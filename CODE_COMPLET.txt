@@ -1,0 +1,3039 @@
+# MEETGAY - CODE COMPLET (Live)
+# Généré le 2026-06-02 23:21:22
+
+# ========== BACKEND ==========
+
+# FILE: backend/backup.js
+
+// ============================================================
+// backup.js - Sauvegarde du code et de la base de données
+// ============================================================5511445
+// 1. FONCTIONS DE SAUVEGARDE (backupCode, backupDatabase)
+// 2. ROUTE /api/backup (protégée par admin)
+// ============================================================
+
+const { exec } = require('child_process');
+
+// ========== 1. SAUVEGARDE DU CODE ==========
+function backupCode(callback) {
+    const cmd = 'cd /root/meetgay && git add . && git commit -m "Sauvegarde web" && git push origin main 2>&1';
+    exec(cmd, (error, stdout, stderr) => {
+        const output = stdout || stderr;
+        console.log(`📦 Backup code : ${output || (error ? 'Erreur' : 'Succès')}`);
+        if (callback) callback(error, output);
+    });
+}
+
+// ========== 2. SAUVEGARDE DE LA BASE ==========
+function backupDatabase(callback) {
+    const date = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+    const filename = `/root/backups/mgb_db_${date}.sql`;
+    const cmd = `mkdir -p /root/backups && pg_dump -U admin_omega -h localhost mgb_db > ${filename} 2>&1 && echo "✅ Sauvegarde DB : ${filename}"`;
+    exec(cmd, (error, stdout, stderr) => {
+        const output = stdout || stderr;
+        console.log(`🗄️ Backup DB : ${output || (error ? 'Erreur' : 'Succès')}`);
+        if (callback) callback(error, output);
+    });
+}
+
+// ========== 3. ROUTE API (appelée par server.js) ==========
+function setupBackupRoute(app, isAdminToken, JWT_SECRET) {
+    app.post('/api/backup', async (req, res) => {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) return res.status(401).json({ error: 'Non autorisé' });
+        try {
+            const decoded = jwt.verify(token, JWT_SECRET);
+            if (decoded.role !== 'admin') throw new Error();
+        } catch {
+            return res.status(403).json({ error: 'Admin requis' });
+        }
+
+        const { action } = req.body;
+        if (action === 'code') {
+            backupCode((err, output) => {
+                if (err) return res.json({ error: output });
+                res.json({ success: true, output });
+            });
+        } else if (action === 'database') {
+            backupDatabase((err, output) => {
+                if (err) return res.json({ error: output });
+                res.json({ success: true, output });
+            });
+        } else {
+            res.status(400).json({ error: 'Action inconnue' });
+        }
+    });
+}
+
+module.exports = { backupCode, backupDatabase, setupBackupRoute };
+
+# FILE: backend/cleanup.js
+
+// cleanup.js - Nettoyage périodique des visiteurs libres****
+
+const { Pool } = require('pg');
+
+const pool = new Pool({
+    host: process.env.DB_HOST,
+    port: process.env.DB_PORT,
+    database: process.env.DB_NAME,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+});
+
+// Le reste du code...
+
+console.log('🧹 Module de nettoyage chargé (en attente de démarrage)');
+
+let cleanupInterval = null;
+
+function startCleanup(intervalMinutes = 10, getOnlineUsersCallback) {
+    if (cleanupInterval) {
+        clearInterval(cleanupInterval);
+    }
+
+    console.log(`🧹 Nettoyage programmé toutes les ${intervalMinutes} minutes`);
+
+    cleanupInterval = setInterval(async () => {
+        try {
+            const onlinePseudos = getOnlineUsersCallback ? getOnlineUsersCallback() : [];
+
+            if (onlinePseudos.length > 0) {
+                const placeholders = onlinePseudos.map((_, i) => `$${i + 1}`).join(',');
+                const result = await pool.query(
+                    `DELETE FROM users WHERE pseudo NOT IN (${placeholders}) AND (is_member IS NULL OR is_member = false)`,
+                    onlinePseudos
+                );
+                if (result.rowCount > 0) {
+                    console.log(`🧹 Nettoyage: ${result.rowCount} visiteur(s) supprimé(s) de la base`);
+                }
+            } else {
+                const result = await pool.query("DELETE FROM users WHERE is_member IS NULL OR is_member = false");
+                if (result.rowCount > 0) {
+                    console.log(`🧹 Nettoyage complet: ${result.rowCount} visiteur(s) supprimé(s) de la base`);
+                }
+            }
+        } catch (err) {
+            console.error('❌ Erreur lors du nettoyage:', err.message);
+        }
+    }, intervalMinutes * 60 * 1000);
+}
+
+function stopCleanup() {
+    if (cleanupInterval) {
+        clearInterval(cleanupInterval);
+        cleanupInterval = null;
+        console.log('🧹 Nettoyage arrêté');
+    }
+}
+
+module.exports = { startCleanup, stopCleanup };
+
+# FILE: backend/ecosystem.config.js
+
+module.exports = {
+    apps: [
+        {
+            name: "control",
+            script: "./control.js",
+            env: {
+                "CONTROL_TOKEN": "SuperSecretToken123456"
+            }
+        },
+        {
+            name: "meetgay",
+            script: "./server.js",
+            env: {
+                "NODE_ENV": "production"
+            }
+        }
+    ]
+}
+
+# FILE: backend/generate-hash.js
+
+const argon2 = require('argon2');
+
+async function generate() {
+    const hash = await argon2.hash('omega1977');
+    console.log(hash);
+}
+generate();
+
+
+# FILE: backend/moderation.js
+
+// moderation.js - Gestion des bans et warns
+
+// Vérifier si un utilisateur est banni
+async function isBanned(pool, pseudo, ip, fingerprint) {
+    // 1. Vérifier par pseudo
+    const result = await pool.query(
+        `SELECT * FROM users WHERE pseudo = $1 AND is_banned = true`,
+        [pseudo]
+    );
+    if (result.rows.length > 0) return true;
+
+    // 2. Plus tard : vérifier par IP + fingerprint
+    return false;
+}
+
+// Appliquer le ban : déconnecter immédiatement
+function disconnectBannedUser(io, users, pseudo, reason) {
+    const sockets = Object.entries(users).filter(([_, u]) => u.pseudo === pseudo);
+    sockets.forEach(([socketId]) => {
+        io.to(socketId).emit('force logout', { reason: `Vous avez été banni : ${reason}` });
+        const socket = io.sockets.sockets.get(socketId);
+        if (socket) socket.disconnect();
+    });
+}
+
+module.exports = { isBanned, disconnectBannedUser };
+
+# FILE: backend/options.js
+
+// ============================================================
+// options.js - Tâches annexes (nettoyage, futurs helpers)
+// ============================================================
+// 1. NETTOYAGE PÉRIODIQUE DES VISITEURS DÉCONNECTÉS
+// ============================================================
+
+function startCleanup(pool, getOnlineUsers, intervalMs = 60 * 1000) {
+    console.log(`🧹 Nettoyage programmé toutes les ${intervalMs / 1000} secondes`);
+    setInterval(async () => {
+        try {
+            const onlinePseudos = getOnlineUsers();
+            if (onlinePseudos.length > 0) {
+                const placeholders = onlinePseudos.map((_, i) => `$${i + 1}`).join(',');
+                const result = await pool.query(
+                    `DELETE FROM users WHERE pseudo NOT IN (${placeholders}) AND (is_member = false OR is_member IS NULL)`,
+                    onlinePseudos
+                );
+                if (result.rowCount > 0) console.log(`🧹 ${result.rowCount} visiteur(s) supprimé(s)`);
+            } else {
+                const result = await pool.query("DELETE FROM users WHERE is_member = false OR is_member IS NULL");
+                if (result.rowCount > 0) console.log(`🧹 Nettoyage complet: ${result.rowCount} visiteur(s) supprimé(s)`);
+            }
+        } catch (err) {
+            console.error('❌ Erreur nettoyage:', err.message);
+        }
+    }, intervalMs);
+}
+
+module.exports = { startCleanup };
+
+# FILE: backend/package.json
+
+{
+  "name": "meetgay",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "compression": "^1.8.1",
+    "dotenv": "^17.4.2",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.0",
+    "pg": "^8.11.0",
+    "socket.io": "^4.6.1"
+  }
+}
+
+
+# FILE: backend/server.js
+
+// ============================================================112446464684654
+// server.js - Cœur du chat MeetGay (restructuré)
+// ============================================================
+// STRUCTURE :
+// 1. CHARGEMENT DES VARIABLES D'ENVIRONNEMENT
+// 2. IMPORTS
+// 3. CONNEXION À POSTGRESQL
+// 4. MIDDLEWARES EXPRESS
+// 5. JWT & ADMIN MIDDLEWARE (version définitive)
+// 6. ROUTES PUBLIQUES (register, login, get-user, verify-token)
+// 7. ROUTES ADMIN (warn, ban, unban, set-modo, set-admin)
+// 8. SOCKET.IO (chat temps réel + messages privés)
+// 9. OPTIONS EXTERNALISÉES (nettoyage + backup)
+// 10. DÉMARRAGE DU SERVEUR
+// ============================================================
+
+// ========== 1. CHARGEMENT DES VARIABLES D'ENVIRONNEMENT ==========
+if (process.env.NODE_ENV !== 'production') {
+    try {
+        require('dotenv').config();
+        console.log('✅ dotenv chargé (environnement local)');
+    } catch (err) {
+        console.log('⚠️ dotenv non installé, utilisation des variables système');
+    }
+} else {
+    console.log('✅ Mode production, variables Render utilisées');
+}
+
+// ========== 2. IMPORTS ==========
+const express = require('express');
+const compression = require('compression');
+const http = require('http');
+const socketIo = require('socket.io');
+const jwt = require('jsonwebtoken');
+const { Pool } = require('pg');
+const { disconnectBannedUser } = require('./moderation');
+const { startCleanup } = require('./options');
+const path = require('path');
+const bcrypt = require('bcrypt');
+
+// ========== 3. CONNEXION À POSTGRESQL ==========
+const pool = new Pool({
+    host: process.env.DB_HOST || 'localhost',
+    port: process.env.DB_PORT || 5432,
+    database: process.env.DB_NAME || 'mgb_db',
+    user: process.env.DB_USER || 'admin_omega',
+    password: process.env.DB_PASSWORD || 'AdminOmega1977',
+});
+console.log('🔍 DB_USER:', process.env.DB_USER);
+console.log('🔍 DB_PASSWORD:', process.env.DB_PASSWORD ? '******' : 'MISSING');
+
+// ========== 4. CONFIGURATION EXPRESS ==========
+const app = express();
+const server = http.createServer(app);
+
+// Middleware CSP pour VvvebJs
+app.use((req, res, next) => {
+    res.setHeader('Content-Security-Policy', "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; img-src * data: blob:; style-src * 'unsafe-inline'; script-src * 'unsafe-inline' 'unsafe-eval';");
+    next();
+});
+
+// Compresse le CSS
+app.use(compression({
+    level: 6,           // Compression modérée
+    threshold: 1024,    // Ne compresse que les fichiers > 1KB
+    filter: (req, res) => {
+        // Ne pas compresser les événements SSE ou WebSocket
+        if (req.path === '/socket.io/') return false;
+        return compression.filter(req, res);
+    }
+}));
+
+
+
+app.use(express.json());
+
+// JWT_SECRET déclaré
+const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
+
+// ========== 5. MIDDLEWARE ADMIN (JWT) - REMPLACE isAdminToken ==========
+function isAdmin(req, res, next) {
+    const token = req.headers.authorization?.split(' ')[1];
+    
+    if (!token) {
+        return res.status(401).json({ error: 'Token manquant' });
+    }
+    
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        
+        // Vérifier que le token contient bien le rôle admin (soit role, soit type)
+        if (decoded.role !== 'admin' && decoded.type !== 'admin') {
+            return res.status(403).json({ error: 'Accès admin requis' });
+        }
+        
+        // Stocker les infos admin pour les routes suivantes (optionnel)
+        req.admin = decoded;
+        next();
+        
+    } catch (err) {
+        return res.status(403).json({ error: 'Token invalide ou expiré' });
+    }
+}
+
+// Middleware de maintenance (public)
+app.use(async (req, res, next) => {
+    // Ignorer les fichiers statiques
+    if (req.path.match(/\.(css|js|png|jpg|ico|json)$/)) {
+        return next();
+    }
+
+    // Ignorer les routes d'authentification admin et publique
+    if (req.path === '/api/login' || req.path === '/api/admin/login') {
+        return next();
+    }
+
+    // Vérifier si l'utilisateur est admin (via token JWT)
+    let isAdminUser = false;
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.split(' ')[1];
+        try {
+            const decoded = jwt.verify(token, JWT_SECRET);
+            if (decoded.role === 'admin' || decoded.type === 'admin') isAdminUser = true;
+        } catch (err) { }
+    }
+
+    if (isAdminUser) {
+        return next();  // Les admins voient le site normalement
+    }
+
+    // Vérifier le mode maintenance
+    try {
+        const result = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
+        const maintenance = result.rows[0]?.value === 'true';
+        if (maintenance) {
+            return res.status(503).sendFile(path.join(__dirname, 'public', 'maintenance.html'));
+        }
+        next();
+    } catch (err) {
+        next();
+    }
+});
+
+app.use(express.static('public'));
+
+// ========== 6. ROUTES PUBLIQUES ==========
+app.post('/api/register', async (req, res) => {
+    try {
+        const { pseudo, age, tendencies, locationCode, locationName, bio, gender, purpose } = req.body;
+        if (!pseudo || !age) return res.status(400).json({ error: 'Pseudo et âge requis' });
+
+        const result = await pool.query(
+            `INSERT INTO users (pseudo, age, tendencies, location_code, location_name, bio, gender, purpose)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (pseudo) DO NOTHING
+             RETURNING *`,
+            [pseudo, age, tendencies, locationCode, locationName, bio, gender, purpose]
+        );
+
+        if (result.rows.length === 0) return res.status(400).json({ error: 'Pseudo déjà utilisé' });
+        res.json({ success: true, user: result.rows[0] });
+    } catch (err) {
+        console.error('Erreur inscription:', err);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+app.post('/api/login', async (req, res) => {
+    const { pseudo } = req.body;
+    if (!pseudo) return res.status(400).json({ error: 'Pseudo requis' });
+    try {
+        const result = await pool.query('SELECT * FROM users WHERE pseudo = $1', [pseudo]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Utilisateur non trouvé' });
+        const user = result.rows[0];
+        const token = jwt.sign({ id: user.id, pseudo: user.pseudo, role: user.role || 'user' }, JWT_SECRET, { expiresIn: '24h' });
+        res.json({ success: true, token, user: { pseudo: user.pseudo, role: user.role } });
+    } catch (err) {
+        console.error('Erreur login:', err);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+app.post('/api/verify-token', (req, res) => {
+    const { token } = req.body;
+    if (!token) return res.json({ valid: false, error: 'Token manquant' });
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        res.json({ valid: true, user: decoded });
+    } catch {
+        res.json({ valid: false, error: 'Token invalide' });
+    }
+});
+
+app.post('/api/get-user', async (req, res) => {
+    const { pseudo } = req.body;
+    if (!pseudo) return res.status(400).json({ error: 'Pseudo requis' });
+    try {
+        const result = await pool.query('SELECT * FROM users WHERE pseudo = $1', [pseudo]);
+        if (result.rows.length === 0) return res.status(404).json({ error: 'Utilisateur non trouvé' });
+        res.json({ success: true, user: result.rows[0] });
+    } catch (err) {
+        console.error('Erreur get-user:', err);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+// ========== 7. ROUTES ADMIN ==========
+// Route login admin (table admins)
+app.post('/api/admin/login', async (req, res) => {
+    const { username, password } = req.body;
+
+    if (!username || !password) {
+        return res.status(400).json({
+            success: false,
+            error: 'Nom d\'utilisateur et mot de passe requis'
+        });
+    }
+
+    try {
+        const result = await pool.query(
+            `SELECT id, username, email, password_hash, role, is_active 
+             FROM admins 
+             WHERE username = $1`,
+            [username]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(401).json({
+                success: false,
+                error: 'Identifiants incorrects'
+            });
+        }
+
+        const admin = result.rows[0];
+
+        if (!admin.is_active) {
+            return res.status(401).json({
+                success: false,
+                error: 'Compte administrateur désactivé'
+            });
+        }
+
+        const isValid = await bcrypt.compare(password, admin.password_hash);
+
+        if (!isValid) {
+            return res.status(401).json({
+                success: false,
+                error: 'Identifiants incorrects'
+            });
+        }
+
+        await pool.query(
+            `UPDATE admins SET last_login = NOW() WHERE id = $1`,
+            [admin.id]
+        );
+
+        const token = jwt.sign(
+            {
+                id: admin.id,
+                username: admin.username,
+                role: 'admin',  // Important pour le middleware isAdmin
+                type: 'admin'
+            },
+            JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        res.json({
+            success: true,
+            token: token,
+            admin: {
+                id: admin.id,
+                username: admin.username,
+                email: admin.email,
+                role: admin.role
+            }
+        });
+
+    } catch (err) {
+        console.error('❌ Erreur login admin:', err);
+        res.status(500).json({
+            success: false,
+            error: 'Erreur serveur'
+        });
+    }
+});
+
+app.get('/api/admin/verify', (req, res) => {
+    const token = req.headers.authorization?.split(' ')[1];
+    if (!token) return res.json({ valid: false });
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        res.json({ valid: (decoded.role === 'admin' || decoded.type === 'admin') });
+    } catch {
+        res.json({ valid: false });
+    }
+});
+
+// Toutes les routes admin sont maintenant protégées par le middleware isAdmin (JWT)
+app.get('/api/admin/users', isAdmin, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT pseudo, age, role, warnings, is_banned, ban_reason FROM users ORDER BY id');
+        res.json(result.rows);
+    } catch (err) {
+        console.error("❌ Erreur admin/users:", err.message);
+        res.status(500).json({ error: 'Erreur serveur', details: err.message });
+    }
+});
+
+app.post('/api/admin/warn', isAdmin, async (req, res) => {
+    const { pseudo } = req.body;
+    await pool.query('UPDATE users SET warnings = COALESCE(warnings, 0) + 1 WHERE pseudo = $1', [pseudo]);
+    res.json({ success: true });
+});
+
+app.post('/api/admin/ban', isAdmin, async (req, res) => {
+    const { pseudo, reason } = req.body;
+    try {
+        await pool.query('UPDATE users SET is_banned = true, ban_reason = $1 WHERE pseudo = $2', [reason, pseudo]);
+        disconnectBannedUser(io, users, pseudo, reason);
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Erreur' });
+    }
+});
+
+app.post('/api/admin/unban', isAdmin, async (req, res) => {
+    const { pseudo } = req.body;
+    await pool.query('UPDATE users SET is_banned = false, ban_reason = NULL WHERE pseudo = $1', [pseudo]);
+    res.json({ success: true });
+});
+
+app.post('/api/admin/set-modo', isAdmin, async (req, res) => {
+    const { pseudo } = req.body;
+    await pool.query('UPDATE users SET role = $1 WHERE pseudo = $2', ['modo', pseudo]);
+    res.json({ success: true });
+});
+
+app.post('/api/admin/set-admin', isAdmin, async (req, res) => {
+    const { pseudo } = req.body;
+    await pool.query('UPDATE users SET role = $1 WHERE pseudo = $2', ['admin', pseudo]);
+    res.json({ success: true });
+});
+
+// ========== 8. SOCKET.IO (CHAT TEMPS RÉEL) ==========
+const io = socketIo(server, { cors: { origin: "*", methods: ["GET", "POST"] } });
+const users = {};
+
+io.on('connection', (socket) => {
+    console.log('🔌 Nouvelle connexion :', socket.id);
+
+    socket.on('user join', (userInfo) => {
+        if (!userInfo || !userInfo.pseudo) {
+            socket.emit('join error', { error: 'Pseudo requis pour rejoindre' });
+            return;
+        }
+        users[socket.id] = { ...userInfo, socketId: socket.id };
+        console.log(`✅ ${userInfo.pseudo} a rejoint (${socket.id})`);
+
+        const usersList = Object.values(users).map(u => ({
+            pseudo: u.pseudo,
+            age: u.age,
+            tendencies: u.tendencies,
+            gender: u.gender,
+            purpose: u.purpose,
+            bio: u.bio,
+            locationCode: u.locationCode,
+            locationName: u.locationName,
+            socketId: u.socketId
+        }));
+        io.emit('update users', usersList);
+        socket.emit('join confirmed', { success: true, user: userInfo });
+    });
+
+    socket.on('private message', (data) => {
+        const { toSocketId, message, fromPseudo } = data;
+        console.log(`💬 Message privé de ${fromPseudo} vers ${toSocketId}: ${message}`);
+        socket.to(toSocketId).emit('private message received', {
+            message: message,
+            fromPseudo: fromPseudo,
+            fromSocketId: socket.id
+        });
+        socket.emit('message sent confirmation', { message: message, to: toSocketId });
+    });
+
+    socket.on('disconnect', () => {
+        const disconnectedUser = users[socket.id];
+        if (disconnectedUser) console.log(`❌ ${disconnectedUser.pseudo} s'est déconnecté (${socket.id})`);
+        else console.log(`❌ Déconnexion inconnue : ${socket.id}`);
+        delete users[socket.id];
+        const usersList = Object.values(users).map(u => ({
+            pseudo: u.pseudo,
+            age: u.age,
+            tendencies: u.tendencies,
+            gender: u.gender,
+            purpose: u.purpose,
+            bio: u.bio,
+            locationCode: u.locationCode,
+            locationName: u.locationName,
+            socketId: u.socketId
+        }));
+        io.emit('update users', usersList);
+    });
+
+    socket.on('ping', () => socket.emit('pong'));
+});
+
+// ========== MAINTENANCE MODE (admin seulement) ==========
+app.get('/api/admin/maintenance', isAdmin, async (req, res) => {
+    try {
+        const result = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
+        res.json({ enabled: result.rows[0]?.value === 'true' });
+    } catch (err) {
+        res.status(500).json({ error: 'Erreur' });
+    }
+});
+
+app.post('/api/admin/maintenance', isAdmin, async (req, res) => {
+    const { enabled } = req.body;
+    if (typeof enabled !== 'boolean') {
+        return res.status(400).json({ error: 'enabled doit être true/false' });
+    }
+    try {
+        await pool.query("UPDATE settings SET value = $1 WHERE key = 'maintenance_mode'", [enabled ? 'true' : 'false']);
+        res.json({ success: true, enabled });
+    } catch (err) {
+        res.status(500).json({ error: 'Erreur' });
+    }
+});
+
+// ========== 9. OPTIONS EXTERNALISÉES ==========
+startCleanup(pool, () => Object.values(users).map(u => u.pseudo), 60 * 1000);
+
+// ========== 10. DÉMARRAGE ==========
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+});
+
+# ========== FRONTEND HTML ==========
+
+# FILE: frontend/cgu.html
+
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MeetGay - Conditions Générales</title>
+    <!-- CSS communs -->
+    <link rel="stylesheet" href="/css/common/reset.css">
+    
+    <!-- CSS spécifique admin-login -->
+    <link rel="stylesheet" href="/css/pages/admin-login.css">
+</head>
+
+<body>
+    <div class="container">
+        <h1>⚖️ Conditions Générales d'Utilisation</h1>
+        <p><strong>Dernière mise à jour :</strong> 18 mai 2026</p>
+
+        <div class="warning">
+            ⚠️ <strong>Ce site est strictement réservé aux personnes majeures (18 ans et plus).</strong>
+        </div>
+
+        <h2>1. Acceptation des conditions</h2>
+        <p>
+            En utilisant MeetGay, vous acceptez pleinement et sans réserve les présentes conditions générales.
+        </p>
+
+        <h2>2. Comportement interdit</h2>
+        <p>Il est strictement interdit de :</p>
+        <ul>
+            <li>❌ Tenir des propos homophobes, racistes, discriminatoires ou insultants</li>
+            <li>❌ Harceler, menacer ou intimider un autre utilisateur</li>
+            <li>❌ Faire du prosélytisme, de la publicité non sollicitée ou du spam</li>
+            <li>❌ Partager des contenus illégaux (pédopornographie, apologie du terrorisme, etc.)</li>
+            <li>❌ Usurper l'identité d'une autre personne</li>
+            <li>❌ Contourner les règles de modération ou de bannissement</li>
+        </ul>
+
+        <h2>3. Modération et sanctions</h2>
+        <p>
+            MeetGay se réserve le droit de :<br>
+            - Supprimer tout message ne respectant pas les règles<br>
+            - Avertir un utilisateur (warn)<br>
+            - Bannir temporairement ou définitivement un utilisateur<br>
+            - Transmettre les logs aux autorités judiciaires en cas d'infraction grave
+        </p>
+
+        <h2>4. Signalement</h2>
+        <p>
+            Si vous êtes témoin ou victime d'un comportement inapproprié, utilisez le bouton <strong>🚨
+                Signaler</strong> présent sur chaque message.
+        </p>
+
+        <h2>5. Limitation de responsabilité</h2>
+        <p>
+            MeetGay est une plateforme de mise en relation. Nous n'organisons pas de rencontres physiques et ne pouvons
+            garantir la fiabilité des utilisateurs.
+        </p>
+        <p>
+            Vous êtes seul responsable de vos échanges et de vos rencontres.
+        </p>
+
+        <h2>6. Protection des mineurs</h2>
+        <p>
+            L'accès au site est interdit aux mineurs. Tout utilisateur déclarant un âge inférieur à 18 ans sera
+            immédiatement banni.
+        </p>
+
+        <h2>7. Droit applicable</h2>
+        <p>
+            Les présentes CGU sont régies par le droit belge.
+        </p>
+
+        <h2>8. Contact</h2>
+        <p>
+            Pour toute question ou signalement : <strong>[VOTRE EMAIL]</strong>
+        </p>
+
+        <a href="/index.html" class="back-link">← Retour à l'accueil</a>
+    </div>
+</body>
+
+</html>
+
+# FILE: frontend/login.html
+
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MeetGay - Connexion</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>">
+    <script src="https://cdn.jsdelivr.net/npm/@fingerprintjs/fingerprintjs@3/dist/fp.min.js"></script>
+    <!-- CSS communs -->
+    <link rel="stylesheet" href="/css/common/reset.css">
+    <link rel="stylesheet" href="/css/layouts/footer.css">
+    
+    <!-- CSS spécifique login -->
+    <link rel="stylesheet" href="/css/pages/login.css">
+</head>
+
+<body>
+    <script>
+        // AJOUT PROTECTION 18+ : Vérifier si l'utilisateur a validé son âge
+        (function checkAgeVerification() {
+            const isAgeVerified = sessionStorage.getItem('meetgay_age_verified');
+            if (!isAgeVerified) {
+                // Pas de validation 18+ -> redirection vers l'accueil
+                window.location.href = '/index.html';
+                return;
+            }
+            // Optionnel : vérifier que la validation date de moins de 24h (86400000 ms)
+            const verifiedTime = sessionStorage.getItem('meetgay_age_verified_time');
+            if (verifiedTime && (Date.now() - parseInt(verifiedTime) > 86400000)) {
+                sessionStorage.removeItem('meetgay_age_verified');
+                window.location.href = '/index.html';
+            }
+        })();
+    </script>
+    <div class="page-container">
+        <div class="login-box">
+            <h1>✉️ MeetGay</h1>
+            <div class="subtitle" id="subtitle">Rejoignez le chat</div>
+            <div id="errorMsg" style="color: red; margin-top: 10px;"></div>
+
+            <form id="loginForm">
+                <label id="labelPseudo">👤 Pseudo :</label>
+                <input type="text" id="pseudo" maxlength="15" placeholder="15 caractères max" required>
+
+                <label id="labelAge">🎂 Âge :</label>
+                <select id="age" required>
+                    <option value="" id="ageDefault">Sélectionnez votre âge</option>
+                </select>
+
+                <label id="labelTendencies">⬆️⬇️↔️ Orientation :</label>
+                <select id="tendencies" required>
+                    <option value="" id="tendenciesDefault">Sélectionnez</option>
+                    <option value="A" id="optA">▲ Actif (A)</option>
+                    <option value="P" id="optP">▼ Passif (P)</option>
+                    <option value="V" id="optV">▲▼ Versatile (V)</option>
+                </select>
+
+                <label id="labelGender">⚧ Genre :</label>
+                <select id="gender" required>
+                    <option value="" id="genderDefault">Sélectionnez</option>
+                    <option value="G">Gay</option>
+                    <option value="H">Hétéro</option>
+                    <option value="T">Transgenre</option>
+                </select>
+                
+                <label id="labelPurpose">🎯 Je suis ici pour :</label>
+                <select id="purpose" required>
+                    <option value="" id="purposeDefault">Sélectionnez</option>
+                    <option value="meeting">💬 Rencontre</option>
+                    <option value="flirt">😘 Flirt</option>
+                    <option value="adultery">💔 Relation sexuelle</option>
+                </select>
+
+                <label id="labelLocation">📍 Localité :</label>
+                <select id="location" required>
+                    <option value="" id="locationDefault">Sélectionnez votre région</option>
+                    <option value="BRU">🇧🇪 Bruxelles</option>
+                    <option value="ANV">🇧🇪 Anvers</option>
+                    <option value="LIE">🇧🇪 Liège</option>
+                    <option value="GAND">🇧🇪 Gand</option>
+                    <option value="CHAR">🇧🇪 Charleroi</option>
+                    <option value="NAM">🇧🇪 Namur</option>
+                    <option value="MONS">🇧🇪 Mons</option>
+                    <option value="LUV">🇧🇪 Louvain</option>
+                    <option value="BRUGE">🇧🇪 Bruges</option>
+                    <option value="ARLON">🇧🇪 Arlon</option>
+                    <option value="AUTRE">🇧🇪 Autre</option>
+                </select>
+
+                <label id="labelBio">📝 Présentez-vous :</label>
+                <textarea id="bio" maxlength="100"
+                    placeholder="Quelques mots sur vous... (100 caractères max)"></textarea>
+                <div class="char-counter">
+                    <span id="bioCounter">0</span> / 100 caractères
+                </div>
+
+                <button type="submit" id="submitBtn">🎮 ENTRER DANS LE CHAT</button>
+            </form>
+
+            <div class="note" id="note">
+                ⚡ Chat privé instantané<br>
+                Cliquez sur un pseudo pour lui parler
+            </div>
+        </div>
+    </div>
+
+    <footer class="site-footer">
+        <div class="footer-content">
+            © 2026 MeetGay - Chat Belgique -
+            <a href="/mentions-legales.html">Mentions légales</a> -
+            <a href="/cgu.html">CGU</a> -
+            <a href="/contact.html">Contact</a>
+        </div>
+    </footer>
+
+    <script>
+        // Lire la langue choisie dans index.html (stockée dans localStorage)
+        let currentLang = localStorage.getItem('MeetGay_lang') || 'fr';
+
+        // Traductions (sans switch visuel)
+        const translations = {
+            fr: {
+                subtitle: "Rejoignez le chat",
+                pseudo: "👤 Pseudo :",
+                age: "🎂 Âge :",
+                ageDefault: "Sélectionnez votre âge",
+                tendencies: "⬆️⬇️↔️ Orientation :",
+                tendenciesDefault: "Sélectionnez",
+                location: "📍 Localité :",
+                locationDefault: "Sélectionnez votre région",
+                bio: "📝 Présentez-vous :",
+                bioPlaceholder: "Quelques mots sur vous... (100 caractères max)",
+                submit: "🎮 ENTRER DANS LE CHAT",
+                note: "⚡ Chat privé instantané\nCliquez sur un pseudo pour lui parler",
+                gender: "⚧ Genre :",
+                genderDefault: "Sélectionnez",
+                genderG: "Gay",
+                genderH: "Hétéro",
+                genderT: "Transgenre",
+                purpose: "🎯 Je suis ici pour :",
+                purposeDefault: "Sélectionnez",
+                purposeMeeting: "💬 Rencontre",
+                purposeFlirt: "😘 Flirt",
+                purposeAdultery: "💔 Relation sexuelle"
+            },
+            nl: {
+                subtitle: "Praat mee",
+                pseudo: "👤 Gebruikersnaam :",
+                age: "🎂 Leeftijd :",
+                ageDefault: "Selecteer uw leeftijd",
+                tendencies: "⬆️⬇️↔️ Oriëntatie :",
+                tendenciesDefault: "Selecteer",
+                location: "📍 Locatie :",
+                locationDefault: "Selecteer uw regio",
+                bio: "📝 Stel je voor :",
+                bioPlaceholder: "Een paar woorden over jezelf... (100 tekens max)",
+                submit: "🎮 CHAT BINNENKOMEN",
+                note: "⚡ Privé chat\nKlik op een pseudoniem om te praten",
+                gender: "⚧ Geslacht :",
+                genderDefault: "Selecteer",
+                genderG: "Gay",
+                genderH: "Hetero",
+                genderT: "Transgender",
+                purpose: "🎯 Ik ben hier voor :",
+                purposeDefault: "Selecteer",
+                purposeMeeting: "💬 Ontmoeting",
+                purposeFlirt: "😘 Flirt",
+                purposeAdultery: "💔 Seksuele relatie"
+            }
+        };
+
+        // Appliquer la langue (sans switch)
+        function applyLanguage(lang) {
+            const t = translations[lang];
+            if (!t) return;
+
+            document.getElementById('subtitle').innerText = t.subtitle;
+            document.getElementById('labelPseudo').innerHTML = t.pseudo;
+            document.getElementById('labelAge').innerHTML = t.age;
+            const ageDefault = document.getElementById('ageDefault');
+            if (ageDefault) ageDefault.innerText = t.ageDefault;
+            document.getElementById('labelTendencies').innerHTML = t.tendencies;
+            const tendenciesDefault = document.getElementById('tendenciesDefault');
+            if (tendenciesDefault) tendenciesDefault.innerText = t.tendenciesDefault;
+            document.getElementById('labelLocation').innerHTML = t.location;
+            const locationDefault = document.getElementById('locationDefault');
+            if (locationDefault) locationDefault.innerText = t.locationDefault;
+            document.getElementById('labelBio').innerHTML = t.bio;
+            const bioField = document.getElementById('bio');
+            if (bioField) bioField.placeholder = t.bioPlaceholder;
+            const submitBtn = document.getElementById('submitBtn');
+            if (submitBtn) submitBtn.innerHTML = t.submit;
+            
+            // Genre
+            const labelGender = document.getElementById('labelGender');
+            if (labelGender) labelGender.innerHTML = t.gender;
+            const genderDefault = document.getElementById('genderDefault');
+            if (genderDefault) genderDefault.innerText = t.genderDefault;
+            const genderGOption = document.querySelector('#gender option[value="G"]');
+            if (genderGOption) genderGOption.innerText = t.genderG;
+            const genderHOption = document.querySelector('#gender option[value="H"]');
+            if (genderHOption) genderHOption.innerText = t.genderH;
+            const genderTOption = document.querySelector('#gender option[value="T"]');
+            if (genderTOption) genderTOption.innerText = t.genderT;
+
+            // Purpose
+            const labelPurpose = document.getElementById('labelPurpose');
+            if (labelPurpose) labelPurpose.innerHTML = t.purpose;
+            const purposeDefault = document.getElementById('purposeDefault');
+            if (purposeDefault) purposeDefault.innerText = t.purposeDefault;
+            const purposeMeeting = document.querySelector('#purpose option[value="meeting"]');
+            if (purposeMeeting) purposeMeeting.innerText = t.purposeMeeting;
+            const purposeFlirt = document.querySelector('#purpose option[value="flirt"]');
+            if (purposeFlirt) purposeFlirt.innerText = t.purposeFlirt;
+            const purposeAdultery = document.querySelector('#purpose option[value="adultery"]');
+            if (purposeAdultery) purposeAdultery.innerText = t.purposeAdultery;
+            
+            const note = document.getElementById('note');
+            if (note) note.innerHTML = t.note.replace(/\n/g, '<br>');
+        }
+
+        // Traduction orientation
+        function translateOrientation() {
+            const currentLang = localStorage.getItem('MeetGay_lang') || 'fr';
+            const optA = document.getElementById('optA');
+            const optP = document.getElementById('optP');
+            const optV = document.getElementById('optV');
+            
+            if (currentLang === 'nl') {
+                if (optA) optA.innerText = '▲ Actief (A)';
+                if (optP) optP.innerText = '▼ Passief (P)';
+                if (optV) optV.innerText = '▲▼ Veelzijdig (V)';
+            } else {
+                if (optA) optA.innerText = '▲ Actif (A)';
+                if (optP) optP.innerText = '▼ Passif (P)';
+                if (optV) optV.innerText = '▲▼ Versatile (V)';
+            }
+        }
+
+        // Remplir les âges (18 à 99)
+        function populateAges() {
+            const ageSelect = document.getElementById('age');
+            if (!ageSelect) return;
+            
+            const lang = localStorage.getItem('MeetGay_lang') || 'fr';
+            const ageSuffix = lang === 'fr' ? 'ans' : 'jaar';
+            
+            // Vider les options existantes (sauf la première)
+            while (ageSelect.options.length > 1) {
+                ageSelect.remove(1);
+            }
+            
+            for (let i = 18; i <= 99; i++) {
+                const option = document.createElement('option');
+                option.value = i;
+                option.textContent = `${i} ${ageSuffix}`;
+                ageSelect.appendChild(option);
+            }
+        }
+
+        // Compteur de caractères pour la bio
+        const bioTextarea = document.getElementById('bio');
+        const bioCounter = document.getElementById('bioCounter');
+        if (bioTextarea && bioCounter) {
+            bioTextarea.addEventListener('input', () => {
+                bioCounter.textContent = bioTextarea.value.length;
+            });
+        }
+
+        // Nettoyer les entrées
+        function cleanInput(str) {
+            return str.replace(/[<>]/g, '').trim();
+        }
+
+        // ========== SOUMISSION DU FORMULAIRE AVEC JWT ==========
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const clean = (str) => str.replace(/[<>]/g, '').trim();
+            const pseudo = clean(document.getElementById('pseudo').value);
+            const bio = clean(document.getElementById('bio').value);
+
+            // CORRECTION 1: Vérifier que tous les champs sont remplis
+            const age = document.getElementById('age').value;
+            const tendencies = document.getElementById('tendencies').value;
+            const gender = document.getElementById('gender').value;
+            const purpose = document.getElementById('purpose').value;
+            const location = document.getElementById('location').value;
+
+            if (!age || !tendencies || !gender || !purpose || !location) {
+                alert(currentLang === 'fr' ? "Veuillez remplir tous les champs" : "Vul alle velden in");
+                return;
+            }
+
+            if (pseudo.length < 2 || pseudo.length > 15) {
+                alert(currentLang === 'fr' ? "Le pseudo doit faire entre 2 et 15 caractères" : "De gebruikersnaam moet 2-15 tekens bevatten");
+                return;
+            }
+
+            const user = {
+                pseudo: pseudo,
+                age: parseInt(age),
+                tendencies: tendencies,
+                locationCode: location,
+                locationName: document.getElementById('location').selectedOptions[0]?.text || location,
+                bio: bio.substring(0, 100) || (currentLang === 'fr' ? "Aucune présentation" : "Geen introductie"),
+                gender: gender,
+                purpose: purpose
+            };
+
+            // CORRECTION 2: Désactiver le bouton pendant l'envoi
+            const submitBtn = document.getElementById('submitBtn');
+            const originalText = submitBtn.innerHTML;
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = currentLang === 'fr' ? "Envoi en cours..." : "Bezig met verzenden...";
+
+            try {
+                // 1. Inscription
+                const registerRes = await fetch('/api/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(user)
+                });
+
+                const registerData = await registerRes.json();
+
+                if (!registerRes.ok) {
+                    if (registerData.error === 'Pseudo déjà utilisé') {
+                        alert(currentLang === 'fr' ? "Ce pseudo est déjà utilisé" : "Deze gebruikersnaam is al in gebruik");
+                    } else {
+                        throw new Error(registerData.error || 'Erreur inscription');
+                    }
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = originalText;
+                    return;
+                }
+
+                // 2. Login pour obtenir le token JWT
+                const loginRes = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pseudo: pseudo })
+                });
+
+                const loginData = await loginRes.json();
+
+                if (loginData.success) {
+                    localStorage.setItem('meetgay_token', loginData.token);
+                    localStorage.setItem('meetgay_user', JSON.stringify(loginData.user));
+                    localStorage.setItem('meetgay_pseudo', pseudo);
+                    window.location.href = '/chat.html';
+                } else {
+                    alert(loginData.error || (currentLang === 'fr' ? "Erreur de connexion" : "Foutmelding"));
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = originalText;
+                }
+            } catch (err) {
+                console.error('Erreur:', err);
+                alert(currentLang === 'fr' ? "Erreur de connexion au serveur. Vérifiez que le serveur est démarré." : "Verbindingsfout met de server. Controleer of de server draait.");
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalText;
+            }
+        });
+
+        // Appliquer la langue et initialiser
+        applyLanguage(currentLang);
+        translateOrientation();
+        populateAges();
+        
+        // CORRECTION 3: S'assurer que la langue est bien récupérée pour les âges après changement
+        window.addEventListener('storage', function(e) {
+            if (e.key === 'MeetGay_lang') {
+                currentLang = e.newValue || 'fr';
+                applyLanguage(currentLang);
+                translateOrientation();
+                populateAges();
+            }
+
+            
+        });
+    </script>
+    <script>
+        // Générer l'empreinte numérique et la stocker dans sessionStorage
+        (async function () {
+            try {
+                const fp = await FingerprintJS.load();
+                const result = await fp.get();
+                const visitorId = result.visitorId;
+                sessionStorage.setItem('fingerprint', visitorId);
+                console.log('✅ Empreinte générée:', visitorId);
+            } catch (err) {
+                console.error('❌ Erreur empreinte:', err);
+                // Fallback : générer un ID aléatoire
+                const fallbackId = 'fallback_' + Math.random().toString(36).substring(2);
+                sessionStorage.setItem('fingerprint', fallbackId);
+            }
+        })();
+    </script>
+</body>
+
+</html>
+
+# FILE: frontend/admin-login.html
+
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Login Admin - MeetGay</title>
+    <!-- CSS communs -->
+    <link rel="stylesheet" href="/css/common/reset.css">
+    
+    <!-- CSS spécifique admin-login -->
+    <link rel="stylesheet" href="/css/pages/admin-login.css">
+</head>
+
+<body>
+    <div class="login-box">
+        <h1>👑 Admin Login</h1>
+        <input type="text" id="adminUsername" placeholder="Nom d'utilisateur">
+        <input type="password" id="adminPassword" placeholder="Mot de passe">
+        <button onclick="loginAdmin()">Se connecter</button>
+        <div id="errorMsg" class="error"></div>
+    </div>
+
+    <script>
+        async function loginAdmin() {
+                const username = document.getElementById('adminUsername').value;
+                const password = document.getElementById('adminPassword').value;
+                const errorDiv = document.getElementById('errorMsg');
+
+                if (!username || !password) {
+                    errorDiv.textContent = 'Veuillez entrer nom d\'utilisateur et mot de passe';
+                    return;
+                }
+
+                try {
+                    const response = await fetch('/api/admin/login', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username, password })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        localStorage.setItem('admin_token', data.token);
+                        window.location.href = '/admin.html';
+                    } else {
+                        errorDiv.textContent = data.error || 'Identifiants incorrects';
+                    }
+                } catch (err) {
+                    errorDiv.textContent = 'Erreur de connexion';
+                }
+            }
+
+        // Si déjà connecté, rediriger vers admin
+        if (localStorage.getItem('admin_token')) {
+            window.location.href = '/admin.html';
+        }
+    </script>
+</body>
+
+</html>
+
+# FILE: frontend/mentions-legales.html
+
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MeetGay - Mentions légales</title>
+    <!-- CSS communs -->
+    <link rel="stylesheet" href="/css/common/reset.css">
+    
+    <!-- CSS spécifique admin-login -->
+    <link rel="stylesheet" href="/css/pages/admin-login.css">
+    <style>
+        
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>📄 Mentions légales</h1>
+        <p><strong>Dernière mise à jour :</strong> 18 mai 2026</p>
+
+        <h2>1. Éditeur du site</h2>
+        <p>
+            <strong>Nom du site :</strong> MeetGay<br>
+            <strong>Statut :</strong> Projet personnel / Association<br>
+            <strong>Propriétaire et responsable :</strong> [VOTRE NOM]<br>
+            <strong>Adresse :</strong> [VOTRE ADRESSE - mettez même une adresse postale si possible]<br>
+            <strong>Email :</strong> [VOTRE EMAIL DE CONTACT]<br>
+            <strong>Téléphone :</strong> [FACULTATIF]
+        </p>
+
+        <h2>2. Hébergement du site</h2>
+        <p>
+            <strong>Hébergeur :</strong> Railway<br>
+            <strong>Adresse :</strong> 760 Market St, Suite 900, San Francisco, CA 94102, États-Unis<br>
+            <strong>Site web :</strong> <a href="https://railway.com" target="_blank">https://railway.com</a>
+        </p>
+
+        <h2>3. Protection des données personnelles (RGPD)</h2>
+        <p>
+            Conformément au RGPD et à la loi belge, vous disposez d'un droit d'accès, de rectification et de suppression
+            de vos données.
+        </p>
+        <p>
+            Les données collectées (pseudo, âge, orientation, localité, bio, messages) sont utilisées uniquement pour le
+            fonctionnement du chat.
+        </p>
+        <p>
+            <strong>Durée de conservation :</strong> Les logs de messages sont conservés 1 an à des fins de modération
+            et de preuve en cas d'enquête judiciaire.
+        </p>
+        <p>
+            <strong>Contact DPO :</strong> [VOTRE EMAIL]
+        </p>
+
+        <h2>4. Cookies et traceurs</h2>
+        <p>
+            Ce site utilise uniquement du <strong>sessionStorage</strong> pour gérer votre connexion. Aucun cookie tiers
+            n'est déposé.
+        </p>
+
+        <h2>5. Responsabilité</h2>
+        <p>
+            MeetGay est une plateforme de discussion communautaire. Nous ne sommes pas responsables des rencontres,
+            échanges ou actes qui auraient lieu hors du site.
+        </p>
+        <p>
+            Tout utilisateur est tenu de respecter les Conditions Générales d'Utilisation et la loi belge.
+        </p>
+
+        <a href="/index.html" class="back-link">← Retour à l'accueil</a>
+    </div>
+</body>
+
+</html>
+
+# FILE: frontend/index.html
+
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="/favicon-16x16.png">
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>">
+    <!-- CSS communs -->
+    <link rel="stylesheet" href="/css/common/reset.css">
+    <link rel="stylesheet" href="/css/layouts/footer.css">
+    
+    <!-- CSS spécifique index -->
+    <link rel="stylesheet" href="/css/pages/index.css">
+
+    <title>MeetGay - Chat Belgique</title>
+</head>
+
+<body>
+    <div class="container">
+        <div class="welcome-box">
+            <h1>💬 MeetGay</h1>
+            <div class="subtitle">Belgique - Rencontres et discussions</div>
+
+            <div class="lang-buttons">
+                <button class="lang-btn fr" id="btnFr" disabled>🇫🇷 Français</button>
+                <button class="lang-btn nl" id="btnNl" disabled>🇳🇱 Nederlands</button>
+            </div>
+
+            <div class="features">
+                <div class="feature"><span>✉️</span> Messages privés</div>
+                <div class="feature"><span>👥</span> Rencontres gay</div>
+                <div class="feature"><span>💬</span> Chat instantané</div>
+            </div>
+
+            <div class="age-warning">
+                ⚠️ Site réservé aux personnes majeures (18+)
+            </div>
+
+            <!-- MENU DÉROULANT PETIT ET FIN EN BAS -->
+            <div class="age-verification-bottom">
+                <div class="age-selector-small">
+                    <label>📋 Vérification âge :</label>
+                    <select id="ageSelect">
+                        <option value="">-- Sélectionner --</option>
+                        <option value="18plus">✅ J'ai +18 ans</option>
+                        <option value="18moins">❌ J'ai -18 ans</option>
+                    </select>
+                    <div id="ageError" class="age-error-small">
+                        ⚠️ Désolé, site réservé aux 18+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <footer class="site-footer">
+        <div class="footer-content">
+            © 2026 MeetGay - Chat Belgique -
+            <a href="/mentions-legales.html">Mentions légales</a> -
+            <a href="/cgu.html">CGU</a> -
+            <a href="/contact.html">Contact</a>
+        </div>
+    </footer>
+
+    <script>
+        const ageSelect = document.getElementById('ageSelect');
+        const btnFr = document.getElementById('btnFr');
+        const btnNl = document.getElementById('btnNl');
+        const ageError = document.getElementById('ageError');
+
+        btnFr.disabled = true;
+        btnNl.disabled = true;
+
+        ageSelect.addEventListener('change', function () {
+            const selectedValue = ageSelect.value;
+
+            if (selectedValue === '18plus') {
+                btnFr.disabled = false;
+                btnNl.disabled = false;
+                ageError.classList.remove('show');
+            }
+            else if (selectedValue === '18moins') {
+                btnFr.disabled = true;
+                btnNl.disabled = true;
+                ageError.classList.add('show');
+            }
+            else {
+                btnFr.disabled = true;
+                btnNl.disabled = true;
+                ageError.classList.remove('show');
+            }
+        });
+
+        // AJOUT PROTECTION 18+ : Enregistrer la validation dans sessionStorage
+        function setAgeVerified() {
+                sessionStorage.setItem('meetgay_age_verified', 'true');
+                sessionStorage.setItem('meetgay_age_verified_time', Date.now());
+            }
+
+        function chooseLanguage(lang) {
+                if (ageSelect.value !== '18plus') {
+                    ageError.classList.add('show');
+                    return;
+                }
+                // AJOUT PROTECTION 18+ : enregistrer que l'utilisateur est majeur
+                setAgeVerified();
+                localStorage.setItem('MeetGay_lang', lang);
+                window.location.href = '/login.html';
+            }
+
+        btnFr.onclick = () => chooseLanguage('fr');
+        btnNl.onclick = () => chooseLanguage('nl');
+    </script>
+</body>
+
+</html>
+
+# FILE: frontend/maintenance.html
+
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <title>MeetGay - Maintenance</title>
+    <!-- CSS communs -->
+    <link rel="stylesheet" href="/css/common/reset.css">
+    
+    <!-- CSS spécifique admin-login -->
+    <link rel="stylesheet" href="/css/pages/admin-login.css">
+</head>
+
+<body>
+    <div class="message">
+        <div class="logo">🚧</div>
+        <h1>Site en maintenance</h1>
+        <p>MeetGay est temporairement indisponible.<br>Revenez dans quelques instants !</p>
+    </div>
+</body>
+
+</html>
+
+# FILE: frontend/chat.html
+
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MeetGay - Chat</title>
+    <!-- CSS communs -->
+    <link rel="stylesheet" href="/css/common/reset.css">
+    
+    <!-- CSS spécifique chat (contient header ET footer) -->
+    <link rel="stylesheet" href="/css/pages/chat.css">
+    <link rel="manifest" href="/manifest.json">
+</head>
+
+<body>
+    <header class="site-header">
+        <div class="header-content">
+            <div class="logo">
+                <h1>💬 MeetGay</h1>
+                <p>Belgique - Rencontres et discussions</p>
+            </div>
+            <div class="user-badge" id="userBadge">👤 Chargement...</div>
+        </div>
+    </header>
+
+    <div class="main-container">
+        <div class="container">
+            <div class="users-panel">
+                <h3 id="connectedTitle">👥 Connectés</h3>
+                <div id="usersList">En attente...</div>
+            </div>
+
+            <div class="chat-panel">
+                <div id="contactInfo" class="contact-info">
+                    <div><span class="contact-name" id="contactName"></span>
+                        (<span id="contactAge"></span> ans, <span id="contactGender"></span>, <span
+                            id="contactOrientation"></span>)
+                    </div>
+                    <div id="contactPurpose" style="margin-top: 5px; font-size: 12px; color: #555;"></div>
+                    <div class="contact-bio" id="contactBio"></div>
+                </div>
+
+                <div class="message-area" id="messageArea">
+                    <div class="empty-message">💬 En attente de message...</div>
+                </div>
+
+                <div class="input-area">
+                    <input type="text" id="messageInput" placeholder="" disabled>
+                    <button id="sendBtn" disabled>✉️ Envoyer</button>
+                </div>
+
+                <div id="envelope" class="envelope" style="display: none;">✉️</div>
+            </div>
+
+            <div class="history-panel">
+                <h4 id="historyTitle">📋 Historique</h4>
+                <div id="historyList">
+                    <div class="empty-message" style="padding: 20px;">Aucune conversation</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="site-footer">
+        <div class="footer-content">
+            © 2026 MeetGay - Chat Belgique -
+            <a href="#">Mentions légales</a> -
+            <a href="#">Contact</a>
+        </div>
+    </footer>
+
+    <script src="/socket.io/socket.io.js"></script>
+
+    <script>
+        // ========== VÉRIFICATION JWT ==========
+        const token = localStorage.getItem('meetgay_token');
+        if (!token) {
+            window.location.href = '/login.html';
+        }
+
+        // ========== LECTURE DE LA LANGUE ==========
+        let chatLang = localStorage.getItem('MeetGay_lang') || 'fr';
+
+        // ========== TRADUCTIONS ==========
+        const chatTranslations = {
+            fr: {
+                emptyMessage: "💬 En attente de message...",
+                placeholderInput: "Cliquez sur un pseudo d'abord...",
+                sendBtn: "✉️ Envoyer",
+                historyTitle: "📋 Historique",
+                connectedTitle: "👥 Connectés"
+            },
+            nl: {
+                emptyMessage: "💬 Wachten op bericht...",
+                placeholderInput: "Klik eerst op een pseudoniem...",
+                sendBtn: "✉️ Verstuur",
+                historyTitle: "📋 Historisch",
+                connectedTitle: "👥 Aangesloten"
+            }
+        };
+
+        const t = chatTranslations[chatLang];
+
+        // ← AJOUT : Exporter les globales pour ui.js et history.js
+            window.chatLang = chatLang;
+            window.chatT = chatTranslations[chatLang];
+
+        // ========== APPLICATION DES TEXTES ==========
+        document.addEventListener('DOMContentLoaded', () => {
+                // ← AJOUT : Mettre à jour les globales au cas où
+                window.chatLang = chatLang;
+                window.chatT = chatTranslations[chatLang];
+
+                const msgArea = document.getElementById('messageArea');
+                if (msgArea) msgArea.innerHTML = `<div class="empty-message">${t.emptyMessage}</div>`;
+
+                const historyDiv = document.getElementById('historyList');
+                if (historyDiv) historyDiv.innerHTML = `<div class="empty-message" style="padding: 20px;">Aucune conversation</div>`;
+
+                const sendBtn = document.getElementById('sendBtn');
+                if (sendBtn) sendBtn.innerHTML = t.sendBtn;
+
+                const messageInput = document.getElementById('messageInput');
+                if (messageInput) messageInput.placeholder = t.placeholderInput;
+
+                const historyTitle = document.getElementById('historyTitle');
+                if (historyTitle) historyTitle.innerHTML = t.historyTitle;
+
+                const connectedTitle = document.getElementById('connectedTitle');
+                if (connectedTitle) connectedTitle.innerHTML = t.connectedTitle;
+            });
+    </script>
+
+    <script src="/js/utils.js"></script>
+    <script src="/js/ui.js"></script>
+    <script src="/js/history.js"></script>
+    <script src="/js/chat.js"></script>
+</body>
+
+</html>
+
+# FILE: frontend/admin.html
+
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - MeetGay</title>
+    <!-- CSS communs -->
+    <link rel="stylesheet" href="/css/common/reset.css">
+    
+    <!-- CSS spécifique admin-login -->
+    <link rel="stylesheet" href="/css/pages/admin.css">
+</head>
+
+<body>
+    <div class="admin-wrapper">
+        <!-- EN-TÊTE -->
+        <div class="admin-header">
+            <div class="logo-area">
+                <h1>🛡️ Panel Admin MeetGay</h1>
+                <p>Gestion complète de la communauté</p>
+            </div>
+            <div class="admin-badge">
+                <span>👑 <span id="adminUsername">Administrateur</span></span>
+                <button class="logout-btn" onclick="logout()">Déconnexion</button>
+            </div>
+        </div>
+
+        <!-- STATS RAPIDES - 4 cartes bien espacées -->
+        <div class="stats-grid">
+            <div class="stat-card"><div class="stat-icon">👥</div><div class="stat-info"><h3 id="totalUsers">0</h3><p>Utilisateurs</p></div></div>
+            <div class="stat-card"><div class="stat-icon">⚠️</div><div class="stat-info"><h3 id="totalWarns">0</h3><p>Avertissements</p></div></div>
+            <div class="stat-card"><div class="stat-icon">🚫</div><div class="stat-info"><h3 id="totalBanned">0</h3><p>Bannis</p></div></div>
+            <div class="stat-card"><div class="stat-icon">👮</div><div class="stat-info"><h3 id="totalModos">0</h3><p>Modérateurs</p></div></div>
+        </div>
+
+        <!-- RECHERCHE + FILTRES -->
+        <div class="search-bar">
+            <input type="text" id="searchInput" placeholder="🔎 Rechercher par pseudo...">
+            <select id="roleFilter">
+                <option value="all">Tous les rôles</option>
+                <option value="admin">Admin</option>
+                <option value="modo">Modo</option>
+                <option value="user">Membre</option>
+                <option value="guest">Visiteur</option>
+            </select>
+            <select id="statusFilter">
+                <option value="all">Tous statuts</option>
+                <option value="active">Actifs</option>
+                <option value="banned">Bannis</option>
+                <option value="warned">Avertis</option>
+            </select>
+            <button id="searchBtn">Filtrer</button>
+        </div>
+
+        <!-- TABLEAU UTILISATEURS -->
+        <div class="table-container">
+            <div id="usersList">Chargement des utilisateurs...</div>
+        </div>
+
+        <!-- ACTIONS RAPIDES (sans backup code) -->
+        <div class="quick-actions">
+            <h3>⚙️ Actions rapides</h3>
+            <div class="actions-grid">
+                <button class="quick-btn" id="maintenanceBtn">🚧 Mode maintenance</button>
+                <button class="quick-btn" id="backupDbBtn">🗄️ Sauvegarder la BDD</button>
+                <button class="quick-btn danger-btn" id="cleanupBtn">🧹 Nettoyage manuel</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/js/admin.js"></script>
+ </body>
+
+</html>
+
+# ========== CSS ==========
+
+# FILE: frontend/css/pages/mentions.css
+
+﻿/* ========== MENTIONS LÉGALES ========== */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    padding: 40px 20px;
+}
+
+.container {
+    max-width: 900px;
+    margin: 0 auto;
+    background: white;
+    border-radius: 20px;
+    padding: 40px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+}
+
+h1 {
+    color: #667eea;
+    margin-bottom: 20px;
+}
+
+h2 {
+    color: #764ba2;
+    margin-top: 25px;
+    margin-bottom: 10px;
+    font-size: 1.2rem;
+}
+
+p,
+li {
+    line-height: 1.6;
+    color: #333;
+    margin-bottom: 10px;
+}
+
+ul {
+    margin-left: 20px;
+    margin-bottom: 20px;
+}
+
+.back-link {
+    display: inline-block;
+    margin-top: 30px;
+    color: #667eea;
+    text-decoration: none;
+}
+
+hr {
+    margin: 20px 0;
+}
+
+# FILE: frontend/css/pages/login.css
+
+﻿/* ========== PAGE LOGIN (INSCRIPTION CONNEXION) ========== */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.page-container {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 40px 20px;
+}
+
+.login-box {
+    background: white;
+    border-radius: 24px;
+    padding: 40px;
+    max-width: 500px;
+    width: 100%;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+}
+
+h1 {
+    font-size: 28px;
+    color: #667eea;
+    text-align: center;
+    margin-bottom: 8px;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+.subtitle {
+    text-align: center;
+    color: #666;
+    margin-bottom: 30px;
+    font-size: 14px;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+label {
+    display: block;
+    margin-top: 18px;
+    margin-bottom: 6px;
+    font-weight: 600;
+    color: #333;
+    font-size: 14px;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+input,
+select,
+textarea {
+    width: 100%;
+    padding: 12px 14px;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    border: 2px solid #e0e0e0;
+    border-radius: 12px;
+    font-size: 14px;
+    transition: all 0.2s;
+    background: white;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+    outline: none;
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+textarea {
+    resize: vertical;
+    min-height: 80px;
+}
+
+.char-counter {
+    text-align: right;
+    font-size: 11px;
+    color: #888;
+    margin-top: 5px;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+button {
+    width: 100%;
+    margin-top: 30px;
+    padding: 14px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 50px;
+    font-size: 16px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+}
+
+.note {
+    text-align: center;
+    margin-top: 25px;
+    font-size: 12px;
+    color: #888;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+@media (max-width: 550px) {
+    .login-box {
+        padding: 25px;
+        margin: 0 15px;
+    }
+
+    h1 {
+        font-size: 24px;
+    }
+}/* test Tue Jun  2 20:48:38 UTC 2026 */
+
+
+# FILE: frontend/css/pages/cgu.css
+
+﻿/* ========== CONDITIONS GÉNÉRALES D'UTILISATION ========== */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    padding: 40px 20px;
+}
+
+.container {
+    max-width: 900px;
+    margin: 0 auto;
+    background: white;
+    border-radius: 20px;
+    padding: 40px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+}
+
+h1 {
+    color: #667eea;
+    margin-bottom: 20px;
+}
+
+h2 {
+    color: #764ba2;
+    margin-top: 25px;
+    margin-bottom: 10px;
+    font-size: 1.2rem;
+}
+
+p,
+li {
+    line-height: 1.6;
+    color: #333;
+    margin-bottom: 10px;
+}
+
+ul {
+    margin-left: 20px;
+    margin-bottom: 20px;
+}
+
+.warning {
+    background: #fff3cd;
+    padding: 15px;
+    border-radius: 10px;
+    margin: 20px 0;
+}
+
+.back-link {
+    display: inline-block;
+    margin-top: 30px;
+    color: #667eea;
+    text-decoration: none;
+}
+
+# FILE: frontend/css/pages/admin.css
+
+﻿/* ========== PANEL ADMIN ========== */
+body {
+    font-family: 'Segoe UI', 'Inter', system-ui, -apple-system, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    padding: 24px;
+}
+
+.admin-wrapper {
+    max-width: 1600px;
+    margin: 0 auto;
+}
+
+.admin-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 32px;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.logo-area h1 {
+    color: white;
+    font-size: 28px;
+    margin: 0;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.logo-area p {
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 14px;
+    margin: 4px 0 0;
+}
+
+.admin-badge {
+    background: rgba(255, 255, 255, 0.2);
+    backdrop-filter: blur(10px);
+    padding: 8px 24px;
+    border-radius: 40px;
+    color: white;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.logout-btn {
+    background: rgba(231, 76, 60, 0.9);
+    color: white;
+    border: none;
+    padding: 8px 24px;
+    border-radius: 40px;
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+
+.logout-btn:hover {
+    background: #e74c3c;
+    transform: translateY(-1px);
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 24px;
+    margin-bottom: 32px;
+}
+
+.stat-card {
+    background: white;
+    border-radius: 24px;
+    padding: 24px 20px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    transition: transform 0.2s;
+}
+
+.stat-card:hover {
+    transform: translateY(-2px);
+}
+
+.stat-icon {
+    font-size: 48px;
+}
+
+.stat-info h3 {
+    font-size: 32px;
+    font-weight: 700;
+    color: #1e293b;
+    margin: 0;
+}
+
+.stat-info p {
+    color: #64748b;
+    margin: 4px 0 0;
+    font-size: 14px;
+}
+
+.search-bar {
+    background: white;
+    border-radius: 60px;
+    padding: 6px 6px 6px 24px;
+    display: flex;
+    gap: 16px;
+    margin-bottom: 28px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    flex-wrap: wrap;
+}
+
+.search-bar input {
+    flex: 2;
+    border: none;
+    padding: 14px 0;
+    font-size: 15px;
+    outline: none;
+    background: transparent;
+    min-width: 180px;
+}
+
+.search-bar select {
+    border: none;
+    background: #f1f5f9;
+    padding: 8px 20px;
+    border-radius: 40px;
+    font-size: 14px;
+    outline: none;
+    cursor: pointer;
+}
+
+.search-bar button {
+    background: #667eea;
+    border: none;
+    padding: 0 28px;
+    border-radius: 40px;
+    color: white;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.search-bar button:hover {
+    background: #5a67d8;
+}
+
+.table-container {
+    background: white;
+    border-radius: 24px;
+    overflow-x: auto;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    margin-bottom: 32px;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 800px;
+}
+
+th {
+    text-align: left;
+    padding: 18px 20px;
+    background: #f8fafc;
+    font-weight: 600;
+    color: #1e293b;
+    border-bottom: 2px solid #e2e8f0;
+}
+
+td {
+    padding: 16px 20px;
+    border-bottom: 1px solid #e2e8f0;
+    color: #334155;
+}
+
+tr:hover {
+    background: #f8fafc;
+}
+
+.status-badge {
+    display: inline-block;
+    padding: 4px 12px;
+    border-radius: 40px;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.status-active {
+    background: #dcfce7;
+    color: #15803d;
+}
+
+.status-warned {
+    background: #fff3e3;
+    color: #b45309;
+}
+
+.status-banned {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.action-btn {
+    padding: 6px 14px;
+    border-radius: 30px;
+    border: none;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-warn {
+    background: #fef3c7;
+    color: #b45309;
+}
+
+.btn-warn:hover {
+    background: #fde68a;
+}
+
+.btn-ban {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+.btn-ban:hover {
+    background: #fecaca;
+}
+
+.btn-unban {
+    background: #dcfce7;
+    color: #15803d;
+}
+
+.btn-unban:hover {
+    background: #bbf7d0;
+}
+
+.btn-modo {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+.btn-modo:hover {
+    background: #bfdbfe;
+}
+
+.btn-admin {
+    background: #f3e8ff;
+    color: #7e22ce;
+}
+
+.btn-admin:hover {
+    background: #e9d5ff;
+}
+
+.quick-actions {
+    background: white;
+    border-radius: 24px;
+    padding: 24px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.quick-actions h3 {
+    margin: 0 0 20px 0;
+    color: #1e293b;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 18px;
+}
+
+.actions-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.quick-btn {
+    background: #f1f5f9;
+    border: none;
+    padding: 12px 24px;
+    border-radius: 40px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+}
+
+.quick-btn:hover {
+    background: #e2e8f0;
+    transform: translateY(-1px);
+}
+
+.danger-btn {
+    background: #fee2e2;
+    color: #b91c1c;
+}
+
+.danger-btn:hover {
+    background: #fecaca;
+}
+
+.loading {
+    text-align: center;
+    padding: 60px;
+    color: #64748b;
+}
+
+@media (max-width: 1200px) {
+    .stats-grid {
+        gap: 16px;
+    }
+
+    .stat-card {
+        padding: 20px 16px;
+    }
+
+    .stat-icon {
+        font-size: 36px;
+    }
+
+    .stat-info h3 {
+        font-size: 28px;
+    }
+}
+
+@media (max-width: 900px) {
+    .stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    body {
+        padding: 16px;
+    }
+
+    .admin-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .admin-badge {
+        justify-content: space-between;
+    }
+
+    .search-bar {
+        border-radius: 24px;
+        padding: 16px;
+    }
+
+    .search-bar button {
+        padding: 10px 20px;
+    }
+}
+
+@media (max-width: 500px) {
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+# FILE: frontend/css/pages/chat.css
+
+﻿/* ========== PAGE CHAT ========== */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* HEADER */
+.site-header {
+    background: rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(10px);
+    padding: 15px 30px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.header-content {
+    max-width: 1400px;
+    margin: 0 auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 15px;
+}
+
+.logo h1 {
+    margin: 0;
+    font-size: 24px;
+    color: white;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.logo p {
+    margin: 5px 0 0;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.user-badge {
+    background: rgba(255, 255, 255, 0.2);
+    padding: 8px 16px;
+    border-radius: 50px;
+    font-size: 14px;
+    color: white;
+}
+
+/* MAIN CONTAINER */
+.main-container {
+    flex: 1;
+    max-width: 1400px;
+    margin: 20px auto;
+    padding: 0 20px;
+}
+
+.container {
+    display: flex;
+    gap: 20px;
+    position: relative;
+}
+
+/* COLONNE GAUCHE - CONNECTÉS */
+.users-panel {
+    width: 250px;
+    background: white;
+    border-radius: 16px;
+    padding: 15px;
+    height: 600px;
+    overflow-y: auto;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+}
+
+.users-panel h3 {
+    margin: 0 0 15px 0;
+    font-size: 16px;
+    color: #667eea;
+    border-bottom: 2px solid #667eea;
+    padding-bottom: 8px;
+}
+
+/* COLONNE CENTRALE - CHAT */
+.chat-panel {
+    flex: 1;
+    background: white;
+    border-radius: 16px;
+    padding: 20px;
+    height: 600px;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+}
+
+.contact-info {
+    background: #f0f0ff;
+    border-radius: 12px;
+    padding: 12px;
+    margin-bottom: 15px;
+    font-size: 13px;
+    display: none;
+    border-left: 4px solid #667eea;
+}
+
+.contact-info .contact-name {
+    font-weight: bold;
+    font-size: 15px;
+    color: #667eea;
+}
+
+.contact-info .contact-bio {
+    margin-top: 8px;
+    padding: 8px;
+    background: white;
+    border-radius: 8px;
+    font-style: italic;
+}
+
+.message-area {
+    flex: 1;
+    background: #f8f9fa;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 15px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    overflow-y: auto;
+}
+
+.current-message {
+    font-size: 18px;
+    word-wrap: break-word;
+    max-width: 100%;
+}
+
+.empty-message {
+    color: #adb5bd;
+    font-style: italic;
+}
+
+.input-area {
+    display: flex;
+    gap: 10px;
+}
+
+#messageInput {
+    flex: 1;
+    padding: 12px 16px;
+    font-family: inherit;
+    border: 2px solid #e0e0e0;
+    border-radius: 50px;
+    font-size: 14px;
+    transition: border-color 0.2s;
+}
+
+#messageInput:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+#sendBtn {
+    padding: 12px 24px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 50px;
+    font-family: inherit;
+    cursor: pointer;
+    font-weight: bold;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+#sendBtn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+}
+
+#sendBtn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.user-item {
+    padding: 10px;
+    margin: 8px 0;
+    background: #f8f9fa;
+    cursor: pointer;
+    border-radius: 12px;
+    font-size: 13px;
+    transition: all 0.2s;
+    border: 1px solid transparent;
+}
+
+.user-item:hover {
+    background: #e9ecef;
+    transform: translateX(3px);
+}
+
+.user-item strong {
+    color: #667eea;
+}
+
+.user-item.current-target {
+    background: #667eea;
+    color: white;
+}
+
+.user-item.current-target strong {
+    color: white;
+}
+
+/* COLONNE DROITE - HISTORIQUE */
+.history-panel {
+    width: 280px;
+    background: white;
+    border-radius: 16px;
+    padding: 15px;
+    height: 600px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+}
+
+.history-panel h4 {
+    margin: 0 0 15px 0;
+    font-size: 14px;
+    color: #667eea;
+    text-align: center;
+    border-bottom: 2px solid #667eea;
+    padding-bottom: 8px;
+}
+
+.contact-accordion {
+    margin-bottom: 10px;
+    border-radius: 10px;
+    overflow: hidden;
+    border: 1px solid #e0e0e0;
+}
+
+.contact-header {
+    background: #f8f9fa;
+    padding: 10px;
+    cursor: pointer;
+    font-weight: bold;
+    display: flex;
+    justify-content: space-between;
+    transition: background 0.2s;
+}
+
+.contact-header:hover {
+    background: #e9ecef;
+}
+
+.contact-header .badge {
+    background: #667eea;
+    color: white;
+    border-radius: 20px;
+    padding: 0px 8px;
+    font-size: 11px;
+}
+
+.contact-messages {
+    display: none;
+    padding: 10px;
+    background: #f8f9fa;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.contact-messages.open {
+    display: block;
+}
+
+.history-message {
+    padding: 8px;
+    margin: 5px 0;
+    font-size: 11px;
+    border-radius: 8px;
+}
+
+.history-message.sent {
+    background: #e0f0ff;
+}
+
+.history-message.received {
+    background: #fff0e0;
+}
+
+.message-sender {
+    font-weight: bold;
+}
+
+.message-text {
+    margin-top: 3px;
+    word-wrap: break-word;
+}
+
+.message-time {
+    font-size: 9px;
+    color: #888;
+    margin-top: 3px;
+}
+
+/* ENVELOPPE NOTIFICATIONS */
+.envelope {
+    position: absolute;
+    bottom: 80px;
+    right: 20px;
+    font-size: 40px;
+    cursor: pointer;
+    background: white;
+    border-radius: 50%;
+    padding: 12px;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+    transition: transform 0.2s;
+    z-index: 100;
+}
+
+.envelope:hover {
+    transform: scale(1.05);
+}
+
+.envelope.blinking {
+    animation: blink 0.8s infinite;
+}
+
+@keyframes blink {
+    0% {
+        opacity: 1;
+        background: white;
+    }
+
+    50% {
+        opacity: 0.5;
+        background: #ffcc00;
+    }
+
+    100% {
+        opacity: 1;
+        background: white;
+    }
+}
+
+.pending-badge {
+    background: red;
+    color: white;
+    border-radius: 50%;
+    font-size: 12px;
+    padding: 2px 6px;
+    position: absolute;
+    top: -5px;
+    right: -5px;
+}
+
+/* FOOTER CHAT */
+.site-footer {
+    background: rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(10px);
+    padding: 15px 30px;
+    text-align: center;
+    border-top: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.footer-content {
+    max-width: 1400px;
+    margin: 0 auto;
+    font-size: 12px;
+    color: white;
+}
+
+.footer-content a {
+    color: white;
+    text-decoration: none;
+    margin: 0 10px;
+}
+
+.footer-content a:hover {
+    text-decoration: underline;
+}
+
+/* RESPONSIVE MOBILE */
+@media (max-width: 900px) {
+    .container {
+        flex-direction: column;
+    }
+
+    .users-panel,
+    .history-panel {
+        width: 100%;
+        height: 200px;
+    }
+
+    .chat-panel {
+        height: 450px;
+    }
+
+    .header-content {
+        flex-direction: column;
+        text-align: center;
+    }
+
+    .envelope {
+        z-index: 1001;
+    }
+}
+
+# FILE: frontend/css/pages/index.css
+
+﻿/* ========== PAGE INDEX (ACCUEIL) ========== */
+body {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.container {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 20px;
+}
+
+.welcome-box {
+    background: white;
+    border-radius: 20px;
+    padding: 50px;
+    max-width: 600px;
+    width: 100%;
+    text-align: center;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+}
+
+h1 {
+    font-size: 48px;
+    color: #667eea;
+    margin-bottom: 10px;
+}
+
+.subtitle {
+    color: #666;
+    margin-bottom: 40px;
+    font-size: 18px;
+}
+
+.lang-buttons {
+    display: flex;
+    gap: 20px;
+    justify-content: center;
+    margin-bottom: 30px;
+}
+
+.lang-btn {
+    padding: 15px 40px;
+    font-size: 24px;
+    font-weight: bold;
+    border: none;
+    border-radius: 50px;
+    cursor: pointer;
+    transition: transform 0.2s, box-shadow 0.2s;
+    font-family: inherit;
+}
+
+.lang-btn.fr {
+    background: #0055a4;
+    color: white;
+}
+
+.lang-btn.nl {
+    background: #ff6600;
+    color: white;
+}
+
+.lang-btn:hover:not(:disabled) {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
+}
+
+.lang-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.features {
+    display: flex;
+    justify-content: center;
+    gap: 30px;
+    margin-top: 30px;
+    flex-wrap: wrap;
+    margin-bottom: 30px;
+}
+
+.feature {
+    text-align: center;
+    font-size: 14px;
+    color: #666;
+}
+
+.feature span {
+    font-size: 30px;
+    display: block;
+    margin-bottom: 8px;
+}
+
+.age-warning {
+    margin-top: 30px;
+    padding: 10px;
+    background: #fff3cd;
+    border-radius: 10px;
+    font-size: 12px;
+    color: #856404;
+}
+
+.age-verification-bottom {
+    margin-top: 20px;
+    padding-top: 15px;
+    border-top: 1px solid #eee;
+}
+
+.age-selector-small {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.age-selector-small label {
+    font-size: 12px;
+    color: #666;
+    font-weight: normal;
+}
+
+.age-selector-small select {
+    padding: 6px 10px;
+    font-size: 12px;
+    border: 1px solid #ddd;
+    border-radius: 20px;
+    background: white;
+    cursor: pointer;
+    font-family: inherit;
+    color: #333;
+    width: auto;
+    min-width: 140px;
+}
+
+.age-selector-small select:focus {
+    outline: none;
+    border-color: #667eea;
+}
+
+.age-error-small {
+    background: #f8d7da;
+    color: #721c24;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 11px;
+    display: none;
+    margin-top: 8px;
+    text-align: center;
+}
+
+.age-error-small.show {
+    display: inline-block;
+}
+
+@media (max-width: 600px) {
+    .welcome-box {
+        padding: 30px;
+    }
+
+    h1 {
+        font-size: 32px;
+    }
+
+    .lang-btn {
+        padding: 10px 25px;
+        font-size: 18px;
+    }
+
+    .age-selector-small {
+        flex-direction: column;
+        gap: 8px;
+    }
+}
+
+# FILE: frontend/css/pages/maintenance.css
+
+﻿/* ========== PAGE MAINTENANCE ========== */
+body {
+    font-family: 'Segoe UI', sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 0;
+}
+
+.message {
+    background: white;
+    padding: 40px;
+    border-radius: 20px;
+    text-align: center;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+}
+
+h1 {
+    color: #667eea;
+}
+
+.logo {
+    font-size: 64px;
+}
+
+# FILE: frontend/css/pages/admin-login.css
+
+﻿/* ========== PAGE ADMIN-LOGIN ========== */
+body {
+    font-family: 'Segoe UI', sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.login-box {
+    background: white;
+    border-radius: 24px;
+    padding: 40px;
+    width: 100%;
+    max-width: 400px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+}
+
+h1 {
+    color: #667eea;
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+input {
+    width: 100%;
+    padding: 12px;
+    margin: 10px 0;
+    border: 2px solid #e0e0e0;
+    border-radius: 12px;
+    font-family: inherit;
+}
+
+button {
+    width: 100%;
+    padding: 12px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 50px;
+    font-weight: bold;
+    cursor: pointer;
+    margin-top: 20px;
+}
+
+.error {
+    color: red;
+    text-align: center;
+    margin-top: 10px;
+}
+
+# FILE: frontend/css/layouts/footer.css
+
+﻿/* FOOTER UTILISATEUR (index, login, chat) */
+footer {
+    text-align: center;
+    padding: 20px;
+    background: rgba(0, 0, 0, 0.1);
+    color: white;
+    font-size: 12px;
+}
+
+footer a {
+    color: white;
+    text-decoration: none;
+    margin: 0 10px;
+}
+
+footer a:hover {
+    text-decoration: underline;
+}
+
+/* FOOTER SITE (cgu, mentions, etc.) */
+.site-footer {
+    text-align: center;
+    padding: 20px;
+    background: rgba(0, 0, 0, 0.1);
+    color: white;
+    font-size: 12px;
+}
+
+.site-footer a {
+    color: white;
+    text-decoration: none;
+    margin: 0 10px;
+}
+
+.site-footer a:hover {
+    text-decoration: underline;
+}
+
+# FILE: frontend/css/common/reset.css
+
+﻿/* RESET COMMUN À TOUTES LES PAGES */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+/* Ce reset apparaît dans index, login, cgu, mentions, etc. */
+/* Supprime les doublons dans chaque fichier de page */
+
