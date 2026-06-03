@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-03 00:08:53
+# Généré le 2026-06-03 00:20:46
 
 # ========== BACKEND ==========
 
@@ -394,19 +394,49 @@ app.use(express.static('public'));
 // ========== 6. ROUTES PUBLIQUES ==========
 app.post('/api/register', async (req, res) => {
     try {
-        const { pseudo, age, tendencies, locationCode, locationName, bio, gender, purpose } = req.body;
-        if (!pseudo || !age) return res.status(400).json({ error: 'Pseudo et âge requis' });
+        const { pseudo, age, tendencies, locationCode, locationName, bio, gender, purpose, fingerprint } = req.body;
 
+        if (!pseudo || !age) return res.status(400).json({ error: 'Pseudo et âge requis' });
+        if (!fingerprint) return res.status(400).json({ error: 'Empreinte numérique requise' });
+
+        // 1. Vérifier si l'empreinte est bannie
+        const banCheck = await pool.query(
+            `SELECT is_banned, ban_reason FROM fingerprints WHERE fingerprint_hash = $1`,
+            [fingerprint]
+        );
+
+        if (banCheck.rows.length > 0 && banCheck.rows[0].is_banned) {
+            return res.status(403).json({
+                error: 'Accès refusé',
+                reason: banCheck.rows[0].ban_reason || 'Votre empreinte est bannie'
+            });
+        }
+
+        // 2. Créer ou mettre à jour l'empreinte
+        const fingerprintResult = await pool.query(
+            `INSERT INTO fingerprints (fingerprint_hash, last_seen) 
+             VALUES ($1, NOW()) 
+             ON CONFLICT (fingerprint_hash) 
+             DO UPDATE SET last_seen = NOW()
+             RETURNING id`,
+            [fingerprint]
+        );
+
+        const fingerprintId = fingerprintResult.rows[0].id;
+
+        // 3. Créer l'utilisateur
         const result = await pool.query(
-            `INSERT INTO users (pseudo, age, tendencies, location_code, location_name, bio, gender, purpose)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            `INSERT INTO users (pseudo, age, tendencies, location_code, location_name, bio, gender, purpose, fingerprint_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
              ON CONFLICT (pseudo) DO NOTHING
              RETURNING *`,
-            [pseudo, age, tendencies, locationCode, locationName, bio, gender, purpose]
+            [pseudo, age, tendencies, locationCode, locationName, bio, gender, purpose, fingerprintId]
         );
 
         if (result.rows.length === 0) return res.status(400).json({ error: 'Pseudo déjà utilisé' });
+
         res.json({ success: true, user: result.rows[0] });
+
     } catch (err) {
         console.error('Erreur inscription:', err);
         res.status(500).json({ error: 'Erreur serveur' });
