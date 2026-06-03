@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-03 00:24:42
+# Généré le 2026-06-03 00:25:56
 
 # ========== BACKEND ==========
 
@@ -619,6 +619,57 @@ app.post('/api/admin/set-admin', isAdmin, async (req, res) => {
     const { pseudo } = req.body;
     await pool.query('UPDATE users SET role = $1 WHERE pseudo = $2', ['admin', pseudo]);
     res.json({ success: true });
+});
+
+// ========== BAN PAR EMPREINTE (admin) ==========
+app.post('/api/admin/ban-fingerprint', isAdmin, async (req, res) => {
+    const { fingerprint, reason } = req.body;
+
+    if (!fingerprint) {
+        return res.status(400).json({ error: 'Empreinte requise' });
+    }
+
+    try {
+        // Vérifier si l'empreinte existe déjà
+        const check = await pool.query(
+            `SELECT id FROM fingerprints WHERE fingerprint_hash = $1`,
+            [fingerprint]
+        );
+
+        if (check.rows.length === 0) {
+            // Créer l'empreinte et la bannir
+            await pool.query(
+                `INSERT INTO fingerprints (fingerprint_hash, is_banned, ban_reason, banned_at) 
+                 VALUES ($1, true, $2, NOW())`,
+                [fingerprint, reason || 'Banni par admin']
+            );
+        } else {
+            // Mettre à jour l'empreinte existante
+            await pool.query(
+                `UPDATE fingerprints SET is_banned = true, ban_reason = $1, banned_at = NOW() 
+                 WHERE fingerprint_hash = $2`,
+                [reason || 'Banni par admin', fingerprint]
+            );
+        }
+
+        // Déconnecter tous les utilisateurs actuels avec cette empreinte
+        const usersToKick = await pool.query(
+            `SELECT u.pseudo FROM users u
+             JOIN fingerprints f ON u.fingerprint_id = f.id
+             WHERE f.fingerprint_hash = $1`,
+            [fingerprint]
+        );
+
+        for (const user of usersToKick.rows) {
+            disconnectBannedUser(io, users, user.pseudo, reason || 'Banni par admin');
+        }
+
+        res.json({ success: true, message: `Empreinte bannie, ${usersToKick.rowCount} utilisateur(s) déconnecté(s)` });
+
+    } catch (err) {
+        console.error('❌ Erreur ban fingerprint:', err);
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
 });
 
 // ========== 8. SOCKET.IO (CHAT TEMPS RÉEL) ==========
