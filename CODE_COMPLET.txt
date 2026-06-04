@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-04 12:30:56
+# Généré le 2026-06-04 12:36:06
 
 # ========== FRONTEND - HTML ==========
 
@@ -3793,10 +3793,39 @@ app.use(async (req, res, next) => {
         return next();
     }
 
-    // Ignorer également les pages principales sans extension
-    if (req.path === '/' || req.path === '/index.html') {
-        return next();
+    // Pour les pages HTML (hors admin-login/admin.html), on vérifie le token
+    if (req.path === '/' || req.path === '/index.html' || req.path === '/chat.html') {
+        // Vérifier si l'utilisateur est admin (via token JWT)
+        let isAdminUser = false;
+        const authHeader = req.headers.authorization;
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+            const token = authHeader.split(' ')[1];
+            try {
+                const decoded = jwt.verify(token, JWT_SECRET);
+                if (decoded.role === 'admin' || decoded.type === 'admin') isAdminUser = true;
+            } catch (err) { }
+        }
+
+        // Si admin, on laisse passer (même en maintenance)
+        if (isAdminUser) {
+            return next();
+        }
+
+        // Sinon, on vérifie le mode maintenance
+        try {
+            const result = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
+            const maintenance = result.rows[0]?.value === 'true';
+            if (maintenance) {
+                return res.status(503).sendFile(path.join(__dirname, 'public', 'maintenance.html'));
+            }
+            next();
+        } catch (err) {
+            next();
+        }
     }
+
+    // Pour les autres routes (API, etc.), on continue normalement
+    next();
 
     // Vérifier si l'utilisateur est admin (via token JWT)
     let isAdminUser = false;
