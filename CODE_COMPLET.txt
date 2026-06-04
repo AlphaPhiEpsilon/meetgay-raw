@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-04 12:36:06
+# Généré le 2026-06-04 12:37:58
 
 # ========== FRONTEND - HTML ==========
 
@@ -3766,52 +3766,93 @@ function isAdmin(req, res, next) {
             return res.status(403).json({ error: 'Accès admin requis' });
         }
 
-        // Stocker les infos admin pour les routes suivantes (optionnel)
-        req.admin = decoded;
-        next();
+        if (req.path === '/' || req.path === '/index.html' || req.path === '/login.html' || req.path === '/chat.html') {
 
-    } catch (err) {
-        return res.status(403).json({ error: 'Token invalide ou expiré' });
+            // Stocker les infos admin pour les routes suivantes (optionnel)
+            req.admin = decoded;
+            next();
+
+        } catch (err) {
+            return res.status(403).json({ error: 'Token invalide ou expiré' });
+        }
     }
-}
 
 // Middleware de maintenance (public)
 app.use(async (req, res, next) => {
-    // Ignorer les fichiers statiques
-    if (req.path.match(/\.(css|js|png|jpg|ico|json)$/)) {
-        return next();
-    }
+        // Ignorer les fichiers statiques
+        if (req.path.match(/\.(css|js|png|jpg|ico|json)$/)) {
+            return next();
+        }
 
-    // Ignorer les routes admin et d'authentification
-    if (req.path === '/api/login' || req.path === '/api/admin/login' ||
-        req.path === '/admin.html' || req.path === '/admin-login.html') {
-        return next();
-    }
+        // Ignorer les routes admin et d'authentification
+        if (req.path === '/api/login' || req.path === '/api/admin/login' ||
+            req.path === '/admin.html' || req.path === '/admin-login.html') {
+            return next();
+        }
 
-    // Pages admin toujours accessibles (pour que tu puisses te reconnecter)
-    if (req.path === '/admin-login.html' || req.path === '/admin.html') {
-        return next();
-    }
+        // Pages admin toujours accessibles (pour que tu puisses te reconnecter)
+        if (req.path === '/admin-login.html' || req.path === '/admin.html') {
+            return next();
+        }
 
-    // Pour les pages HTML (hors admin-login/admin.html), on vérifie le token
-    if (req.path === '/' || req.path === '/index.html' || req.path === '/chat.html') {
+        // Pour les pages HTML (hors admin-login/admin.html), on vérifie le token
+        if (req.path === '/' || req.path === '/index.html' || req.path === '/chat.html') {
+            // Vérifier si l'utilisateur est admin (via token JWT)
+            let isAdminUser = false;
+            const authHeader = req.headers.authorization;
+            if (authHeader && authHeader.startsWith('Bearer ')) {
+                const token = authHeader.split(' ')[1];
+                try {
+                    const decoded = jwt.verify(token, JWT_SECRET);
+                    if (decoded.role === 'admin' || decoded.type === 'admin') isAdminUser = true;
+                } catch (err) { }
+            }
+
+            // Si admin, on laisse passer (même en maintenance)
+            if (isAdminUser) {
+                return next();
+            }
+
+            // Sinon, on vérifie le mode maintenance
+            try {
+                const result = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
+                const maintenance = result.rows[0]?.value === 'true';
+                if (maintenance) {
+                    return res.status(503).sendFile(path.join(__dirname, 'public', 'maintenance.html'));
+                }
+                next();
+            } catch (err) {
+                next();
+            }
+        }
+
+        // Pour les autres routes (API, etc.), on continue normalement
+        next();
+
         // Vérifier si l'utilisateur est admin (via token JWT)
         let isAdminUser = false;
         const authHeader = req.headers.authorization;
+        console.log('🔐 Auth header reçu:', authHeader ? 'Oui' : 'Non');
+
         if (authHeader && authHeader.startsWith('Bearer ')) {
             const token = authHeader.split(' ')[1];
             try {
                 const decoded = jwt.verify(token, JWT_SECRET);
-                if (decoded.role === 'admin' || decoded.type === 'admin') isAdminUser = true;
-            } catch (err) { }
+                console.log('🔓 Token décodé:', decoded);
+                if (decoded.role === 'admin' || decoded.type === 'admin') {
+                    isAdminUser = true;
+                    console.log('✅ Admin reconnu');
+                }
+            } catch (err) {
+                console.log('❌ Erreur vérification token:', err.message);
+            }
         }
 
-        // Si admin, on laisse passer (même en maintenance)
         if (isAdminUser) {
-            return next();
+            return next();  // Les admins voient le site normalement
         }
 
-        // Sinon, on vérifie le mode maintenance
+        // Vérifier le mode maintenance
         try {
             const result = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
             const maintenance = result.rows[0]?.value === 'true';
@@ -3822,458 +3863,419 @@ app.use(async (req, res, next) => {
         } catch (err) {
             next();
         }
-    }
+    });
 
-    // Pour les autres routes (API, etc.), on continue normalement
-    next();
+    app.use(express.static('/var/www/meetgay'));
 
-    // Vérifier si l'utilisateur est admin (via token JWT)
-    let isAdminUser = false;
-    const authHeader = req.headers.authorization;
-    console.log('🔐 Auth header reçu:', authHeader ? 'Oui' : 'Non');
-
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-        const token = authHeader.split(' ')[1];
+    // ========== 6. ROUTES PUBLIQUES ==========
+    app.post('/api/register', async (req, res) => {
         try {
-            const decoded = jwt.verify(token, JWT_SECRET);
-            console.log('🔓 Token décodé:', decoded);
-            if (decoded.role === 'admin' || decoded.type === 'admin') {
-                isAdminUser = true;
-                console.log('✅ Admin reconnu');
+            console.log("🔵 1. Début register, body reçu:", req.body);
+
+            const { pseudo, age, tendencies, locationCode, locationName, bio, gender, purpose, fingerprint } = req.body;
+
+            if (!pseudo || !age) {
+                console.log("🔴 2. Échec: pseudo ou âge manquant");
+                return res.status(400).json({ error: 'Pseudo et âge requis' });
             }
-        } catch (err) {
-            console.log('❌ Erreur vérification token:', err.message);
-        }
-    }
+            if (!fingerprint) {
+                console.log("🔴 3. Échec: fingerprint manquant");
+                return res.status(400).json({ error: 'Empreinte numérique requise' });
+            }
 
-    if (isAdminUser) {
-        return next();  // Les admins voient le site normalement
-    }
+            console.log("🟢 4. Vérification ban pour fingerprint:", fingerprint);
 
-    // Vérifier le mode maintenance
-    try {
-        const result = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
-        const maintenance = result.rows[0]?.value === 'true';
-        if (maintenance) {
-            return res.status(503).sendFile(path.join(__dirname, 'public', 'maintenance.html'));
-        }
-        next();
-    } catch (err) {
-        next();
-    }
-});
+            // 1. Vérifier si l'empreinte est bannie
+            const banCheck = await pool.query(
+                `SELECT is_banned, ban_reason FROM fingerprints WHERE fingerprint_hash = $1`,
+                [fingerprint]
+            );
+            console.log("🟢 5. Résultat banCheck:", banCheck.rows);
 
-app.use(express.static('/var/www/meetgay'));
+            if (banCheck.rows.length > 0 && banCheck.rows[0].is_banned) {
+                console.log("🔴 6. Empreinte bannie");
+                return res.status(403).json({
+                    error: 'Accès refusé',
+                    reason: banCheck.rows[0].ban_reason || 'Votre empreinte est bannie'
+                });
+            }
 
-// ========== 6. ROUTES PUBLIQUES ==========
-app.post('/api/register', async (req, res) => {
-    try {
-        console.log("🔵 1. Début register, body reçu:", req.body);
-
-        const { pseudo, age, tendencies, locationCode, locationName, bio, gender, purpose, fingerprint } = req.body;
-
-        if (!pseudo || !age) {
-            console.log("🔴 2. Échec: pseudo ou âge manquant");
-            return res.status(400).json({ error: 'Pseudo et âge requis' });
-        }
-        if (!fingerprint) {
-            console.log("🔴 3. Échec: fingerprint manquant");
-            return res.status(400).json({ error: 'Empreinte numérique requise' });
-        }
-
-        console.log("🟢 4. Vérification ban pour fingerprint:", fingerprint);
-
-        // 1. Vérifier si l'empreinte est bannie
-        const banCheck = await pool.query(
-            `SELECT is_banned, ban_reason FROM fingerprints WHERE fingerprint_hash = $1`,
-            [fingerprint]
-        );
-        console.log("🟢 5. Résultat banCheck:", banCheck.rows);
-
-        if (banCheck.rows.length > 0 && banCheck.rows[0].is_banned) {
-            console.log("🔴 6. Empreinte bannie");
-            return res.status(403).json({
-                error: 'Accès refusé',
-                reason: banCheck.rows[0].ban_reason || 'Votre empreinte est bannie'
-            });
-        }
-
-        // 2. Créer ou mettre à jour l'empreinte
-        console.log("🟢 7. Insertion/Update fingerprint");
-        const fingerprintResult = await pool.query(
-            `INSERT INTO fingerprints (fingerprint_hash, last_seen) 
+            // 2. Créer ou mettre à jour l'empreinte
+            console.log("🟢 7. Insertion/Update fingerprint");
+            const fingerprintResult = await pool.query(
+                `INSERT INTO fingerprints (fingerprint_hash, last_seen) 
              VALUES ($1, NOW()) 
              ON CONFLICT (fingerprint_hash) 
              DO UPDATE SET last_seen = NOW()
              RETURNING id`,
-            [fingerprint]
-        );
+                [fingerprint]
+            );
 
-        const fingerprintId = fingerprintResult.rows[0].id;
-        console.log("🟢 8. fingerprintId obtenu:", fingerprintId);
+            const fingerprintId = fingerprintResult.rows[0].id;
+            console.log("🟢 8. fingerprintId obtenu:", fingerprintId);
 
-        // 3. Créer l'utilisateur
-        console.log("🟢 9. Insertion utilisateur");
-        const result = await pool.query(
-            `INSERT INTO users (pseudo, age, tendencies, location_code, location_name, bio, gender, purpose, fingerprint_id)
+            // 3. Créer l'utilisateur
+            console.log("🟢 9. Insertion utilisateur");
+            const result = await pool.query(
+                `INSERT INTO users (pseudo, age, tendencies, location_code, location_name, bio, gender, purpose, fingerprint_id)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
              ON CONFLICT (pseudo) DO NOTHING
              RETURNING *`,
-            [pseudo, age, tendencies, locationCode, locationName, bio, gender, purpose, fingerprintId]
-        );
+                [pseudo, age, tendencies, locationCode, locationName, bio, gender, purpose, fingerprintId]
+            );
 
-        console.log("🟢 10. Résultat insertion user, rowCount:", result.rowCount);
+            console.log("🟢 10. Résultat insertion user, rowCount:", result.rowCount);
 
-        if (result.rows.length === 0) {
-            console.log("🔴 11. Pseudo déjà utilisé ou conflit");
-            return res.status(400).json({ error: 'Pseudo déjà utilisé' });
+            if (result.rows.length === 0) {
+                console.log("🔴 11. Pseudo déjà utilisé ou conflit");
+                return res.status(400).json({ error: 'Pseudo déjà utilisé' });
+            }
+
+            console.log("🟢 12. Succès ! Utilisateur créé:", result.rows[0]);
+            res.json({ success: true, user: result.rows[0] });
+
+        } catch (err) {
+            console.error("🔴 ERREUR CATASTROPHIQUE:", err);
+            res.status(500).json({ error: 'Erreur serveur' });
+        }
+    });
+
+    app.post('/api/login', async (req, res) => {
+        const { pseudo } = req.body;
+        if (!pseudo) return res.status(400).json({ error: 'Pseudo requis' });
+        try {
+            const result = await pool.query('SELECT * FROM users WHERE pseudo = $1', [pseudo]);
+            if (result.rows.length === 0) return res.status(404).json({ error: 'Utilisateur non trouvé' });
+            const user = result.rows[0];
+            const token = jwt.sign({ id: user.id, pseudo: user.pseudo, role: user.role || 'user' }, JWT_SECRET, { expiresIn: '24h' });
+            res.json({ success: true, token, user: { pseudo: user.pseudo, role: user.role } });
+        } catch (err) {
+            console.error('Erreur login:', err);
+            res.status(500).json({ error: 'Erreur serveur' });
+        }
+    });
+
+    app.post('/api/verify-token', (req, res) => {
+        const { token } = req.body;
+        if (!token) return res.json({ valid: false, error: 'Token manquant' });
+        try {
+            const decoded = jwt.verify(token, JWT_SECRET);
+            res.json({ valid: true, user: decoded });
+        } catch {
+            res.json({ valid: false, error: 'Token invalide' });
+        }
+    });
+
+    app.post('/api/get-user', async (req, res) => {
+        const { pseudo } = req.body;
+        if (!pseudo) return res.status(400).json({ error: 'Pseudo requis' });
+        try {
+            const result = await pool.query('SELECT * FROM users WHERE pseudo = $1', [pseudo]);
+            if (result.rows.length === 0) return res.status(404).json({ error: 'Utilisateur non trouvé' });
+            res.json({ success: true, user: result.rows[0] });
+        } catch (err) {
+            console.error('Erreur get-user:', err);
+            res.status(500).json({ error: 'Erreur serveur' });
+        }
+    });
+
+    // ========== 7. ROUTES ADMIN ==========
+    // Route login admin (table admins)
+    app.post('/api/admin/login', async (req, res) => {
+        const { username, password } = req.body;
+
+        if (!username || !password) {
+            return res.status(400).json({
+                success: false,
+                error: 'Nom d\'utilisateur et mot de passe requis'
+            });
         }
 
-        console.log("🟢 12. Succès ! Utilisateur créé:", result.rows[0]);
-        res.json({ success: true, user: result.rows[0] });
-
-    } catch (err) {
-        console.error("🔴 ERREUR CATASTROPHIQUE:", err);
-        res.status(500).json({ error: 'Erreur serveur' });
-    }
-});
-
-app.post('/api/login', async (req, res) => {
-    const { pseudo } = req.body;
-    if (!pseudo) return res.status(400).json({ error: 'Pseudo requis' });
-    try {
-        const result = await pool.query('SELECT * FROM users WHERE pseudo = $1', [pseudo]);
-        if (result.rows.length === 0) return res.status(404).json({ error: 'Utilisateur non trouvé' });
-        const user = result.rows[0];
-        const token = jwt.sign({ id: user.id, pseudo: user.pseudo, role: user.role || 'user' }, JWT_SECRET, { expiresIn: '24h' });
-        res.json({ success: true, token, user: { pseudo: user.pseudo, role: user.role } });
-    } catch (err) {
-        console.error('Erreur login:', err);
-        res.status(500).json({ error: 'Erreur serveur' });
-    }
-});
-
-app.post('/api/verify-token', (req, res) => {
-    const { token } = req.body;
-    if (!token) return res.json({ valid: false, error: 'Token manquant' });
-    try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        res.json({ valid: true, user: decoded });
-    } catch {
-        res.json({ valid: false, error: 'Token invalide' });
-    }
-});
-
-app.post('/api/get-user', async (req, res) => {
-    const { pseudo } = req.body;
-    if (!pseudo) return res.status(400).json({ error: 'Pseudo requis' });
-    try {
-        const result = await pool.query('SELECT * FROM users WHERE pseudo = $1', [pseudo]);
-        if (result.rows.length === 0) return res.status(404).json({ error: 'Utilisateur non trouvé' });
-        res.json({ success: true, user: result.rows[0] });
-    } catch (err) {
-        console.error('Erreur get-user:', err);
-        res.status(500).json({ error: 'Erreur serveur' });
-    }
-});
-
-// ========== 7. ROUTES ADMIN ==========
-// Route login admin (table admins)
-app.post('/api/admin/login', async (req, res) => {
-    const { username, password } = req.body;
-
-    if (!username || !password) {
-        return res.status(400).json({
-            success: false,
-            error: 'Nom d\'utilisateur et mot de passe requis'
-        });
-    }
-
-    try {
-        const result = await pool.query(
-            `SELECT id, username, email, password_hash, role, is_active 
+        try {
+            const result = await pool.query(
+                `SELECT id, username, email, password_hash, role, is_active 
              FROM admins 
              WHERE username = $1`,
-            [username]
-        );
+                [username]
+            );
 
-        if (result.rows.length === 0) {
-            return res.status(401).json({
-                success: false,
-                error: 'Identifiants incorrects'
-            });
-        }
-
-        const admin = result.rows[0];
-
-        if (!admin.is_active) {
-            return res.status(401).json({
-                success: false,
-                error: 'Compte administrateur désactivé'
-            });
-        }
-
-        const isValid = await bcrypt.compare(password, admin.password_hash);
-
-        if (!isValid) {
-            return res.status(401).json({
-                success: false,
-                error: 'Identifiants incorrects'
-            });
-        }
-
-        await pool.query(
-            `UPDATE admins SET last_login = NOW() WHERE id = $1`,
-            [admin.id]
-        );
-
-        const token = jwt.sign(
-            {
-                id: admin.id,
-                username: admin.username,
-                role: 'admin',  // Important pour le middleware isAdmin
-                type: 'admin'
-            },
-            JWT_SECRET,
-            { expiresIn: '24h' }
-        );
-
-        res.json({
-            success: true,
-            token: token,
-            admin: {
-                id: admin.id,
-                username: admin.username,
-                email: admin.email,
-                role: admin.role
+            if (result.rows.length === 0) {
+                return res.status(401).json({
+                    success: false,
+                    error: 'Identifiants incorrects'
+                });
             }
-        });
 
-    } catch (err) {
-        console.error('❌ Erreur login admin:', err);
-        res.status(500).json({
-            success: false,
-            error: 'Erreur serveur'
-        });
-    }
-});
+            const admin = result.rows[0];
 
-app.get('/api/admin/verify', (req, res) => {
-    const token = req.headers.authorization?.split(' ')[1];
-    if (!token) return res.json({ valid: false });
-    try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        res.json({ valid: (decoded.role === 'admin' || decoded.type === 'admin') });
-    } catch {
-        res.json({ valid: false });
-    }
-});
+            if (!admin.is_active) {
+                return res.status(401).json({
+                    success: false,
+                    error: 'Compte administrateur désactivé'
+                });
+            }
 
-// Toutes les routes admin sont maintenant protégées par le middleware isAdmin (JWT)
-app.get('/api/admin/users', isAdmin, async (req, res) => {
-    try {
-        const result = await pool.query('SELECT pseudo, age, role, warnings, is_banned, ban_reason FROM users ORDER BY id');
-        res.json(result.rows);
-    } catch (err) {
-        console.error("❌ Erreur admin/users:", err.message);
-        res.status(500).json({ error: 'Erreur serveur', details: err.message });
-    }
-});
+            const isValid = await bcrypt.compare(password, admin.password_hash);
 
-app.post('/api/admin/warn', isAdmin, async (req, res) => {
-    const { pseudo } = req.body;
-    await pool.query('UPDATE users SET warnings = COALESCE(warnings, 0) + 1 WHERE pseudo = $1', [pseudo]);
-    res.json({ success: true });
-});
+            if (!isValid) {
+                return res.status(401).json({
+                    success: false,
+                    error: 'Identifiants incorrects'
+                });
+            }
 
-app.post('/api/admin/ban', isAdmin, async (req, res) => {
-    const { pseudo, reason } = req.body;
-    try {
-        await pool.query('UPDATE users SET is_banned = true, ban_reason = $1 WHERE pseudo = $2', [reason, pseudo]);
-        disconnectBannedUser(io, users, pseudo, reason);
+            await pool.query(
+                `UPDATE admins SET last_login = NOW() WHERE id = $1`,
+                [admin.id]
+            );
+
+            const token = jwt.sign(
+                {
+                    id: admin.id,
+                    username: admin.username,
+                    role: 'admin',  // Important pour le middleware isAdmin
+                    type: 'admin'
+                },
+                JWT_SECRET,
+                { expiresIn: '24h' }
+            );
+
+            res.json({
+                success: true,
+                token: token,
+                admin: {
+                    id: admin.id,
+                    username: admin.username,
+                    email: admin.email,
+                    role: admin.role
+                }
+            });
+
+        } catch (err) {
+            console.error('❌ Erreur login admin:', err);
+            res.status(500).json({
+                success: false,
+                error: 'Erreur serveur'
+            });
+        }
+    });
+
+    app.get('/api/admin/verify', (req, res) => {
+        const token = req.headers.authorization?.split(' ')[1];
+        if (!token) return res.json({ valid: false });
+        try {
+            const decoded = jwt.verify(token, JWT_SECRET);
+            res.json({ valid: (decoded.role === 'admin' || decoded.type === 'admin') });
+        } catch {
+            res.json({ valid: false });
+        }
+    });
+
+    // Toutes les routes admin sont maintenant protégées par le middleware isAdmin (JWT)
+    app.get('/api/admin/users', isAdmin, async (req, res) => {
+        try {
+            const result = await pool.query('SELECT pseudo, age, role, warnings, is_banned, ban_reason FROM users ORDER BY id');
+            res.json(result.rows);
+        } catch (err) {
+            console.error("❌ Erreur admin/users:", err.message);
+            res.status(500).json({ error: 'Erreur serveur', details: err.message });
+        }
+    });
+
+    app.post('/api/admin/warn', isAdmin, async (req, res) => {
+        const { pseudo } = req.body;
+        await pool.query('UPDATE users SET warnings = COALESCE(warnings, 0) + 1 WHERE pseudo = $1', [pseudo]);
         res.json({ success: true });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Erreur' });
-    }
-});
+    });
 
-app.post('/api/admin/unban', isAdmin, async (req, res) => {
-    const { pseudo } = req.body;
-    await pool.query('UPDATE users SET is_banned = false, ban_reason = NULL WHERE pseudo = $1', [pseudo]);
-    res.json({ success: true });
-});
+    app.post('/api/admin/ban', isAdmin, async (req, res) => {
+        const { pseudo, reason } = req.body;
+        try {
+            await pool.query('UPDATE users SET is_banned = true, ban_reason = $1 WHERE pseudo = $2', [reason, pseudo]);
+            disconnectBannedUser(io, users, pseudo, reason);
+            res.json({ success: true });
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({ error: 'Erreur' });
+        }
+    });
 
-app.post('/api/admin/set-modo', isAdmin, async (req, res) => {
-    const { pseudo } = req.body;
-    await pool.query('UPDATE users SET role = $1 WHERE pseudo = $2', ['modo', pseudo]);
-    res.json({ success: true });
-});
+    app.post('/api/admin/unban', isAdmin, async (req, res) => {
+        const { pseudo } = req.body;
+        await pool.query('UPDATE users SET is_banned = false, ban_reason = NULL WHERE pseudo = $1', [pseudo]);
+        res.json({ success: true });
+    });
 
-app.post('/api/admin/set-admin', isAdmin, async (req, res) => {
-    const { pseudo } = req.body;
-    await pool.query('UPDATE users SET role = $1 WHERE pseudo = $2', ['admin', pseudo]);
-    res.json({ success: true });
-});
+    app.post('/api/admin/set-modo', isAdmin, async (req, res) => {
+        const { pseudo } = req.body;
+        await pool.query('UPDATE users SET role = $1 WHERE pseudo = $2', ['modo', pseudo]);
+        res.json({ success: true });
+    });
 
-// ========== BAN PAR EMPREINTE (admin) ==========
-app.post('/api/admin/ban-fingerprint', isAdmin, async (req, res) => {
-    const { fingerprint, reason } = req.body;
+    app.post('/api/admin/set-admin', isAdmin, async (req, res) => {
+        const { pseudo } = req.body;
+        await pool.query('UPDATE users SET role = $1 WHERE pseudo = $2', ['admin', pseudo]);
+        res.json({ success: true });
+    });
 
-    if (!fingerprint) {
-        return res.status(400).json({ error: 'Empreinte requise' });
-    }
+    // ========== BAN PAR EMPREINTE (admin) ==========
+    app.post('/api/admin/ban-fingerprint', isAdmin, async (req, res) => {
+        const { fingerprint, reason } = req.body;
 
-    try {
-        // Vérifier si l'empreinte existe déjà
-        const check = await pool.query(
-            `SELECT id FROM fingerprints WHERE fingerprint_hash = $1`,
-            [fingerprint]
-        );
-
-        if (check.rows.length === 0) {
-            // Créer l'empreinte et la bannir
-            await pool.query(
-                `INSERT INTO fingerprints (fingerprint_hash, is_banned, ban_reason, banned_at) 
-                 VALUES ($1, true, $2, NOW())`,
-                [fingerprint, reason || 'Banni par admin']
-            );
-        } else {
-            // Mettre à jour l'empreinte existante
-            await pool.query(
-                `UPDATE fingerprints SET is_banned = true, ban_reason = $1, banned_at = NOW() 
-                 WHERE fingerprint_hash = $2`,
-                [reason || 'Banni par admin', fingerprint]
-            );
+        if (!fingerprint) {
+            return res.status(400).json({ error: 'Empreinte requise' });
         }
 
-        // Déconnecter tous les utilisateurs actuels avec cette empreinte
-        const usersToKick = await pool.query(
-            `SELECT u.pseudo FROM users u
+        try {
+            // Vérifier si l'empreinte existe déjà
+            const check = await pool.query(
+                `SELECT id FROM fingerprints WHERE fingerprint_hash = $1`,
+                [fingerprint]
+            );
+
+            if (check.rows.length === 0) {
+                // Créer l'empreinte et la bannir
+                await pool.query(
+                    `INSERT INTO fingerprints (fingerprint_hash, is_banned, ban_reason, banned_at) 
+                 VALUES ($1, true, $2, NOW())`,
+                    [fingerprint, reason || 'Banni par admin']
+                );
+            } else {
+                // Mettre à jour l'empreinte existante
+                await pool.query(
+                    `UPDATE fingerprints SET is_banned = true, ban_reason = $1, banned_at = NOW() 
+                 WHERE fingerprint_hash = $2`,
+                    [reason || 'Banni par admin', fingerprint]
+                );
+            }
+
+            // Déconnecter tous les utilisateurs actuels avec cette empreinte
+            const usersToKick = await pool.query(
+                `SELECT u.pseudo FROM users u
              JOIN fingerprints f ON u.fingerprint_id = f.id
              WHERE f.fingerprint_hash = $1`,
-            [fingerprint]
-        );
+                [fingerprint]
+            );
 
-        for (const user of usersToKick.rows) {
-            disconnectBannedUser(io, users, user.pseudo, reason || 'Banni par admin');
+            for (const user of usersToKick.rows) {
+                disconnectBannedUser(io, users, user.pseudo, reason || 'Banni par admin');
+            }
+
+            res.json({ success: true, message: `Empreinte bannie, ${usersToKick.rowCount} utilisateur(s) déconnecté(s)` });
+
+        } catch (err) {
+            console.error('❌ Erreur ban fingerprint:', err);
+            res.status(500).json({ error: 'Erreur serveur' });
         }
-
-        res.json({ success: true, message: `Empreinte bannie, ${usersToKick.rowCount} utilisateur(s) déconnecté(s)` });
-
-    } catch (err) {
-        console.error('❌ Erreur ban fingerprint:', err);
-        res.status(500).json({ error: 'Erreur serveur' });
-    }
-});
-
-// ========== 8. SOCKET.IO (CHAT TEMPS RÉEL) ==========
-const io = socketIo(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"],
-        credentials: true,
-        allowedHeaders: ["*"]
-    },
-    transports: ['websocket', 'polling'],  // ← autorise les deux
-    allowEIO3: true,  // ← compatibilité
-    pingTimeout: 60000,
-    pingInterval: 25000
-});
-
-io.on('connection', (socket) => {
-    console.log('🔌 Nouvelle connexion :', socket.id);
-    console.log('🔌 SOCKET CONNECTÉ !!! ID:', socket.id);
-
-    socket.on('user join', (userInfo) => {
-        console.log('📡 Événement user join reçu:', userInfo);
-        if (!userInfo || !userInfo.pseudo) {
-            socket.emit('join error', { error: 'Pseudo requis pour rejoindre' });
-            return;
-        }
-        users[socket.id] = { ...userInfo, socketId: socket.id };
-        console.log(`✅ ${userInfo.pseudo} a rejoint (${socket.id})`);
-
-        const usersList = Object.values(users).map(u => ({
-            pseudo: u.pseudo,
-            age: u.age,
-            tendencies: u.tendencies,
-            gender: u.gender,
-            purpose: u.purpose,
-            bio: u.bio,
-            locationCode: u.locationCode,
-            locationName: u.locationName,
-            socketId: u.socketId
-        }));
-        io.emit('update users', usersList);
-        socket.emit('join confirmed', { success: true, user: userInfo });
     });
 
-    socket.on('private message', (data) => {
-        const { toSocketId, message, fromPseudo } = data;
-        console.log(`💬 Message privé de ${fromPseudo} vers ${toSocketId}: ${message}`);
-        socket.to(toSocketId).emit('private message received', {
-            message: message,
-            fromPseudo: fromPseudo,
-            fromSocketId: socket.id
+    // ========== 8. SOCKET.IO (CHAT TEMPS RÉEL) ==========
+    const io = socketIo(server, {
+        cors: {
+            origin: "*",
+            methods: ["GET", "POST"],
+            credentials: true,
+            allowedHeaders: ["*"]
+        },
+        transports: ['websocket', 'polling'],  // ← autorise les deux
+        allowEIO3: true,  // ← compatibilité
+        pingTimeout: 60000,
+        pingInterval: 25000
+    });
+
+    io.on('connection', (socket) => {
+        console.log('🔌 Nouvelle connexion :', socket.id);
+        console.log('🔌 SOCKET CONNECTÉ !!! ID:', socket.id);
+
+        socket.on('user join', (userInfo) => {
+            console.log('📡 Événement user join reçu:', userInfo);
+            if (!userInfo || !userInfo.pseudo) {
+                socket.emit('join error', { error: 'Pseudo requis pour rejoindre' });
+                return;
+            }
+            users[socket.id] = { ...userInfo, socketId: socket.id };
+            console.log(`✅ ${userInfo.pseudo} a rejoint (${socket.id})`);
+
+            const usersList = Object.values(users).map(u => ({
+                pseudo: u.pseudo,
+                age: u.age,
+                tendencies: u.tendencies,
+                gender: u.gender,
+                purpose: u.purpose,
+                bio: u.bio,
+                locationCode: u.locationCode,
+                locationName: u.locationName,
+                socketId: u.socketId
+            }));
+            io.emit('update users', usersList);
+            socket.emit('join confirmed', { success: true, user: userInfo });
         });
-        socket.emit('message sent confirmation', { message: message, to: toSocketId });
+
+        socket.on('private message', (data) => {
+            const { toSocketId, message, fromPseudo } = data;
+            console.log(`💬 Message privé de ${fromPseudo} vers ${toSocketId}: ${message}`);
+            socket.to(toSocketId).emit('private message received', {
+                message: message,
+                fromPseudo: fromPseudo,
+                fromSocketId: socket.id
+            });
+            socket.emit('message sent confirmation', { message: message, to: toSocketId });
+        });
+
+        socket.on('disconnect', () => {
+            console.log('❌ Socket déconnecté:', socket.id);
+            const disconnectedUser = users[socket.id];
+            if (disconnectedUser) console.log(`❌ ${disconnectedUser.pseudo} s'est déconnecté (${socket.id})`);
+            else console.log(`❌ Déconnexion inconnue : ${socket.id}`);
+            delete users[socket.id];
+            const usersList = Object.values(users).map(u => ({
+                pseudo: u.pseudo,
+                age: u.age,
+                tendencies: u.tendencies,
+                gender: u.gender,
+                purpose: u.purpose,
+                bio: u.bio,
+                locationCode: u.locationCode,
+                locationName: u.locationName,
+                socketId: u.socketId
+            }));
+            io.emit('update users', usersList);
+        });
+
+        socket.on('ping', () => socket.emit('pong'));
     });
 
-    socket.on('disconnect', () => {
-        console.log('❌ Socket déconnecté:', socket.id);
-        const disconnectedUser = users[socket.id];
-        if (disconnectedUser) console.log(`❌ ${disconnectedUser.pseudo} s'est déconnecté (${socket.id})`);
-        else console.log(`❌ Déconnexion inconnue : ${socket.id}`);
-        delete users[socket.id];
-        const usersList = Object.values(users).map(u => ({
-            pseudo: u.pseudo,
-            age: u.age,
-            tendencies: u.tendencies,
-            gender: u.gender,
-            purpose: u.purpose,
-            bio: u.bio,
-            locationCode: u.locationCode,
-            locationName: u.locationName,
-            socketId: u.socketId
-        }));
-        io.emit('update users', usersList);
+    // ========== MAINTENANCE MODE (admin seulement) ==========
+    app.get('/api/admin/maintenance', isAdmin, async (req, res) => {
+        try {
+            const result = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
+            res.json({ enabled: result.rows[0]?.value === 'true' });
+        } catch (err) {
+            res.status(500).json({ error: 'Erreur' });
+        }
     });
 
-    socket.on('ping', () => socket.emit('pong'));
-});
+    app.post('/api/admin/maintenance', isAdmin, async (req, res) => {
+        const { enabled } = req.body;
+        if (typeof enabled !== 'boolean') {
+            return res.status(400).json({ error: 'enabled doit être true/false' });
+        }
+        try {
+            await pool.query("UPDATE settings SET value = $1 WHERE key = 'maintenance_mode'", [enabled ? 'true' : 'false']);
+            res.json({ success: true, enabled });
+        } catch (err) {
+            res.status(500).json({ error: 'Erreur' });
+        }
+    });
 
-// ========== MAINTENANCE MODE (admin seulement) ==========
-app.get('/api/admin/maintenance', isAdmin, async (req, res) => {
-    try {
-        const result = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
-        res.json({ enabled: result.rows[0]?.value === 'true' });
-    } catch (err) {
-        res.status(500).json({ error: 'Erreur' });
-    }
-});
+    // ========== 9. OPTIONS EXTERNALISÉES ==========
+    startCleanup(pool, () => Object.values(users).map(u => u.pseudo), 60 * 1000);
 
-app.post('/api/admin/maintenance', isAdmin, async (req, res) => {
-    const { enabled } = req.body;
-    if (typeof enabled !== 'boolean') {
-        return res.status(400).json({ error: 'enabled doit être true/false' });
-    }
-    try {
-        await pool.query("UPDATE settings SET value = $1 WHERE key = 'maintenance_mode'", [enabled ? 'true' : 'false']);
-        res.json({ success: true, enabled });
-    } catch (err) {
-        res.status(500).json({ error: 'Erreur' });
-    }
-});
-
-// ========== 9. OPTIONS EXTERNALISÉES ==========
-startCleanup(pool, () => Object.values(users).map(u => u.pseudo), 60 * 1000);
-
-// ========== 10. DÉMARRAGE ==========
-const PORT = process.env.PORT || 3005;
-server.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
-})
+    // ========== 10. DÉMARRAGE ==========
+    const PORT = process.env.PORT || 3005;
+    server.listen(PORT, '0.0.0.0', () => {
+        console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+    })
 
 # FILE: /root/meetgay/options.js
 
