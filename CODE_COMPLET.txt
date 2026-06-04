@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-04 12:00:52
+# Généré le 2026-06-04 12:04:44
 
 # ========== FRONTEND - HTML ==========
 
@@ -3753,75 +3753,79 @@ const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
 // ========== 5. MIDDLEWARE ADMIN (JWT) - REMPLACE isAdminToken ==========
 function isAdmin(req, res, next) {
     const token = req.headers.authorization?.split(' ')[1];
-    
+
     if (!token) {
         return res.status(401).json({ error: 'Token manquant' });
     }
-    
+
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
-        
+
         // Vérifier que le token contient bien le rôle admin (soit role, soit type)
         if (decoded.role !== 'admin' && decoded.type !== 'admin') {
             return res.status(403).json({ error: 'Accès admin requis' });
         }
-        
+
         // Stocker les infos admin pour les routes suivantes (optionnel)
         req.admin = decoded;
         next();
-        
+
     } catch (err) {
         return res.status(403).json({ error: 'Token invalide ou expiré' });
     }
 }
 
 // Middleware de maintenance (public)
-app.use(async (req, res, next) => {
-    // Ignorer les fichiers statiques
-    if (req.path.match(/\.(css|js|png|jpg|ico|json)$/)) {
-        return next();
-    }
+// Ignorer TOUS les fichiers statiques (html, css, js, images)
+if (req.path.match(/\.(css|js|png|jpg|ico|json|html)$/)) {
+    return next();
+}
 
-    // Ignorer les routes admin et d'authentification
-    if (req.path === '/api/login' || req.path === '/api/admin/login' ||
-        req.path === '/admin.html' || req.path === '/admin-login.html') {
-        return next();
-    }
+// Ignorer également les pages principales sans extension
+if (req.path === '/' || req.path === '/index.html') {
+    return next();
+}
 
-    // Vérifier si l'utilisateur est admin (via token JWT)
-    let isAdminUser = false;
-    const authHeader = req.headers.authorization;
-    console.log('🔐 Auth header reçu:', authHeader ? 'Oui' : 'Non');
+// Ignorer les routes admin et d'authentification
+if (req.path === '/api/login' || req.path === '/api/admin/login' ||
+    req.path === '/admin.html' || req.path === '/admin-login.html') {
+    return next();
+}
 
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-        const token = authHeader.split(' ')[1];
-        try {
-            const decoded = jwt.verify(token, JWT_SECRET);
-            console.log('🔓 Token décodé:', decoded);
-            if (decoded.role === 'admin' || decoded.type === 'admin') {
-                isAdminUser = true;
-                console.log('✅ Admin reconnu');
-            }
-        } catch (err) {
-            console.log('❌ Erreur vérification token:', err.message);
-        }
-    }
+// Vérifier si l'utilisateur est admin (via token JWT)
+let isAdminUser = false;
+const authHeader = req.headers.authorization;
+console.log('🔐 Auth header reçu:', authHeader ? 'Oui' : 'Non');
 
-    if (isAdminUser) {
-        return next();  // Les admins voient le site normalement
-    }
-
-    // Vérifier le mode maintenance
+if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.split(' ')[1];
     try {
-        const result = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
-        const maintenance = result.rows[0]?.value === 'true';
-        if (maintenance) {
-            return res.status(503).sendFile(path.join(__dirname, 'public', 'maintenance.html'));
+        const decoded = jwt.verify(token, JWT_SECRET);
+        console.log('🔓 Token décodé:', decoded);
+        if (decoded.role === 'admin' || decoded.type === 'admin') {
+            isAdminUser = true;
+            console.log('✅ Admin reconnu');
         }
-        next();
     } catch (err) {
-        next();
+        console.log('❌ Erreur vérification token:', err.message);
     }
+}
+
+if (isAdminUser) {
+    return next();  // Les admins voient le site normalement
+}
+
+// Vérifier le mode maintenance
+try {
+    const result = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
+    const maintenance = result.rows[0]?.value === 'true';
+    if (maintenance) {
+        return res.status(503).sendFile(path.join(__dirname, 'public', 'maintenance.html'));
+    }
+    next();
+} catch (err) {
+    next();
+}
 });
 
 app.use(express.static('/var/www/meetgay'));
