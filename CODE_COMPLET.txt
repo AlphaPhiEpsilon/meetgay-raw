@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-05 12:28:24
+# Généré le 2026-06-05 12:30:37
 
 # ========== ARBORESCENCE DES FICHIERS ==========
 
@@ -1251,137 +1251,93 @@ app.use(compression({
 
 app.use(express.json());
 
-// ========== MIDDLEWARE DE TEST (à mettre au tout début) ==========
-app.use((req, res, next) => {
-    console.log(`🔍 TEST - ${req.method} ${req.path}`);
-    next();
-});
-
-// ========== 5. MIDDLEWARE DE MAINTENANCE ==========
-app.use(async (req, res, next) => {
-    console.log(`🚧 MAINTENANCE CHECK - ${req.path}`); // ← Ce log va nous dire si le middleware est atteint
-
-    // Exclure maintenance.html
-    if (req.path === '/maintenance.html') {
-        return next();
-    }
-
-    // Exclure les pages admin
-    if (req.path === '/admin-login.html' || req.path === '/admin.html' || req.path === '/api/admin/login') {
-        return next();
-    }
-
-    // Exclure l'API maintenance
-    if (req.path === '/api/admin/maintenance') {
-        return next();
-    }
-
-    // Vérifier admin connecté
-    let isAdminLoggedIn = false;
-    try {
-        const result = await pool.query(
-            `SELECT is_logged_in FROM admins WHERE is_logged_in = true LIMIT 1`
-        );
-        isAdminLoggedIn = result.rows.length > 0 && result.rows[0].is_logged_in === true;
-        console.log(`👑 Admin connecté: ${isAdminLoggedIn}`);
-    } catch (err) {
-        console.error('Erreur vérification admin:', err);
-    }
-
-    if (isAdminLoggedIn) {
-        console.log(`✅ ACCÈS ADMIN - ${req.path}`);
-        return next();
-    }
-
-    // Vérifier maintenance
-    try {
-        const result = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
-        let maintenance = false;
-
-        if (result.rows[0]) {
-            maintenance = (result.rows[0].value === 'true');
-            console.log(`🔧 Mode maintenance: ${maintenance} (valeur: ${result.rows[0].value})`);
-        }
-
-        if (maintenance) {
-            console.log(`🚫 BLOCKED - ${req.path} - Mode maintenance ON`);
-            res.setHeader('Cache-Control', 'no-store');
-            return res.status(503).sendFile(path.join(__dirname, 'public', 'maintenance.html'));
-        }
-    } catch (err) {
-        console.error('Erreur maintenance:', err);
-    }
-
-    next();
-});
-
-// Fichiers statiques
-app.use(express.static('/var/www/meetgay/public'));
-
 // JWT_SECRET pour les utilisateurs normaux
 const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
 
-// ========== 5. MIDDLEWARE DE MAINTENANCE ==========
+// ========== 5. MIDDLEWARE DE MAINTENANCE (VERSION DEBUG) ==========
 app.use(async (req, res, next) => {
-    // Exclure MAINTENANCE.HTML lui-même (sinon boucle infinie)
-    if (req.path === '/maintenance.html') {
+    console.log('='.repeat(60));
+    console.log(`[MAINTENANCE] Interception de: ${req.method} ${req.path}`);
+    console.log(`[MAINTENANCE] Heure: ${new Date().toISOString()}`);
+
+    // 1. Exclure les chemins spéciaux
+    const excludePaths = ['/maintenance.html', '/admin-login.html', '/admin.html'];
+    if (excludePaths.includes(req.path)) {
+        console.log(`[MAINTENANCE] Chemin exclu: ${req.path} -> PASS`);
         return next();
     }
 
-    // Exclure les pages admin et l'API login
-    if (req.path === '/admin-login.html' || req.path === '/admin.html' || req.path === '/api/admin/login') {
+    // 2. Exclure les APIs admin
+    if (req.path === '/api/admin/login' || req.path === '/api/admin/maintenance') {
+        console.log(`[MAINTENANCE] API admin exclue: ${req.path} -> PASS`);
         return next();
     }
 
-    // Exclure l'API maintenance (pour que le bouton toggle fonctionne)
-    if (req.path === '/api/admin/maintenance') {
-        return next();
-    }
-
-    // Vérifier si un admin est connecté
+    // 3. Vérifier si un admin est connecté
     let isAdminLoggedIn = false;
     try {
         const result = await pool.query(
             `SELECT is_logged_in FROM admins WHERE is_logged_in = true LIMIT 1`
         );
         isAdminLoggedIn = result.rows.length > 0 && result.rows[0].is_logged_in === true;
+        console.log(`[MAINTENANCE] Admin connecté: ${isAdminLoggedIn}`);
     } catch (err) {
-        console.error('Erreur vérification admin:', err);
+        console.error(`[MAINTENANCE] Erreur SQL admin:`, err.message);
     }
 
-    // Admin connecté → accès libre
     if (isAdminLoggedIn) {
+        console.log(`[MAINTENANCE] Admin détecté -> ACCÈS LIBRE pour ${req.path}`);
         return next();
     }
 
-    // Vérifier le mode maintenance
+    // 4. Lire le mode maintenance (avec gestion d'erreur détaillée)
+    let maintenance = false;
     try {
-        const result = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
-        let maintenance = false;
+        console.log(`[MAINTENANCE] Tentative de lecture de maintenance_mode...`);
+        const result = await pool.query(`SELECT value FROM settings WHERE key = 'maintenance_mode'`);
+        console.log(`[MAINTENANCE] Résultat SQL:`, result.rows);
 
-        if (result.rows[0]) {
-            const value = result.rows[0].value;
-            maintenance = (value === 'true');
-        }
-
-        if (maintenance) {
-            console.log(`🚧 Mode MAINTENANCE actif - Redirection de ${req.path} vers maintenance.html`);
-
-            // Pour les requêtes AJAX/API
-            if (req.path.startsWith('/api/')) {
-                return res.status(503).json({ error: 'Site en maintenance' });
-            }
-
-            // Pour les pages HTML
-            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
-            return res.status(503).sendFile(path.join(__dirname, 'public', 'maintenance.html'));
+        if (result.rows && result.rows[0]) {
+            const rawValue = result.rows[0].value;
+            console.log(`[MAINTENANCE] Valeur brute: "${rawValue}" (type: ${typeof rawValue})`);
+            maintenance = (rawValue === 'true');
+            console.log(`[MAINTENANCE] Maintenance interprété: ${maintenance}`);
+        } else {
+            console.log(`[MAINTENANCE] Aucune ligne trouvée pour maintenance_mode`);
         }
     } catch (err) {
-        console.error('Erreur lecture maintenance_mode:', err);
+        console.error(`[MAINTENANCE] ERREUR SQL détaillée:`, err);
+        console.error(`[MAINTENANCE] Stack:`, err.stack);
     }
 
+    // 5. Bloquer si maintenance activée
+    if (maintenance) {
+        console.log(`🚨🚨🚨 MAINTENANCE ACTIVE - BLOCAGE de ${req.path} 🚨🚨🚨`);
+        res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+        res.setHeader('X-Maintenance-Mode', 'active');
+
+        const maintenanceFile = path.join(__dirname, 'public', 'maintenance.html');
+        console.log(`[MAINTENANCE] Envoi du fichier: ${maintenanceFile}`);
+
+        // Vérifier si le fichier existe
+        const fs = require('fs');
+        if (fs.existsSync(maintenanceFile)) {
+            console.log(`[MAINTENANCE] ✅ Fichier maintenance.html trouvé`);
+            return res.status(503).sendFile(maintenanceFile);
+        } else {
+            console.error(`[MAINTENANCE] ❌ Fichier NON TROUVÉ: ${maintenanceFile}`);
+            return res.status(503).send('<h1>Site en maintenance</h1><p>Page temporairement indisponible</p>');
+        }
+    } else {
+        console.log(`[MAINTENANCE] ✅ ACCÈS AUTORISÉ pour ${req.path} (maintenance off)`);
+    }
+
+    console.log('='.repeat(60));
     next();
 });
+
+// Fichiers statiques - APRÈS le middleware
+app.use(express.static('/var/www/meetgay/public'));
 
 // Fichiers statiques
 app.use(express.static('/var/www/meetgay/public'));
