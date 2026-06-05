@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-05 10:30:31
+# Généré le 2026-06-05 10:35:21
 
 # ========== ARBORESCENCE DES FICHIERS ==========
 
@@ -1255,23 +1255,19 @@ app.use(express.json());
 const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
 
 // ========== 5. MIDDLEWARE DE MAINTENANCE ==========
+// ========== MIDDLEWARE DE MAINTENANCE ÉTENDU ==========
 app.use(async (req, res, next) => {
-    // Pages admin toujours accessibles
+    // 1. TOUJOURS autoriser les pages admin (pour pouvoir se reconnecter)
     if (req.path === '/admin-login.html' || req.path === '/admin.html') {
         return next();
     }
 
-    // Fichiers statiques
-    if (req.path.match(/\.(css|js|png|jpg|ico|json)$/)) {
+    // 2. TOUJOURS autoriser l'API de login admin
+    if (req.path === '/api/admin/login') {
         return next();
     }
 
-    // Routes API publiques
-    if (req.path === '/api/login' || req.path === '/api/admin/login') {
-        return next();
-    }
-
-    // Vérifier si un admin est connecté (dans la base)
+    // 3. Vérifier si un admin est connecté dans la base
     let isAdminLoggedIn = false;
     try {
         const result = await pool.query(
@@ -1282,22 +1278,22 @@ app.use(async (req, res, next) => {
         console.error('Erreur vérification admin:', err);
     }
 
-    // Si admin connecté → laisser passer TOUT
+    // 4. Si admin connecté → laisser passer TOUT (pages, CSS, JS, API, etc.)
     if (isAdminLoggedIn) {
         return next();
     }
 
-    // Sinon, vérifier mode maintenance pour les pages publiques
-    if (req.path === '/' || req.path === '/index.html' || req.path === '/login.html' || req.path === '/chat.html') {
-        try {
-            const result = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
-            const maintenance = result.rows[0]?.value === 'true';
-            if (maintenance) {
-                return res.status(503).sendFile(path.join(__dirname, 'public', 'maintenance.html'));
-            }
-        } catch (err) {
-            console.error('Erreur maintenance:', err);
+    // 5. Sinon, vérifier le mode maintenance pour TOUTES les routes
+    try {
+        const result = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
+        const maintenance = result.rows[0]?.value === 'true';
+
+        if (maintenance) {
+            // Bloque tout : HTML, CSS, JS, API, images...
+            return res.status(503).sendFile(path.join(__dirname, 'public', 'maintenance.html'));
         }
+    } catch (err) {
+        console.error('Erreur maintenance:', err);
     }
 
     next();
