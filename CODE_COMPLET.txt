@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-05 12:18:02
+# Généré le 2026-06-05 12:23:30
 
 # ========== ARBORESCENCE DES FICHIERS ==========
 
@@ -1256,13 +1256,18 @@ const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
 
 // ========== 5. MIDDLEWARE DE MAINTENANCE ==========
 app.use(async (req, res, next) => {
+    // Exclure MAINTENANCE.HTML lui-même (sinon boucle infinie)
+    if (req.path === '/maintenance.html') {
+        return next();
+    }
+
     // Exclure les pages admin et l'API login
     if (req.path === '/admin-login.html' || req.path === '/admin.html' || req.path === '/api/admin/login') {
         return next();
     }
 
-    // Exclure les fichiers statiques (CSS, JS, etc.)
-    if (req.path.match(/\.(css|js|png|jpg|jpeg|gif|ico|svg|json|webmanifest)$/)) {
+    // Exclure l'API maintenance (pour que le bouton toggle fonctionne)
+    if (req.path === '/api/admin/maintenance') {
         return next();
     }
 
@@ -1288,13 +1293,19 @@ app.use(async (req, res, next) => {
         let maintenance = false;
 
         if (result.rows[0]) {
-            // ✅ Correction : convertir explicitement la chaîne 'true' en booléen
             const value = result.rows[0].value;
-            maintenance = (value === 'true');  // ← SIMPLIFIÉ : plus besoin de value === true
+            maintenance = (value === 'true');
         }
 
         if (maintenance) {
-            console.log('🚧 Mode MAINTENANCE actif - Redirection vers maintenance.html');
+            console.log(`🚧 Mode MAINTENANCE actif - Redirection de ${req.path} vers maintenance.html`);
+
+            // Pour les requêtes AJAX/API
+            if (req.path.startsWith('/api/')) {
+                return res.status(503).json({ error: 'Site en maintenance' });
+            }
+
+            // Pour les pages HTML
             res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
             return res.status(503).sendFile(path.join(__dirname, 'public', 'maintenance.html'));
         }
@@ -1305,8 +1316,6 @@ app.use(async (req, res, next) => {
     next();
 });
 
-// Fichiers statiques
-app.use(express.static('/var/www/meetgay/public'));
 
 // ========== 6. ROUTES PUBLIQUES ==========
 app.post('/api/register', async (req, res) => {
@@ -1535,6 +1544,9 @@ app.post('/api/admin/ban-fingerprint', async (req, res) => {
         res.status(500).json({ error: 'Erreur serveur' });
     }
 });
+
+// Fichiers statiques
+app.use(express.static('/var/www/meetgay/public'));
 
 // ========== MAINTENANCE MODE ==========
 app.get('/api/admin/maintenance', async (req, res) => {
