@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-05 11:41:54
+# Généré le 2026-06-05 11:46:07
 
 # ========== ARBORESCENCE DES FICHIERS ==========
 
@@ -1255,21 +1255,48 @@ app.use(express.json());
 const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
 
 // ========== 5. MIDDLEWARE DE MAINTENANCE ==========
-// ========== 5. MIDDLEWARE DE MAINTENANCE (FORCÉ) ==========
 app.use(async (req, res, next) => {
-    // Pages admin toujours accessibles
-    if (req.path === '/admin-login.html' || req.path === '/admin.html') {
+    // 1. TOUJOURS autoriser les pages admin et l'API login
+    if (req.path === '/admin-login.html' || req.path === '/admin.html' || req.path === '/api/admin/login') {
         return next();
     }
 
-    // API login admin
-    if (req.path === '/api/admin/login') {
+    // 2. TOUJOURS autoriser les fichiers statiques (CSS, JS, images, etc.)
+    if (req.path.match(/\.(css|js|png|jpg|jpeg|gif|ico|svg|json|webmanifest)$/)) {
         return next();
     }
 
-    // Force le blocage pour TOUTES les routes (sauf admin)
-    console.log(`🔧 BLOCAGE FORCÉ pour: ${req.path}`);
-    return res.status(503).sendFile(path.join(__dirname, 'public', 'maintenance.html'));
+    // 3. Vérifier si un admin est connecté
+    let isAdminLoggedIn = false;
+    try {
+        const result = await pool.query(
+            `SELECT is_logged_in FROM admins WHERE is_logged_in = true LIMIT 1`
+        );
+        isAdminLoggedIn = result.rows.length > 0 && result.rows[0].is_logged_in === true;
+    } catch (err) {
+        console.error('Erreur vérification admin:', err);
+    }
+
+    // 4. Si admin connecté → laisser passer TOUT (y compris les routes)
+    if (isAdminLoggedIn) {
+        return next();
+    }
+
+    // 5. Vérifier le mode maintenance
+    try {
+        const result = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
+        const maintenance = result.rows[0]?.value === 'true';
+
+        if (maintenance) {
+            // Bloquer toutes les routes HTML et API (mais pas les fichiers statiques déjà autorisés)
+            return res.status(503).sendFile(path.join(__dirname, 'public', 'maintenance.html'));
+        }
+    } catch (err) {
+        console.error('Erreur lecture maintenance_mode:', err);
+    }
+
+    // 6. Sinon, tout est normal
+    next();
 });
 
 // Fichiers statiques
