@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-06 18:51:03
+# Généré le 2026-06-06 18:51:37
 
 ==============================================================================
 # SYSTEME DE CLONE DE FICHIER MIS A JOUR EN TEMPS REEL 
@@ -1828,7 +1828,7 @@
 431| 
 432| app.post('/api/admin/warn', async (req, res) => {
 433|     const { pseudo } = req.body;
-434|     await pool.query('UPDATE users SET last_seen = NOW() WHERE pseudo = $1', [userInfo.pseudo]);
+434|     await pool.query('UPDATE users SET warnings = COALESCE(warnings, 0) + 1 WHERE pseudo = $1', [pseudo]);
 435|     res.json({ success: true });
 436| });
 437| 
@@ -1952,66 +1952,65 @@
 555|             socket.emit('join error', { error: 'Pseudo requis pour rejoindre' });
 556|             return;
 557|         }
-558|         users[socket.id] = { ...userInfo, socketId: socket.id };
+558|         users[socket.id] = { ...userInfo, socketId: socket.id, connectedAt: Date.now() };
 559|         console.log(`✅ ${userInfo.pseudo} a rejoint (${socket.id})`);
 560| 
-561|         // Récupérer les utilisateurs triés par dernière connexion (dernier en haut)
-562|         const dbResult = await pool.query('SELECT pseudo, age, tendencies, gender, purpose, bio, location_code, location_name FROM users WHERE is_member = true ORDER BY last_seen DESC');
-563|         const usersList = dbResult.rows.map(u => ({
-564|             age: u.age,
-565|             tendencies: u.tendencies,
-566|             gender: u.gender,
-567|             purpose: u.purpose,
-568|             bio: u.bio,
-569|             locationCode: u.locationCode,
-570|             locationName: u.locationName,
-571|             socketId: u.socketId
-572|         }));
-573|         io.emit('update users', usersList);
-574|         socket.emit('join confirmed', { success: true, user: userInfo });
-575|     });
-576| 
-577|     socket.on('private message', (data) => {
-578|         const { toSocketId, message, fromPseudo } = data;
-579|         console.log(`💬 Message privé de ${fromPseudo} vers ${toSocketId}: ${message}`);
-580|         socket.to(toSocketId).emit('private message received', {
-581|             message: message,
-582|             fromPseudo: fromPseudo,
-583|             fromSocketId: socket.id
-584|         });
-585|         socket.emit('message sent confirmation', { message: message, to: toSocketId });
-586|     });
-587| 
-588|     socket.on('disconnect', () => {
-589|         const disconnectedUser = users[socket.id];
-590|         if (disconnectedUser) console.log(`❌ ${disconnectedUser.pseudo} s'est déconnecté (${socket.id})`);
-591|         else console.log(`❌ Déconnexion inconnue : ${socket.id}`);
-592|         delete users[socket.id];
-593|         const usersList = Object.values(users).map(u => ({
-594|             pseudo: u.pseudo,
-595|             age: u.age,
-596|             tendencies: u.tendencies,
-597|             gender: u.gender,
-598|             purpose: u.purpose,
-599|             bio: u.bio,
-600|             locationCode: u.locationCode,
-601|             locationName: u.locationName,
-602|             socketId: u.socketId
-603|         }));
-604|         io.emit('update users', usersList);
-605|     });
-606| 
-607|     socket.on('ping', () => socket.emit('pong'));
-608| });
-609| 
-610| // ========== 9. OPTIONS EXTERNALISÉES ==========
-611| //startCleanup(pool, () => Object.values(users).map(u => u.pseudo), 60 * 1000);
-612| 
-613| // ========== 10. DÉMARRAGE ==========
-614| const PORT = process.env.PORT || 3005;
-615| server.listen(PORT, '0.0.0.0', () => {
-616|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
-617| });
+561|         const usersList = Object.values(users).reverse().sort((a, b) => (b.connectedAt || 0) - (a.connectedAt || 0)).map(u => ({
+562|             pseudo: u.pseudo,
+563|             age: u.age,
+564|             tendencies: u.tendencies,
+565|             gender: u.gender,
+566|             purpose: u.purpose,
+567|             bio: u.bio,
+568|             locationCode: u.locationCode,
+569|             locationName: u.locationName,
+570|             socketId: u.socketId
+571|         }));
+572|         io.emit('update users', usersList);
+573|         socket.emit('join confirmed', { success: true, user: userInfo });
+574|     });
+575| 
+576|     socket.on('private message', (data) => {
+577|         const { toSocketId, message, fromPseudo } = data;
+578|         console.log(`💬 Message privé de ${fromPseudo} vers ${toSocketId}: ${message}`);
+579|         socket.to(toSocketId).emit('private message received', {
+580|             message: message,
+581|             fromPseudo: fromPseudo,
+582|             fromSocketId: socket.id
+583|         });
+584|         socket.emit('message sent confirmation', { message: message, to: toSocketId });
+585|     });
+586| 
+587|     socket.on('disconnect', () => {
+588|         const disconnectedUser = users[socket.id];
+589|         if (disconnectedUser) console.log(`❌ ${disconnectedUser.pseudo} s'est déconnecté (${socket.id})`);
+590|         else console.log(`❌ Déconnexion inconnue : ${socket.id}`);
+591|         delete users[socket.id];
+592|         const usersList = Object.values(users).map(u => ({
+593|             pseudo: u.pseudo,
+594|             age: u.age,
+595|             tendencies: u.tendencies,
+596|             gender: u.gender,
+597|             purpose: u.purpose,
+598|             bio: u.bio,
+599|             locationCode: u.locationCode,
+600|             locationName: u.locationName,
+601|             socketId: u.socketId
+602|         }));
+603|         io.emit('update users', usersList);
+604|     });
+605| 
+606|     socket.on('ping', () => socket.emit('pong'));
+607| });
+608| 
+609| // ========== 9. OPTIONS EXTERNALISÉES ==========
+610| //startCleanup(pool, () => Object.values(users).map(u => u.pseudo), 60 * 1000);
+611| 
+612| // ========== 10. DÉMARRAGE ==========
+613| const PORT = process.env.PORT || 3005;
+614| server.listen(PORT, '0.0.0.0', () => {
+615|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+616| });
 
 # FILE: /var/www/meetgay/options.js
 
