@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-06 02:52:44
+# Généré le 2026-06-06 09:33:03
 
 =============================================================================
 # INSTRUCTIONS OBLIGATOIRES POUR L'IA - À LIRE ABSOLUMENT
@@ -1540,336 +1540,365 @@
 248|     }
 249| });
 250| 
-251| // ========== CONTACT AVEC EMAIL ==========
-252| const nodemailer = require('nodemailer');
-253| 
-254| // Configuration SMTP OVH
-255| const transporter = nodemailer.createTransport({
-256|     host: process.env.SMTP_HOST,
-257|     port: parseInt(process.env.SMTP_PORT),
-258|     secure: process.env.SMTP_SECURE === 'true',
-259|     auth: {
-260|         user: process.env.SMTP_USER,
-261|         pass: process.env.SMTP_PASS
-262|     }
-263| });
-264| 
-265| app.post('/api/contact', async (req, res) => {
-266|     const { name, email, subject, message } = req.body;
-267| 
-268|     if (!name || !email || !message) {
-269|         return res.status(400).json({ error: 'Tous les champs sont requis' });
-270|     }
-271| 
-272|     try {
-273|         // Envoyer l'email
-274|         await transporter.sendMail({
-275|             from: `"${name}" <${process.env.SMTP_FROM}>`,
-276|             to: process.env.SMTP_FROM,
-277|             replyTo: email,
-278|             subject: `📬 Contact MeetGay - ${subject}`,
-279|             html: `
-280|                 <h2>Nouveau message de contact</h2>
-281|                 <p><strong>Nom :</strong> ${name}</p>
-282|                 <p><strong>Email :</strong> ${email}</p>
-283|                 <p><strong>Sujet :</strong> ${subject}</p>
-284|                 <p><strong>Message :</strong></p>
-285|                 <p>${message.replace(/\n/g, '<br>')}</p>
-286|             `
-287|         });
-288| 
-289|         console.log(`📧 Email envoyé de ${name} (${email})`);
-290|         res.json({ success: true, message: 'Message envoyé avec succès' });
-291| 
-292|     } catch (err) {
-293|         console.error('Erreur contact:', err);
-294|         res.status(500).json({ error: "Erreur d'envoi. Réessayez plus tard." });
-295|     }
-296| });
-297| 
-298| // ========== 7. ROUTES ADMIN ==========
-299| app.post('/api/admin/login', async (req, res) => {
-300|     const { username, password } = req.body;
-301| 
-302|     try {
-303|         const result = await pool.query(
-304|             `SELECT id, username, password_hash, is_active FROM admins WHERE username = $1`,
-305|             [username]
-306|         );
-307| 
-308|         if (result.rows.length === 0) {
-309|             return res.status(401).json({ success: false, error: 'Identifiants incorrects' });
-310|         }
-311| 
-312|         const admin = result.rows[0];
-313| 
-314|         if (!admin.is_active) {
-315|             return res.status(401).json({ success: false, error: 'Compte désactivé' });
-316|         }
+251| app.post('/api/messages/save', async (req, res) => {
+252|     const { from, to, message } = req.body;
+253|     try {
+254|         await pool.query(
+255|             'INSERT INTO messages (from_pseudo, to_pseudo, message) VALUES ($1, $2, $3)',
+256|             [from, to, message]
+257|         );
+258|         res.json({ success: true });
+259|     } catch (err) {
+260|         res.status(500).json({ error: err.message });
+261|     }
+262| });
+263| 
+264| app.get('/api/messages/:pseudo1/:pseudo2', async (req, res) => {
+265|     const { pseudo1, pseudo2 } = req.params;
+266|     try {
+267|         const result = await pool.query(
+268|             `SELECT * FROM messages 
+269|              WHERE (from_pseudo = $1 AND to_pseudo = $2) 
+270|                 OR (from_pseudo = $2 AND to_pseudo = $1)
+271|              ORDER BY created_at ASC`,
+272|             [pseudo1, pseudo2]
+273|         );
+274|         res.json(result.rows);
+275|     } catch (err) {
+276|         res.status(500).json({ error: err.message });
+277|     }
+278| });
+279| 
+280| // ========== CONTACT AVEC EMAIL ==========
+281| const nodemailer = require('nodemailer');
+282| 
+283| // Configuration SMTP OVH
+284| const transporter = nodemailer.createTransport({
+285|     host: process.env.SMTP_HOST,
+286|     port: parseInt(process.env.SMTP_PORT),
+287|     secure: process.env.SMTP_SECURE === 'true',
+288|     auth: {
+289|         user: process.env.SMTP_USER,
+290|         pass: process.env.SMTP_PASS
+291|     }
+292| });
+293| 
+294| app.post('/api/contact', async (req, res) => {
+295|     const { name, email, subject, message } = req.body;
+296| 
+297|     if (!name || !email || !message) {
+298|         return res.status(400).json({ error: 'Tous les champs sont requis' });
+299|     }
+300| 
+301|     try {
+302|         // Envoyer l'email
+303|         await transporter.sendMail({
+304|             from: `"${name}" <${process.env.SMTP_FROM}>`,
+305|             to: process.env.SMTP_FROM,
+306|             replyTo: email,
+307|             subject: `📬 Contact MeetGay - ${subject}`,
+308|             html: `
+309|                 <h2>Nouveau message de contact</h2>
+310|                 <p><strong>Nom :</strong> ${name}</p>
+311|                 <p><strong>Email :</strong> ${email}</p>
+312|                 <p><strong>Sujet :</strong> ${subject}</p>
+313|                 <p><strong>Message :</strong></p>
+314|                 <p>${message.replace(/\n/g, '<br>')}</p>
+315|             `
+316|         });
 317| 
-318|         const isValid = await bcrypt.compare(password, admin.password_hash);
-319| 
-320|         if (!isValid) {
-321|             return res.status(401).json({ success: false, error: 'Identifiants incorrects' });
-322|         }
-323| 
-324|         // CRÉER LA SESSION
-325|         req.session.adminId = admin.id;
-326|         req.session.isAdmin = true;
-327|         req.session.adminUsername = admin.username;
-328| 
-329|         // FORCER L'INSERTION DANS admin_sessions
-330|         try {
-331|             const sessionId = req.session.id;
-332|             console.log('📝 Tentative insertion - Session ID:', sessionId);
-333|             console.log('📝 Tentative insertion - Admin ID:', admin.id);
-334| 
-335|             const insertResult = await pool.query(
-336|                 `INSERT INTO admin_sessions (session_id, admin_id, is_logged_in, login_time, last_activity) 
-337|                  VALUES ($1, $2, true, NOW(), NOW())
-338|                  ON CONFLICT (session_id) DO UPDATE 
-339|                  SET is_logged_in = true, last_activity = NOW()
-340|                  RETURNING *`,
-341|                 [sessionId, admin.id]
-342|             );
-343| 
-344|             console.log('✅ SUCCÈS - Ligne insérée:', insertResult.rows[0]);
-345|         } catch (dbErr) {
-346|             console.error('❌ ÉCHEC INSERTION:', dbErr.message);
-347|             console.error('Détails:', dbErr);
-348|         }
-349| 
-350|         res.json({ success: true, admin: { id: admin.id, username: admin.username } });
-351| 
-352|     } catch (err) {
-353|         console.error('Erreur login admin:', err);
-354|         res.status(500).json({ success: false, error: 'Erreur serveur' });
-355|     }
-356| });
+318|         console.log(`📧 Email envoyé de ${name} (${email})`);
+319|         res.json({ success: true, message: 'Message envoyé avec succès' });
+320| 
+321|     } catch (err) {
+322|         console.error('Erreur contact:', err);
+323|         res.status(500).json({ error: "Erreur d'envoi. Réessayez plus tard." });
+324|     }
+325| });
+326| 
+327| // ========== 7. ROUTES ADMIN ==========
+328| app.post('/api/admin/login', async (req, res) => {
+329|     const { username, password } = req.body;
+330| 
+331|     try {
+332|         const result = await pool.query(
+333|             `SELECT id, username, password_hash, is_active FROM admins WHERE username = $1`,
+334|             [username]
+335|         );
+336| 
+337|         if (result.rows.length === 0) {
+338|             return res.status(401).json({ success: false, error: 'Identifiants incorrects' });
+339|         }
+340| 
+341|         const admin = result.rows[0];
+342| 
+343|         if (!admin.is_active) {
+344|             return res.status(401).json({ success: false, error: 'Compte désactivé' });
+345|         }
+346| 
+347|         const isValid = await bcrypt.compare(password, admin.password_hash);
+348| 
+349|         if (!isValid) {
+350|             return res.status(401).json({ success: false, error: 'Identifiants incorrects' });
+351|         }
+352| 
+353|         // CRÉER LA SESSION
+354|         req.session.adminId = admin.id;
+355|         req.session.isAdmin = true;
+356|         req.session.adminUsername = admin.username;
 357| 
-358| app.post('/api/admin/logout', async (req, res) => {
-359|     // Mettre à jour la table admin_sessions
-360|     if (req.session && req.session.id) {
-361|         try {
-362|             await pool.query(
-363|                 `UPDATE admin_sessions SET is_logged_in = false, logout_time = NOW() 
-364|                  WHERE session_id = $1`,
-365|                 [req.session.id]
-366|             );
-367|         } catch (err) {
-368|             console.error('Erreur mise à jour session:', err.message);
-369|         }
-370|     }
-371| 
-372|     req.session.destroy((err) => {
-373|         if (err) {
-374|             return res.status(500).json({ error: 'Erreur déconnexion' });
-375|         }
-376|         res.json({ success: true });
-377|     });
-378| });
-379| 
-380| app.get('/api/admin/users', async (req, res) => {
-381|     // Vérifier si un admin est connecté via la session
-382|     if (!req.session.isAdmin || !req.session.adminId) {
-383|         return res.status(403).json({ error: 'Accès non autorisé - Veuillez vous connecter' });
+358|         // FORCER L'INSERTION DANS admin_sessions
+359|         try {
+360|             const sessionId = req.session.id;
+361|             console.log('📝 Tentative insertion - Session ID:', sessionId);
+362|             console.log('📝 Tentative insertion - Admin ID:', admin.id);
+363| 
+364|             const insertResult = await pool.query(
+365|                 `INSERT INTO admin_sessions (session_id, admin_id, is_logged_in, login_time, last_activity) 
+366|                  VALUES ($1, $2, true, NOW(), NOW())
+367|                  ON CONFLICT (session_id) DO UPDATE 
+368|                  SET is_logged_in = true, last_activity = NOW()
+369|                  RETURNING *`,
+370|                 [sessionId, admin.id]
+371|             );
+372| 
+373|             console.log('✅ SUCCÈS - Ligne insérée:', insertResult.rows[0]);
+374|         } catch (dbErr) {
+375|             console.error('❌ ÉCHEC INSERTION:', dbErr.message);
+376|             console.error('Détails:', dbErr);
+377|         }
+378| 
+379|         res.json({ success: true, admin: { id: admin.id, username: admin.username } });
+380| 
+381|     } catch (err) {
+382|         console.error('Erreur login admin:', err);
+383|         res.status(500).json({ success: false, error: 'Erreur serveur' });
 384|     }
-385| 
-386|     // Si admin connecté, on exécute la requête
-387|     try {
-388|         const result = await pool.query('SELECT pseudo, age, role, warnings, is_banned, ban_reason FROM users ORDER BY id');
-389|         res.json(result.rows);
-390|     } catch (err) {
-391|         console.error("Erreur admin/users:", err.message);
-392|         res.status(500).json({ error: 'Erreur serveur', details: err.message });
-393|     }
-394| });
-395| 
-396| app.post('/api/admin/warn', async (req, res) => {
-397|     const { pseudo } = req.body;
-398|     await pool.query('UPDATE users SET warnings = COALESCE(warnings, 0) + 1 WHERE pseudo = $1', [pseudo]);
-399|     res.json({ success: true });
-400| });
-401| 
-402| app.post('/api/admin/ban', async (req, res) => {
-403|     const { pseudo, reason } = req.body;
-404|     try {
-405|         await pool.query('UPDATE users SET is_banned = true, ban_reason = $1 WHERE pseudo = $2', [reason, pseudo]);
-406|         disconnectBannedUser(io, users, pseudo, reason);
-407|         res.json({ success: true });
-408|     } catch (err) {
-409|         console.error(err);
-410|         res.status(500).json({ error: 'Erreur' });
-411|     }
-412| });
-413| 
-414| app.post('/api/admin/unban', async (req, res) => {
-415|     const { pseudo } = req.body;
-416|     await pool.query('UPDATE users SET is_banned = false, ban_reason = NULL WHERE pseudo = $1', [pseudo]);
-417|     res.json({ success: true });
-418| });
-419| 
-420| app.post('/api/admin/set-modo', async (req, res) => {
-421|     const { pseudo } = req.body;
-422|     await pool.query('UPDATE users SET role = $1 WHERE pseudo = $2', ['modo', pseudo]);
-423|     res.json({ success: true });
-424| });
-425| 
-426| app.post('/api/admin/set-admin', async (req, res) => {
-427|     const { pseudo } = req.body;
-428|     await pool.query('UPDATE users SET role = $1 WHERE pseudo = $2', ['admin', pseudo]);
-429|     res.json({ success: true });
-430| });
-431| 
-432| app.post('/api/admin/ban-fingerprint', async (req, res) => {
-433|     const { fingerprint, reason } = req.body;
-434|     if (!fingerprint) {
-435|         return res.status(400).json({ error: 'Empreinte requise' });
-436|     }
-437|     try {
-438|         const check = await pool.query(
-439|             `SELECT id FROM fingerprints WHERE fingerprint_hash = $1`,
-440|             [fingerprint]
-441|         );
-442|         if (check.rows.length === 0) {
-443|             await pool.query(
-444|                 `INSERT INTO fingerprints (fingerprint_hash, is_banned, ban_reason, banned_at) 
-445|                  VALUES ($1, true, $2, NOW())`,
-446|                 [fingerprint, reason || 'Banni par admin']
-447|             );
-448|         } else {
-449|             await pool.query(
-450|                 `UPDATE fingerprints SET is_banned = true, ban_reason = $1, banned_at = NOW() 
-451|                  WHERE fingerprint_hash = $2`,
-452|                 [reason || 'Banni par admin', fingerprint]
-453|             );
-454|         }
-455|         const usersToKick = await pool.query(
-456|             `SELECT u.pseudo FROM users u
-457|              JOIN fingerprints f ON u.fingerprint_id = f.id
-458|              WHERE f.fingerprint_hash = $1`,
-459|             [fingerprint]
-460|         );
-461|         for (const user of usersToKick.rows) {
-462|             disconnectBannedUser(io, users, user.pseudo, reason || 'Banni par admin');
-463|         }
-464|         res.json({ success: true, message: `Empreinte bannie, ${usersToKick.rowCount} utilisateur(s) déconnecté(s)` });
-465|     } catch (err) {
-466|         console.error('Erreur ban fingerprint:', err);
-467|         res.status(500).json({ error: 'Erreur serveur' });
-468|     }
-469| });
-470| 
-471| 
-472| // ========== MAINTENANCE MODE ==========
-473| app.get('/api/admin/maintenance', async (req, res) => {
-474|     try {
-475|         const result = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
-476|         res.json({ enabled: result.rows[0]?.value === 'true' });
-477|     } catch (err) {
-478|         res.status(500).json({ error: 'Erreur' });
-479|     }
-480| });
-481| 
-482| app.post('/api/admin/maintenance', async (req, res) => {
-483|     const { enabled } = req.body;
-484|     if (typeof enabled !== 'boolean') {
-485|         return res.status(400).json({ error: 'enabled doit être true/false' });
-486|     }
-487|     try {
-488|         await pool.query("UPDATE settings SET value = $1 WHERE key = 'maintenance_mode'", [enabled ? 'true' : 'false']);
-489|         res.json({ success: true, enabled });
-490|     } catch (err) {
-491|         res.status(500).json({ error: 'Erreur' });
-492|     }
-493| });
-494| 
-495| // Servir admin.html depuis protected/
-496| app.get('/admin.html', (req, res) => {
-497|     res.sendFile('/var/www/meetgay/protected/admin.html');
+385| });
+386| 
+387| app.post('/api/admin/logout', async (req, res) => {
+388|     // Mettre à jour la table admin_sessions
+389|     if (req.session && req.session.id) {
+390|         try {
+391|             await pool.query(
+392|                 `UPDATE admin_sessions SET is_logged_in = false, logout_time = NOW() 
+393|                  WHERE session_id = $1`,
+394|                 [req.session.id]
+395|             );
+396|         } catch (err) {
+397|             console.error('Erreur mise à jour session:', err.message);
+398|         }
+399|     }
+400| 
+401|     req.session.destroy((err) => {
+402|         if (err) {
+403|             return res.status(500).json({ error: 'Erreur déconnexion' });
+404|         }
+405|         res.json({ success: true });
+406|     });
+407| });
+408| 
+409| app.get('/api/admin/users', async (req, res) => {
+410|     // Vérifier si un admin est connecté via la session
+411|     if (!req.session.isAdmin || !req.session.adminId) {
+412|         return res.status(403).json({ error: 'Accès non autorisé - Veuillez vous connecter' });
+413|     }
+414| 
+415|     // Si admin connecté, on exécute la requête
+416|     try {
+417|         const result = await pool.query('SELECT pseudo, age, role, warnings, is_banned, ban_reason FROM users ORDER BY id');
+418|         res.json(result.rows);
+419|     } catch (err) {
+420|         console.error("Erreur admin/users:", err.message);
+421|         res.status(500).json({ error: 'Erreur serveur', details: err.message });
+422|     }
+423| });
+424| 
+425| app.post('/api/admin/warn', async (req, res) => {
+426|     const { pseudo } = req.body;
+427|     await pool.query('UPDATE users SET warnings = COALESCE(warnings, 0) + 1 WHERE pseudo = $1', [pseudo]);
+428|     res.json({ success: true });
+429| });
+430| 
+431| app.post('/api/admin/ban', async (req, res) => {
+432|     const { pseudo, reason } = req.body;
+433|     try {
+434|         await pool.query('UPDATE users SET is_banned = true, ban_reason = $1 WHERE pseudo = $2', [reason, pseudo]);
+435|         disconnectBannedUser(io, users, pseudo, reason);
+436|         res.json({ success: true });
+437|     } catch (err) {
+438|         console.error(err);
+439|         res.status(500).json({ error: 'Erreur' });
+440|     }
+441| });
+442| 
+443| app.post('/api/admin/unban', async (req, res) => {
+444|     const { pseudo } = req.body;
+445|     await pool.query('UPDATE users SET is_banned = false, ban_reason = NULL WHERE pseudo = $1', [pseudo]);
+446|     res.json({ success: true });
+447| });
+448| 
+449| app.post('/api/admin/set-modo', async (req, res) => {
+450|     const { pseudo } = req.body;
+451|     await pool.query('UPDATE users SET role = $1 WHERE pseudo = $2', ['modo', pseudo]);
+452|     res.json({ success: true });
+453| });
+454| 
+455| app.post('/api/admin/set-admin', async (req, res) => {
+456|     const { pseudo } = req.body;
+457|     await pool.query('UPDATE users SET role = $1 WHERE pseudo = $2', ['admin', pseudo]);
+458|     res.json({ success: true });
+459| });
+460| 
+461| app.post('/api/admin/ban-fingerprint', async (req, res) => {
+462|     const { fingerprint, reason } = req.body;
+463|     if (!fingerprint) {
+464|         return res.status(400).json({ error: 'Empreinte requise' });
+465|     }
+466|     try {
+467|         const check = await pool.query(
+468|             `SELECT id FROM fingerprints WHERE fingerprint_hash = $1`,
+469|             [fingerprint]
+470|         );
+471|         if (check.rows.length === 0) {
+472|             await pool.query(
+473|                 `INSERT INTO fingerprints (fingerprint_hash, is_banned, ban_reason, banned_at) 
+474|                  VALUES ($1, true, $2, NOW())`,
+475|                 [fingerprint, reason || 'Banni par admin']
+476|             );
+477|         } else {
+478|             await pool.query(
+479|                 `UPDATE fingerprints SET is_banned = true, ban_reason = $1, banned_at = NOW() 
+480|                  WHERE fingerprint_hash = $2`,
+481|                 [reason || 'Banni par admin', fingerprint]
+482|             );
+483|         }
+484|         const usersToKick = await pool.query(
+485|             `SELECT u.pseudo FROM users u
+486|              JOIN fingerprints f ON u.fingerprint_id = f.id
+487|              WHERE f.fingerprint_hash = $1`,
+488|             [fingerprint]
+489|         );
+490|         for (const user of usersToKick.rows) {
+491|             disconnectBannedUser(io, users, user.pseudo, reason || 'Banni par admin');
+492|         }
+493|         res.json({ success: true, message: `Empreinte bannie, ${usersToKick.rowCount} utilisateur(s) déconnecté(s)` });
+494|     } catch (err) {
+495|         console.error('Erreur ban fingerprint:', err);
+496|         res.status(500).json({ error: 'Erreur serveur' });
+497|     }
 498| });
 499| 
-500| // ========== 8. SOCKET.IO ==========
-501| const io = socketIo(server, {
-502|     cors: {
-503|         origin: "*",
-504|         methods: ["GET", "POST"],
-505|         credentials: true,
-506|         allowedHeaders: ["*"]
-507|     },
-508|     transports: ['websocket', 'polling'],
-509|     allowEIO3: true,
-510|     pingTimeout: 60000,
-511|     pingInterval: 25000
-512| });
-513| 
-514| io.on('connection', (socket) => {
-515|     console.log('🔌 Nouvelle connexion :', socket.id);
-516| 
-517|     socket.on('user join', (userInfo) => {
-518|         if (!userInfo || !userInfo.pseudo) {
-519|             socket.emit('join error', { error: 'Pseudo requis pour rejoindre' });
-520|             return;
-521|         }
-522|         users[socket.id] = { ...userInfo, socketId: socket.id };
-523|         console.log(`✅ ${userInfo.pseudo} a rejoint (${socket.id})`);
-524| 
-525|         const usersList = Object.values(users).reverse().map(u => ({
-526|             pseudo: u.pseudo,
-527|             age: u.age,
-528|             tendencies: u.tendencies,
-529|             gender: u.gender,
-530|             purpose: u.purpose,
-531|             bio: u.bio,
-532|             locationCode: u.locationCode,
-533|             locationName: u.locationName,
-534|             socketId: u.socketId
-535|         }));
-536|         io.emit('update users', usersList);
-537|         socket.emit('join confirmed', { success: true, user: userInfo });
-538|     });
-539| 
-540|     socket.on('private message', (data) => {
-541|         const { toSocketId, message, fromPseudo } = data;
-542|         console.log(`💬 Message privé de ${fromPseudo} vers ${toSocketId}: ${message}`);
-543|         socket.to(toSocketId).emit('private message received', {
-544|             message: message,
-545|             fromPseudo: fromPseudo,
-546|             fromSocketId: socket.id
-547|         });
-548|         socket.emit('message sent confirmation', { message: message, to: toSocketId });
-549|     });
-550| 
-551|     socket.on('disconnect', () => {
-552|         const disconnectedUser = users[socket.id];
-553|         if (disconnectedUser) console.log(`❌ ${disconnectedUser.pseudo} s'est déconnecté (${socket.id})`);
-554|         else console.log(`❌ Déconnexion inconnue : ${socket.id}`);
-555|         delete users[socket.id];
-556|         const usersList = Object.values(users).map(u => ({
-557|             pseudo: u.pseudo,
-558|             age: u.age,
-559|             tendencies: u.tendencies,
-560|             gender: u.gender,
-561|             purpose: u.purpose,
-562|             bio: u.bio,
-563|             locationCode: u.locationCode,
-564|             locationName: u.locationName,
-565|             socketId: u.socketId
-566|         }));
-567|         io.emit('update users', usersList);
-568|     });
-569| 
-570|     socket.on('ping', () => socket.emit('pong'));
-571| });
-572| 
-573| // ========== 9. OPTIONS EXTERNALISÉES ==========
-574| //startCleanup(pool, () => Object.values(users).map(u => u.pseudo), 60 * 1000);
-575| 
-576| // ========== 10. DÉMARRAGE ==========
-577| const PORT = process.env.PORT || 3005;
-578| server.listen(PORT, '0.0.0.0', () => {
-579|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
-580| });
+500| 
+501| // ========== MAINTENANCE MODE ==========
+502| app.get('/api/admin/maintenance', async (req, res) => {
+503|     try {
+504|         const result = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
+505|         res.json({ enabled: result.rows[0]?.value === 'true' });
+506|     } catch (err) {
+507|         res.status(500).json({ error: 'Erreur' });
+508|     }
+509| });
+510| 
+511| app.post('/api/admin/maintenance', async (req, res) => {
+512|     const { enabled } = req.body;
+513|     if (typeof enabled !== 'boolean') {
+514|         return res.status(400).json({ error: 'enabled doit être true/false' });
+515|     }
+516|     try {
+517|         await pool.query("UPDATE settings SET value = $1 WHERE key = 'maintenance_mode'", [enabled ? 'true' : 'false']);
+518|         res.json({ success: true, enabled });
+519|     } catch (err) {
+520|         res.status(500).json({ error: 'Erreur' });
+521|     }
+522| });
+523| 
+524| // Servir admin.html depuis protected/
+525| app.get('/admin.html', (req, res) => {
+526|     res.sendFile('/var/www/meetgay/protected/admin.html');
+527| });
+528| 
+529| // ========== 8. SOCKET.IO ==========
+530| const io = socketIo(server, {
+531|     cors: {
+532|         origin: "*",
+533|         methods: ["GET", "POST"],
+534|         credentials: true,
+535|         allowedHeaders: ["*"]
+536|     },
+537|     transports: ['websocket', 'polling'],
+538|     allowEIO3: true,
+539|     pingTimeout: 60000,
+540|     pingInterval: 25000
+541| });
+542| 
+543| io.on('connection', (socket) => {
+544|     console.log('🔌 Nouvelle connexion :', socket.id);
+545| 
+546|     socket.on('user join', (userInfo) => {
+547|         if (!userInfo || !userInfo.pseudo) {
+548|             socket.emit('join error', { error: 'Pseudo requis pour rejoindre' });
+549|             return;
+550|         }
+551|         users[socket.id] = { ...userInfo, socketId: socket.id };
+552|         console.log(`✅ ${userInfo.pseudo} a rejoint (${socket.id})`);
+553| 
+554|         const usersList = Object.values(users).reverse().map(u => ({
+555|             pseudo: u.pseudo,
+556|             age: u.age,
+557|             tendencies: u.tendencies,
+558|             gender: u.gender,
+559|             purpose: u.purpose,
+560|             bio: u.bio,
+561|             locationCode: u.locationCode,
+562|             locationName: u.locationName,
+563|             socketId: u.socketId
+564|         }));
+565|         io.emit('update users', usersList);
+566|         socket.emit('join confirmed', { success: true, user: userInfo });
+567|     });
+568| 
+569|     socket.on('private message', (data) => {
+570|         const { toSocketId, message, fromPseudo } = data;
+571|         console.log(`💬 Message privé de ${fromPseudo} vers ${toSocketId}: ${message}`);
+572|         socket.to(toSocketId).emit('private message received', {
+573|             message: message,
+574|             fromPseudo: fromPseudo,
+575|             fromSocketId: socket.id
+576|         });
+577|         socket.emit('message sent confirmation', { message: message, to: toSocketId });
+578|     });
+579| 
+580|     socket.on('disconnect', () => {
+581|         const disconnectedUser = users[socket.id];
+582|         if (disconnectedUser) console.log(`❌ ${disconnectedUser.pseudo} s'est déconnecté (${socket.id})`);
+583|         else console.log(`❌ Déconnexion inconnue : ${socket.id}`);
+584|         delete users[socket.id];
+585|         const usersList = Object.values(users).map(u => ({
+586|             pseudo: u.pseudo,
+587|             age: u.age,
+588|             tendencies: u.tendencies,
+589|             gender: u.gender,
+590|             purpose: u.purpose,
+591|             bio: u.bio,
+592|             locationCode: u.locationCode,
+593|             locationName: u.locationName,
+594|             socketId: u.socketId
+595|         }));
+596|         io.emit('update users', usersList);
+597|     });
+598| 
+599|     socket.on('ping', () => socket.emit('pong'));
+600| });
+601| 
+602| // ========== 9. OPTIONS EXTERNALISÉES ==========
+603| //startCleanup(pool, () => Object.values(users).map(u => u.pseudo), 60 * 1000);
+604| 
+605| // ========== 10. DÉMARRAGE ==========
+606| const PORT = process.env.PORT || 3005;
+607| server.listen(PORT, '0.0.0.0', () => {
+608|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+609| });
 
 # FILE: /var/www/meetgay/options.js
 
