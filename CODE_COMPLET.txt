@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-07 13:17:03
+# Généré le 2026-06-07 13:23:42
 
 ==============================================================================
 # SYSTEME DE CLONE DE FICHIER MIS A JOUR EN TEMPS REEL 
@@ -2090,34 +2090,97 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 4| 
 5| module.exports = { startCleanup };
 6| // ============================================================
-7| // options.js - Tâches annexes (nettoyage, futurs helpers)
+7| // options.js - Tâches annexes (nettoyage, surveillance inactivité)
 8| // ============================================================
-9| // 1. NETTOYAGE PÉRIODIQUE DES VISITEURS DÉCONNECTÉS
-10| // ============================================================
-11| 
-12| function startCleanup(pool, getOnlineUsers, intervalMs = 60 * 1000) {
-13|     console.log(`🧹 Nettoyage programmé toutes les ${intervalMs / 1000} secondes`);
-14|     setInterval(async () => {
-15|         try {
-16|             const onlinePseudos = getOnlineUsers();
-17|             if (onlinePseudos.length > 0) {
-18|                 const placeholders = onlinePseudos.map((_, i) => `$${i + 1}`).join(',');
-19|                 const result = await pool.query(
-20|                     `DELETE FROM users WHERE pseudo NOT IN (${placeholders}) AND (is_member = false OR is_member IS NULL)`,
-21|                     onlinePseudos
-22|                 );
-23|                 if (result.rowCount > 0) console.log(`🧹 ${result.rowCount} visiteur(s) supprimé(s)`);
-24|             } else {
-25|                 const result = await pool.query("DELETE FROM users WHERE is_member = false OR is_member IS NULL");
-26|                 if (result.rowCount > 0) console.log(`🧹 Nettoyage complet: ${result.rowCount} visiteur(s) supprimé(s)`);
-27|             }
-28|         } catch (err) {
-29|             console.error('❌ Erreur nettoyage:', err.message);
-30|         }
-31|     }, intervalMs);
-32| }
-33| 
-34| module.exports = { startCleanup };
+9| 
+10| // 1. NETTOYAGE PÉRIODIQUE DES VISITEURS DÉCONNECTÉS
+11| function startCleanup(pool, getOnlineUsers, intervalMs = 60 * 1000) {
+12|     console.log(`🧹 Nettoyage programmé toutes les ${intervalMs / 1000} secondes`);
+13|     setInterval(async () => {
+14|         try {
+15|             const onlinePseudos = getOnlineUsers();
+16|             if (onlinePseudos.length > 0) {
+17|                 const placeholders = onlinePseudos.map((_, i) => `$${i + 1}`).join(',');
+18|                 const result = await pool.query(
+19|                     `DELETE FROM users WHERE pseudo NOT IN (${placeholders}) AND (is_member = false OR is_member IS NULL)`,
+20|                     onlinePseudos
+21|                 );
+22|                 if (result.rowCount > 0) console.log(`🧹 ${result.rowCount} visiteur(s) supprimé(s)`);
+23|             } else {
+24|                 const result = await pool.query("DELETE FROM users WHERE is_member = false OR is_member IS NULL");
+25|                 if (result.rowCount > 0) console.log(`🧹 Nettoyage complet: ${result.rowCount} visiteur(s) supprimé(s)`);
+26|             }
+27|         } catch (err) {
+28|             console.error('❌ Erreur nettoyage:', err.message);
+29|         }
+30|     }, intervalMs);
+31| }
+32| 
+33| // 2. SURVEILLANCE D’INACTIVITÉ (déconnexion automatique après X minutes sans activité)
+34| function startInactivityWatch(io, users, inactivityMinutes = 5, checkIntervalMs = 60 * 1000) {
+35|     console.log(`⏱️ Surveillance inactivité : déconnexion après ${inactivityMinutes} minutes sans activité`);
+36| 
+37|     // Stocker la dernière activité de chaque socket (timestamp)
+38|     const lastActivity = new Map();
+39| 
+40|     // Mettre à jour l’activité pour une socket
+41|     function updateActivity(socketId) {
+42|         lastActivity.set(socketId, Date.now());
+43|     }
+44| 
+45|     // Vérifier périodiquement
+46|     setInterval(() => {
+47|         const now = Date.now();
+48|         const timeoutMs = inactivityMinutes * 60 * 1000;
+49| 
+50|         Object.keys(users).forEach(socketId => {
+51|             const last = lastActivity.get(socketId);
+52|             if (last && (now - last) > timeoutMs) {
+53|                 const user = users[socketId];
+54|                 if (user) {
+55|                     console.log(`⏰ ${user.pseudo} déconnecté pour inactivité (${inactivityMinutes} min)`);
+56| 
+57|                     // Envoyer un message à l’utilisateur
+58|                     const socket = io.sockets.sockets.get(socketId);
+59|                     if (socket) {
+60|                         socket.emit('force logout', {
+61|                             reason: `Inactivité prolongée (${inactivityMinutes} minutes sans activité). Vous avez été déconnecté.`
+62|                         });
+63|                         socket.disconnect(true);
+64|                     }
+65| 
+66|                     // Supprimer l’utilisateur de la base
+67|                     pool.query('DELETE FROM users WHERE pseudo = $1', [user.pseudo]).catch(err => {
+68|                         console.error('Erreur suppression inactif:', err.message);
+69|                     });
+70| 
+71|                     // Supprimer de la mémoire
+72|                     delete users[socketId];
+73|                     lastActivity.delete(socketId);
+74| 
+75|                     // Mettre à jour la liste des connectés
+76|                     const usersList = Object.values(users).sort((a, b) => (b.firstConnectedAt || 0) - (a.firstConnectedAt || 0)).map(u => ({
+77|                         pseudo: u.pseudo,
+78|                         age: u.age,
+79|                         tendencies: u.tendencies,
+80|                         gender: u.gender,
+81|                         purpose: u.purpose,
+82|                         bio: u.bio,
+83|                         locationCode: u.locationCode,
+84|                         locationName: u.locationName,
+85|                         socketId: u.socketId
+86|                     }));
+87|                     io.emit('update users', usersList);
+88|                 }
+89|             }
+90|         });
+91|     }, checkIntervalMs);
+92| 
+93|     // Retourner les fonctions pour les utiliser dans server.js
+94|     return { updateActivity };
+95| }
+96| 
+97| module.exports = { startCleanup, startInactivityWatch };
 
 # FILE: /var/www/meetgay/ecosystem.config.js
 
