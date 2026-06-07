@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-07 20:07:26
+# Généré le 2026-06-07 20:13:12
 
 ==============================================================================
 # SYSTEME DE CLONE DE FICHIER MIS A JOUR EN TEMPS REEL 
@@ -2114,71 +2114,65 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 30|     }, intervalMs);
 31| }
 32| 
-33| // 2. SURVEILLANCE D’INACTIVITÉ (déconnexion automatique après X minutes sans activité)
-34| function startInactivityWatch(io, users, inactivityMinutes = 5, checkIntervalMs = 60 * 1000) {
+33| // 2. SURVEILLANCE D’INACTIVITÉ (déconnexion automatique + suppression base)
+34| function startInactivityWatch(io, users, pool, inactivityMinutes = 5, checkIntervalMs = 60 * 1000) {
 35|     console.log(`⏱️ Surveillance inactivité : déconnexion après ${inactivityMinutes} minutes sans activité`);
 36| 
-37|     // Stocker la dernière activité de chaque socket (timestamp)
-38|     const lastActivity = new Map();
-39| 
-40|     // Mettre à jour l’activité pour une socket
-41|     function updateActivity(socketId) {
-42|         lastActivity.set(socketId, Date.now());
-43|     }
-44| 
-45|     // Vérifier périodiquement
-46|     setInterval(() => {
-47|         const now = Date.now();
-48|         const timeoutMs = inactivityMinutes * 60 * 1000;
-49| 
-50|         Object.keys(users).forEach(socketId => {
-51|             const last = lastActivity.get(socketId);
-52|             if (last && (now - last) > timeoutMs) {
-53|                 const user = users[socketId];
-54|                 if (user) {
-55|                     console.log(`⏰ ${user.pseudo} déconnecté pour inactivité (${inactivityMinutes} min)`);
-56| 
-57|                     // Envoyer un message à l’utilisateur
-58|                     const socket = io.sockets.sockets.get(socketId);
-59|                     if (socket) {
-60|                         socket.emit('force logout', {
-61|                             reason: `Inactivité prolongée (${inactivityMinutes} minutes sans activité). Vous avez été déconnecté.`
-62|                         });
-63|                         socket.disconnect(true);
-64|                     }
-65| 
-66|                     // Supprimer l’utilisateur de la base
-67|                     pool.query('DELETE FROM users WHERE pseudo = $1', [user.pseudo]).catch(err => {
-68|                         console.error('Erreur suppression inactif:', err.message);
-69|                     });
+37|     const lastActivity = new Map();
+38| 
+39|     function updateActivity(socketId) {
+40|         lastActivity.set(socketId, Date.now());
+41|     }
+42| 
+43|     setInterval(async () => {
+44|         const now = Date.now();
+45|         const timeoutMs = inactivityMinutes * 60 * 1000;
+46| 
+47|         for (const [socketId, user] of Object.entries(users)) {
+48|             const last = lastActivity.get(socketId);
+49|             if (last && (now - last) > timeoutMs) {
+50|                 console.log(`⏰ ${user.pseudo} déconnecté pour inactivité (${inactivityMinutes} min)`);
+51| 
+52|                 const socket = io.sockets.sockets.get(socketId);
+53|                 if (socket) {
+54|                     socket.emit('force logout', {
+55|                         reason: `Inactivité prolongée (${inactivityMinutes} minutes sans activité). Vous avez été déconnecté.`
+56|                     });
+57|                     socket.disconnect(true);
+58|                 }
+59| 
+60|                 // Supprimer de la base
+61|                 try {
+62|                     await pool.query('DELETE FROM users WHERE pseudo = $1', [user.pseudo]);
+63|                     console.log(`🗑️ ${user.pseudo} supprimé de la base pour inactivité`);
+64|                 } catch (err) {
+65|                     console.error('Erreur suppression inactif:', err.message);
+66|                 }
+67| 
+68|                 delete users[socketId];
+69|                 lastActivity.delete(socketId);
 70| 
-71|                     // Supprimer de la mémoire
-72|                     delete users[socketId];
-73|                     lastActivity.delete(socketId);
-74| 
-75|                     // Mettre à jour la liste des connectés
-76|                     const usersList = Object.values(users).sort((a, b) => (b.firstConnectedAt || 0) - (a.firstConnectedAt || 0)).map(u => ({
-77|                         pseudo: u.pseudo,
-78|                         age: u.age,
-79|                         tendencies: u.tendencies,
-80|                         gender: u.gender,
-81|                         purpose: u.purpose,
-82|                         bio: u.bio,
-83|                         locationCode: u.locationCode,
-84|                         locationName: u.locationName,
-85|                         socketId: u.socketId
-86|                     }));
-87|                     io.emit('update users', usersList);
-88|                 }
-89|             }
-90|         });
-91|     }, checkIntervalMs);
-92| 
-93|     // Retourner les fonctions pour les utiliser dans server.js
-94|     return { updateActivity };
-95| }
-96| 
-97| module.exports = { startCleanup, startInactivityWatch };
+71|                 // Mettre à jour la liste des connectés
+72|                 const usersList = Object.values(users).sort((a, b) => (b.firstConnectedAt || 0) - (a.firstConnectedAt || 0)).map(u => ({
+73|                     pseudo: u.pseudo,
+74|                     age: u.age,
+75|                     tendencies: u.tendencies,
+76|                     gender: u.gender,
+77|                     purpose: u.purpose,
+78|                     bio: u.bio,
+79|                     locationCode: u.locationCode,
+80|                     locationName: u.locationName,
+81|                     socketId: u.socketId
+82|                 }));
+83|                 io.emit('update users', usersList);
+84|             }
+85|         }
+86|     }, checkIntervalMs);
+87| 
+88|     return { updateActivity };
+89| }
+90| 
+91| module.exports = { startCleanup, startInactivityWatch };
 
 # FILE: /var/www/meetgay/ecosystem.config.js
 
