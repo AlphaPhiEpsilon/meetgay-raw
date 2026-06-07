@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-07 11:52:04
+# Généré le 2026-06-07 11:52:56
 
 ==============================================================================
 # SYSTEME DE CLONE DE FICHIER MIS A JOUR EN TEMPS REEL 
@@ -1953,98 +1953,68 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 550|     pingInterval: 25000
 551| });
 552| 
-553| socket.on('user join', async (userInfo) => {
-554|     if (!userInfo || !userInfo.pseudo) {
-555|         socket.emit('join error', { error: 'Pseudo requis pour rejoindre' });
-556|         return;
-557|     }
-558| 
-559|     // Récupérer la date de création depuis la base
-560|     let createdAt = Date.now();
-561|     try {
-562|         const result = await pool.query(
-563|             `SELECT created_at FROM users WHERE pseudo = $1`,
-564|             [userInfo.pseudo]
-565|         );
-566|         if (result.rows.length > 0 && result.rows[0].created_at) {
-567|             createdAt = new Date(result.rows[0].created_at).getTime();
-568|         }
-569|     } catch (err) {
-570|         console.error('Erreur récupération created_at:', err.message);
-571|     }
-572| 
-573|     // Nettoyer les anciennes sockets du même pseudo
-574|     Object.keys(users).forEach((id) => {
-575|         if (users[id].pseudo === userInfo.pseudo) {
-576|             console.log(`🧹 Suppression de l'ancienne socket ${id} de ${userInfo.pseudo}`);
-577|             delete users[id];
-578|         }
-579|     });
-580| 
-581|     // Conserver la date de première connexion (si elle existe déjà)
-582|     const existingUserData = Object.values(users).find(u => u.pseudo === userInfo.pseudo);
-583|     const connectedAt = existingUserData ? existingUserData.connectedAt : Date.now();
-584| 
-585|     users[socket.id] = { ...userInfo, socketId: socket.id, connectedAt: connectedAt, createdAt: createdAt };
-586|     console.log(`✅ ${userInfo.pseudo} a rejoint (${socket.id})`);
+553| io.on('connection', (socket) => {
+554|     console.log('🔌 Nouvelle connexion :', socket.id);
+555| 
+556|     socket.on('user join', async (userInfo) => {
+557|         if (!userInfo || !userInfo.pseudo) {
+558|             socket.emit('join error', { error: 'Pseudo requis pour rejoindre' });
+559|             return;
+560|         }
+561| 
+562|         // Récupérer la date de création depuis la base
+563|         let createdAt = Date.now();
+564|         try {
+565|             const result = await pool.query(
+566|                 `SELECT created_at FROM users WHERE pseudo = $1`,
+567|                 [userInfo.pseudo]
+568|             );
+569|             if (result.rows.length > 0 && result.rows[0].created_at) {
+570|                 createdAt = new Date(result.rows[0].created_at).getTime();
+571|             }
+572|         } catch (err) {
+573|             console.error('Erreur récupération created_at:', err.message);
+574|         }
+575| 
+576|         // Nettoyer les anciennes sockets du même pseudo
+577|         Object.keys(users).forEach((id) => {
+578|             if (users[id].pseudo === userInfo.pseudo) {
+579|                 console.log(`🧹 Suppression de l'ancienne socket ${id} de ${userInfo.pseudo}`);
+580|                 delete users[id];
+581|             }
+582|         });
+583| 
+584|         // Conserver la date de première connexion (si elle existe déjà)
+585|         const existingUserData = Object.values(users).find(u => u.pseudo === userInfo.pseudo);
+586|         const connectedAt = existingUserData ? existingUserData.connectedAt : Date.now();
 587| 
-588|     // Tri par date de première connexion (plus ancien en bas, plus récent en haut)
-589|     const usersList = Object.values(users).sort((a, b) => (b.connectedAt || 0) - (a.connectedAt || 0)).map(u => ({
-590|         pseudo: u.pseudo,
-591|         age: u.age,
-592|         tendencies: u.tendencies,
-593|         gender: u.gender,
-594|         purpose: u.purpose,
-595|         bio: u.bio,
-596|         locationCode: u.locationCode,
-597|         locationName: u.locationName,
-598|         socketId: u.socketId
-599|     }));
-600|     io.emit('update users', usersList);
-601|     socket.emit('join confirmed', { success: true, user: userInfo });
-602| });
-603| 
-604| socket.on('private message', (data) => {
-605|     const { toSocketId, message, fromPseudo } = data;
-606|     console.log(`💬 Message privé de ${fromPseudo} vers ${toSocketId}: ${message}`);
-607|     socket.to(toSocketId).emit('private message received', {
-608|         message: message,
-609|         fromPseudo: fromPseudo,
-610|         fromSocketId: socket.id
-611|     });
-612|     socket.emit('message sent confirmation', { message: message, to: toSocketId });
-613| });
-614| 
-615| socket.on('disconnect', () => {
-616|     const disconnectedUser = users[socket.id];
-617|     if (disconnectedUser) console.log(`❌ ${disconnectedUser.pseudo} s'est déconnecté (${socket.id})`);
-618|     else console.log(`❌ Déconnexion inconnue : ${socket.id}`);
-619|     delete users[socket.id];
-620|     const usersList = Object.values(users).map(u => ({
-621|         pseudo: u.pseudo,
-622|         age: u.age,
-623|         tendencies: u.tendencies,
-624|         gender: u.gender,
-625|         purpose: u.purpose,
-626|         bio: u.bio,
-627|         locationCode: u.locationCode,
-628|         locationName: u.locationName,
-629|         socketId: u.socketId
-630|     }));
-631|     io.emit('update users', usersList);
-632| });
-633| 
-634| socket.on('ping', () => socket.emit('pong'));
-635| });
-636| 
-637| // ========== 9. OPTIONS EXTERNALISÉES ==========
-638| //startCleanup(pool, () => Object.values(users).map(u => u.pseudo), 60 * 1000);
-639| 
-640| // ========== 10. DÉMARRAGE ==========
-641| const PORT = process.env.PORT || 3005;
-642| server.listen(PORT, '0.0.0.0', () => {
-643|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
-644| });
+588|         users[socket.id] = { ...userInfo, socketId: socket.id, connectedAt: connectedAt, createdAt: createdAt };
+589|         console.log(`✅ ${userInfo.pseudo} a rejoint (${socket.id})`);
+590| 
+591|         // Tri par date de première connexion (plus ancien en bas, plus récent en haut)
+592|         const usersList = Object.values(users).sort((a, b) => (b.connectedAt || 0) - (a.connectedAt || 0)).map(u => ({
+593|             pseudo: u.pseudo,
+594|             age: u.age,
+595|             tendencies: u.tendencies,
+596|             gender: u.gender,
+597|             purpose: u.purpose,
+598|             bio: u.bio,
+599|             locationCode: u.locationCode,
+600|             locationName: u.locationName,
+601|             socketId: u.socketId
+602|         }));
+603|         io.emit('update users', usersList);
+604|         socket.emit('join confirmed', { success: true, user: userInfo });
+605|     });
+606| 
+607|     // ========== 9. OPTIONS EXTERNALISÉES ==========
+608|     //startCleanup(pool, () => Object.values(users).map(u => u.pseudo), 60 * 1000);
+609| 
+610|     // ========== 10. DÉMARRAGE ==========
+611|     const PORT = process.env.PORT || 3005;
+612|     server.listen(PORT, '0.0.0.0', () => {
+613|         console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+614|     });
 
 # FILE: /var/www/meetgay/options.js
 
