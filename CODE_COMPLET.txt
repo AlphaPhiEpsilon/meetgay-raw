@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-07 23:10:52
+# Généré le 2026-06-07 23:26:26
 
 ==============================================================================
 # SYSTEME DE CLONE DE FICHIER MIS A JOUR EN TEMPS REEL 
@@ -789,539 +789,545 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 
 # FILE: /var/www/meetgay/public/js/chat.js
 
-1| // Blocage du retour arrière pour TOUS les navigateurs (Chrome + Firefox)
+1| // 1. Initialisation de l'historique au chargement
 2| history.pushState({ page: "chat" }, "Chat", location.href);
 3| 
-4| window.addEventListener('popstate', async function (event) {
-5|     if (confirm('Voulez-vous vraiment quitter le chat ?')) {
-6|         const stored = localStorage.getItem('meetgay_user');
-7|         let pseudo = null;
-8|         if (stored) {
-9|             try {
-10|                 pseudo = JSON.parse(stored).pseudo;
-11|             } catch (e) { }
+4| // 2. Gestion de l'interception du retour arrière
+5| window.addEventListener('popstate', function (event) {
+6|     if (confirm('Voulez-vous vraiment quitter le chat ?')) {
+7| 
+8|         const stored = localStorage.getItem('meetgay_user');
+9|         let pseudo = null;
+10|         if (stored) {
+11|             try { pseudo = JSON.parse(stored).pseudo; } catch (e) { }
 12|         }
-13|         if (pseudo) {
-14|             try {
-15|                 // Utilisation de fetch (asynchrone) + sendBeacon en fallback pour Firefox
-16|                 const response = await fetch('/api/delete-user', {
-17|                     method: 'POST',
-18|                     headers: { 'Content-Type': 'application/json' },
-19|                     body: JSON.stringify({ pseudo: pseudo })
-20|                 });
-21|                 if (!response.ok) {
-22|                     // Fallback silencieux : sendBeacon
-23|                     navigator.sendBeacon('/api/delete-user', JSON.stringify({ pseudo: pseudo }));
-24|                 }
-25|             } catch (err) {
-26|                 console.error('Erreur suppression:', err);
-27|                 // Dernier recours : sendBeacon
-28|                 navigator.sendBeacon('/api/delete-user', JSON.stringify({ pseudo: pseudo }));
-29|             }
-30|         }
-31|         localStorage.removeItem('meetgay_token');
-32|         localStorage.removeItem('meetgay_user');
-33|         localStorage.removeItem('meetgay_user_full');
-34|         window.location.href = '/';
-35|     } else {
-36|         // Remet l'état dans l'historique pour rester sur la page
-37|         history.pushState({ page: "chat" }, "Chat", location.href);
-38|     }
-39| });
-40| 
-41| // Écouter aussi pageshow pour Firefox (bfcache)
-42| window.addEventListener('pageshow', function (event) {
-43|     if (event.persisted) {
-44|         console.log("📄 Page restaurée depuis le cache Firefox");
-45|         // Remet un état propre dans l'historique
-46|         history.replaceState({ page: "chat" }, "Chat", location.href);
-47|         history.pushState({ page: "chat" }, "Chat", location.href);
-48|     }
-49| });
-50| 
-51| 
-52| 
-53| 
-54| 
-55| console.log('✅ chat.js chargé');
+13| 
+14|         if (pseudo) {
+15|             const data = JSON.stringify({ pseudo: pseudo });
+16| 
+17|             // Solution ultra-fiable pour Node.js : Envoyer un Blob avec le bon Content-Type
+18|             const blob = new Blob([data], { type: 'application/json' });
+19| 
+20|             // sendBeacon est synchrone pour le navigateur (il tire et oublie), 
+21|             // ce qui garantit que la requête part même si la page change immédiatement.
+22|             navigator.sendBeacon('/api/delete-user', blob);
+23|         }
+24| 
+25|         // Nettoyage local
+26|         localStorage.removeItem('meetgay_token');
+27|         localStorage.removeItem('meetgay_user');
+28|         localStorage.removeItem('meetgay_user_full');
+29| 
+30|         // Redirection immédiate et sécurisée
+31|         window.location.replace('/');
+32|     } else {
+33|         // L'utilisateur a annulé : on remet l'état dans l'historique pour bloquer le prochain coup
+34|         history.pushState({ page: "chat" }, "Chat", location.href);
+35|     }
+36| });
+37| 
+38| // 3. Protection contre le BfCache de Firefox
+39| window.addEventListener('pageshow', function (event) {
+40|     if (event.persisted) {
+41|         history.replaceState({ page: "chat" }, "Chat", location.href);
+42|         history.pushState({ page: "chat" }, "Chat", location.href);
+43|     }
+44| });
+45| 
+46| 
+47| // Écouter aussi pageshow pour Firefox (bfcache)
+48| window.addEventListener('pageshow', function (event) {
+49|     if (event.persisted) {
+50|         console.log("📄 Page restaurée depuis le cache Firefox");
+51|         // Remet un état propre dans l'historique
+52|         history.replaceState({ page: "chat" }, "Chat", location.href);
+53|         history.pushState({ page: "chat" }, "Chat", location.href);
+54|     }
+55| });
 56| 
-57| // 1. D'abord le token dans son propre bloc
-58| {
-59|     let token = localStorage.getItem('meetgay_token');
-60|     if (!token) {
-61|         window.location.href = '/login.html';
-62|     }
-63| }
-64| 
-65| // 2. Ensuite socket dans un autre bloc
-66| const socket = io();
-67| 
-68| // ========== RÉCUPÉRATION DES INFOS UTILISATEUR DEPUIS LA BASE ==========00000
-69| let user = null;
-70| const storedUser = JSON.parse(localStorage.getItem('meetgay_user'));
-71| 
-72| async function initUser() {
-73|     console.log('1. Début initUser');
-74|     if (!storedUser || !storedUser.pseudo) {
-75|         console.log('2. Pas de storedUser');
-76|         window.location.href = '/login.html';
-77|         return;
-78|     }
-79| 
-80|     try {
-81|         console.log('3. Appel fetch pour pseudo:', storedUser.pseudo);
-82|         const response = await fetch('/api/get-user', {
-83|             method: 'POST',
-84|             headers: { 'Content-Type': 'application/json' },
-85|             body: JSON.stringify({ pseudo: storedUser.pseudo })
-86|         });
-87|         console.log('4. Réponse reçue, status:', response.status);
-88|         const data = await response.json();
-89|         console.log('5. Data reçue:', data);
-90|         if (data.success) {
-91|             user = data.user;
-92|             localStorage.setItem('meetgay_user_full', JSON.stringify(user));
-93|             console.log('6. Utilisateur chargé, démarrage chat');
-94|             startChat();
-95|         } else {
-96|             console.log('7. Pas de success');
-97|             window.location.href = '/login.html';
-98|         }
-99|     } catch (err) {
-100|         console.error('Erreur:', err);
-101|         window.location.href = '/login.html';
-102|     }
-103| }
-104| 
-105| // ========== DÉMARRAGE DU CHAT (après récupération des infos) ==========
-106| function startChat() {
-107|     // Éléments DOM
-108| 
-109|     // Charger l'historique des messages pour une conversation
-110|     async function loadHistory(withPseudo) {
-111|         try {
-112|             const response = await fetch(`/api/messages/${encodeURIComponent(user.pseudo)}/${encodeURIComponent(withPseudo)}`);
-113|             const messages = await response.json();
+57| 
+58| 
+59| 
+60| 
+61| console.log('✅ chat.js chargé');
+62| 
+63| // 1. D'abord le token dans son propre bloc
+64| {
+65|     let token = localStorage.getItem('meetgay_token');
+66|     if (!token) {
+67|         window.location.href = '/login.html';
+68|     }
+69| }
+70| 
+71| // 2. Ensuite socket dans un autre bloc
+72| const socket = io();
+73| 
+74| // ========== RÉCUPÉRATION DES INFOS UTILISATEUR DEPUIS LA BASE ==========00000
+75| let user = null;
+76| const storedUser = JSON.parse(localStorage.getItem('meetgay_user'));
+77| 
+78| async function initUser() {
+79|     console.log('1. Début initUser');
+80|     if (!storedUser || !storedUser.pseudo) {
+81|         console.log('2. Pas de storedUser');
+82|         window.location.href = '/login.html';
+83|         return;
+84|     }
+85| 
+86|     try {
+87|         console.log('3. Appel fetch pour pseudo:', storedUser.pseudo);
+88|         const response = await fetch('/api/get-user', {
+89|             method: 'POST',
+90|             headers: { 'Content-Type': 'application/json' },
+91|             body: JSON.stringify({ pseudo: storedUser.pseudo })
+92|         });
+93|         console.log('4. Réponse reçue, status:', response.status);
+94|         const data = await response.json();
+95|         console.log('5. Data reçue:', data);
+96|         if (data.success) {
+97|             user = data.user;
+98|             localStorage.setItem('meetgay_user_full', JSON.stringify(user));
+99|             console.log('6. Utilisateur chargé, démarrage chat');
+100|             startChat();
+101|         } else {
+102|             console.log('7. Pas de success');
+103|             window.location.href = '/login.html';
+104|         }
+105|     } catch (err) {
+106|         console.error('Erreur:', err);
+107|         window.location.href = '/login.html';
+108|     }
+109| }
+110| 
+111| // ========== DÉMARRAGE DU CHAT (après récupération des infos) ==========
+112| function startChat() {
+113|     // Éléments DOM
 114| 
-115|             // Nettoyer l'historique existant pour ce contact
-116|             if (!conversationHistory[withPseudo]) {
-117|                 conversationHistory[withPseudo] = [];
-118|             } else {
-119|                 conversationHistory[withPseudo] = [];
-120|             }
-121| 
-122|             // Ajouter les messages chargés
-123|             messages.forEach(msg => {
-124|                 const type = msg.from_pseudo === user.pseudo ? 'sent' : 'received';
-125|                 conversationHistory[withPseudo].push({
-126|                     text: msg.message,
-127|                     type: type,
-128|                     from: msg.from_pseudo,
-129|                     to: msg.to_pseudo,
-130|                     timestamp: new Date(msg.created_at)
-131|                 });
-132|             });
-133| 
-134|             updateHistoryDisplay();
-135|         } catch (err) {
-136|             console.error('Erreur chargement historique:', err);
-137|         }
-138|         ce
-139|     }
-140| 
-141|     const usersDiv = document.getElementById('usersList');
-142|     const messageInput = document.getElementById('messageInput');
-143|     const sendBtn = document.getElementById('sendBtn');
-144|     const envelope = document.getElementById('envelope');
-145| 
-146|     // Bouton déconnexion
-147|     const logoutBtn = document.getElementById('logoutBtn');
-148|     if (logoutBtn) {
-149|         logoutBtn.onclick = async () => {
-150|             try {
-151|                 await fetch('/api/delete-user', {
-152|                     method: 'POST',
-153|                     headers: { 'Content-Type': 'application/json' },
-154|                     body: JSON.stringify({ pseudo: user.pseudo })
-155|                 });
-156|             } catch (err) {
-157|                 console.error('Erreur suppression utilisateur:', err);
-158|             }
-159| 
-160|             localStorage.removeItem('meetgay_token');
-161|             localStorage.removeItem('meetgay_user');
-162|             localStorage.removeItem('meetgay_user_full');
-163|             socket.disconnect();
-164|             window.location.href = '/login.html';
-165|         };
-166|     }
-167| 
-168| 
-169|     // Variables d'état
-170|     let currentTarget = null;
-171|     let currentTargetName = null;
-172|     let pendingMessages = [];
-173|     let usersList = [];
+115|     // Charger l'historique des messages pour une conversation
+116|     async function loadHistory(withPseudo) {
+117|         try {
+118|             const response = await fetch(`/api/messages/${encodeURIComponent(user.pseudo)}/${encodeURIComponent(withPseudo)}`);
+119|             const messages = await response.json();
+120| 
+121|             // Nettoyer l'historique existant pour ce contact
+122|             if (!conversationHistory[withPseudo]) {
+123|                 conversationHistory[withPseudo] = [];
+124|             } else {
+125|                 conversationHistory[withPseudo] = [];
+126|             }
+127| 
+128|             // Ajouter les messages chargés
+129|             messages.forEach(msg => {
+130|                 const type = msg.from_pseudo === user.pseudo ? 'sent' : 'received';
+131|                 conversationHistory[withPseudo].push({
+132|                     text: msg.message,
+133|                     type: type,
+134|                     from: msg.from_pseudo,
+135|                     to: msg.to_pseudo,
+136|                     timestamp: new Date(msg.created_at)
+137|                 });
+138|             });
+139| 
+140|             updateHistoryDisplay();
+141|         } catch (err) {
+142|             console.error('Erreur chargement historique:', err);
+143|         }
+144|         ce
+145|     }
+146| 
+147|     const usersDiv = document.getElementById('usersList');
+148|     const messageInput = document.getElementById('messageInput');
+149|     const sendBtn = document.getElementById('sendBtn');
+150|     const envelope = document.getElementById('envelope');
+151| 
+152|     // Bouton déconnexion
+153|     const logoutBtn = document.getElementById('logoutBtn');
+154|     if (logoutBtn) {
+155|         logoutBtn.onclick = async () => {
+156|             try {
+157|                 await fetch('/api/delete-user', {
+158|                     method: 'POST',
+159|                     headers: { 'Content-Type': 'application/json' },
+160|                     body: JSON.stringify({ pseudo: user.pseudo })
+161|                 });
+162|             } catch (err) {
+163|                 console.error('Erreur suppression utilisateur:', err);
+164|             }
+165| 
+166|             localStorage.removeItem('meetgay_token');
+167|             localStorage.removeItem('meetgay_user');
+168|             localStorage.removeItem('meetgay_user_full');
+169|             socket.disconnect();
+170|             window.location.href = '/login.html';
+171|         };
+172|     }
+173| 
 174| 
-175|     // Afficher le pseudo dans le header
-176|     const userBadge = document.getElementById('userBadge');
-177|     if (userBadge) {
-178|         userBadge.innerHTML = `👤 ${escapeHtml(user.pseudo)} | ${user.age} ans`;
-179|     }
+175|     // Variables d'état
+176|     let currentTarget = null;
+177|     let currentTargetName = null;
+178|     let pendingMessages = [];
+179|     let usersList = [];
 180| 
-181|     // Initialiser l'utilisateur sur le serveur
-182|     socket.emit('user join', {
-183|         pseudo: user.pseudo,
-184|         age: user.age,
-185|         tendencies: user.tendencies,
-186|         locationCode: user.location_code,
-187|         locationName: user.location_name,
-188|         bio: user.bio || 'Aucune présentation',
-189|         gender: user.gender,
-190|         purpose: user.purpose,
-191|         language: localStorage.getItem('MeetGay_lang') || 'fr'
-192|     });
-193| 
-194| 
-195|     socket.on('join confirmed', (data) => {
-196|         console.log('✅ Join confirmé par le serveur:', data);
-197|     });
-198| 
-199|     socket.on('join error', (error) => {
-200|         console.error('❌ Erreur join:', error);
-201|     });
-202| 
-203|     // --------------------------------------------------------------
-204|     // GESTION DE LA LISTE DES CONNECTÉS
-205|     // --------------------------------------------------------------
-206|     socket.on('update users', (usersListData) => {
-207|         usersList = usersListData;
+181|     // Afficher le pseudo dans le header
+182|     const userBadge = document.getElementById('userBadge');
+183|     if (userBadge) {
+184|         userBadge.innerHTML = `👤 ${escapeHtml(user.pseudo)} | ${user.age} ans`;
+185|     }
+186| 
+187|     // Initialiser l'utilisateur sur le serveur
+188|     socket.emit('user join', {
+189|         pseudo: user.pseudo,
+190|         age: user.age,
+191|         tendencies: user.tendencies,
+192|         locationCode: user.location_code,
+193|         locationName: user.location_name,
+194|         bio: user.bio || 'Aucune présentation',
+195|         gender: user.gender,
+196|         purpose: user.purpose,
+197|         language: localStorage.getItem('MeetGay_lang') || 'fr'
+198|     });
+199| 
+200| 
+201|     socket.on('join confirmed', (data) => {
+202|         console.log('✅ Join confirmé par le serveur:', data);
+203|     });
+204| 
+205|     socket.on('join error', (error) => {
+206|         console.error('❌ Erreur join:', error);
+207|     });
 208| 
-209|         // Met à jour le compteur
-210|         const onlineCount = document.getElementById('onlineCount');
-211|         if (onlineCount) {
-212|             onlineCount.textContent = usersList.length;
-213|         }
+209|     // --------------------------------------------------------------
+210|     // GESTION DE LA LISTE DES CONNECTÉS
+211|     // --------------------------------------------------------------
+212|     socket.on('update users', (usersListData) => {
+213|         usersList = usersListData;
 214| 
-215|         if (usersList.length === 0) {
-216|             usersDiv.innerHTML = '<em>Aucun connecté</em>';
-217|             return;
-218|         }
-219| 
-220|         usersDiv.innerHTML = '';
-221| 
-222|         usersList.forEach(u => {
-223|             const div = document.createElement('div');
-224|             div.className = 'user-item';
-225|             const orientationSymbol = getOrientationSymbol(u.tendencies);
-226| 
-227|             // Vérifier si c'est l'utilisateur courant (comparer les socketId)
-228|             if (u.socketId === socket.id) {
-229|                 div.innerHTML = `<strong>${escapeHtml(u.pseudo)} (moi)</strong> <span style="font-size:12px;">(${u.age} ans, ${orientationSymbol} ${u.locationName || u.locationCode})</span>`;
-230|                 div.style.background = '#e9ecef';
-231|                 div.style.fontStyle = 'italic';
-232|             } else {
-233|                 div.innerHTML = `<strong>${escapeHtml(u.pseudo)}</strong> <span style="font-size:12px;">(${u.age} ans, ${orientationSymbol} ${u.locationName || u.locationCode})</span>`;
-234|                 div.onclick = () => {
-235|                     document.querySelectorAll('.user-item').forEach(el => el.classList.remove('current-target'));
-236|                     div.classList.add('current-target');
-237| 
-238|                     currentTarget = u.socketId;
-239|                     currentTargetName = u.pseudo;
-240|                     messageInput.disabled = false;
-241|                     sendBtn.disabled = false;
-242|                     messageInput.placeholder = `Message pour ${u.pseudo}...`;
-243|                     messageInput.focus();
-244|                     clearMessageArea();
-245|                     loadHistory(u.pseudo);
-246| 
-247|                     showContactInfo(
-248|                         u.pseudo,
-249|                         u.age,
-250|                         u.gender,
-251|                         u.tendencies,
-252|                         u.locationName || u.locationCode,  // ← ici on passe la localité
-253|                         u.purpose,
-254|                         u.bio || 'Pas de présentation'
-255|                     );
-256|                 };
-257|             }
-258|             usersDiv.appendChild(div);
-259|         });
-260|     });
-261| 
-262|     // --------------------------------------------------------------
-263|     // ENVOI ET RÉCEPTION DES MESSAGES
-264|     // --------------------------------------------------------------
-265|     socket.on('message sent confirmation', async (data) => {
-266|         displayMessage(data.message, 'sent', null, currentTargetName);
-267|         addToHistory(currentTargetName, data.message, 'sent', user.pseudo, currentTargetName);
-268| 
-269|         // Sauvegarder en base
-270|         try {
-271|             await fetch('/api/messages/save', {
-272|                 method: 'POST',
-273|                 headers: { 'Content-Type': 'application/json' },
-274|                 body: JSON.stringify({
-275|                     from: user.pseudo,
-276|                     to: currentTargetName,
-277|                     message: data.message
-278|                 })
-279|             });
-280|         } catch (err) {
-281|             console.error('Erreur sauvegarde message:', err);
-282|         }
-283| 
-284|         messageInput.value = '';
-285|         messageInput.focus();
-286|     });
-287| 
-288|     socket.on('private message received', (data) => {
-289|         pendingMessages.push(data);
-290| 
-291|         // Sauvegarder en base
-292|         fetch('/api/messages/save', {
-293|             method: 'POST',
-294|             headers: { 'Content-Type': 'application/json' },
-295|             body: JSON.stringify({
-296|                 from: data.fromPseudo,
-297|                 to: user.pseudo,
-298|                 message: data.message
-299|             })
-300|         }).catch(err => console.error('Erreur sauvegarde message reçu:', err));
-301| 
-302|         updateEnvelope(pendingMessages.length);
-303|         startBlinking();
-304|     });
-305| 
-306|     socket.on('error', (msg) => {
-307|         console.error('Erreur:', msg);
-308|     });
-309| 
-310|     socket.on('force logout', (data) => {
-311|         alert(data.reason);
-312|         localStorage.removeItem('meetgay_token');
-313|         localStorage.removeItem('meetgay_user');
-314|         window.location.href = '/login.html';
-315|     });
-316| 
-317|     // --------------------------------------------------------------
-318|     // ENVELOPPE (messages reçus)
-319|     // --------------------------------------------------------------
-320|     envelope.onclick = () => {
-321| 
-322|         if (pendingMessages.length === 0) return;
-323| 
-324|         const msg = pendingMessages.shift();
-325|         displayMessage(msg.message, 'received', msg.fromPseudo);
-326|         addToHistory(msg.fromPseudo, msg.message, 'received', msg.fromPseudo, user.pseudo);
-327|         loadHistory(msg.fromPseudo);  // ← AJOUTE CETTE LIGNE
-328| 
-329|         currentTarget = msg.fromSocketId;
-330|         currentTargetName = msg.fromPseudo;
-331|         messageInput.disabled = false;
-332|         sendBtn.disabled = false;
-333|         messageInput.placeholder = `Répondre à ${msg.fromPseudo}...`;
-334|         messageInput.focus();
-335| 
-336|         document.querySelectorAll('.user-item').forEach(el => {
-337|             if (el.textContent.includes(msg.fromPseudo) && !el.textContent.includes('(moi)')) {
-338|                 document.querySelectorAll('.user-item').forEach(e => e.classList.remove('current-target'));
-339|                 el.classList.add('current-target');
-340|             }
-341|         });
-342| 
-343|         const senderInfo = usersList.find(u => u.pseudo === msg.fromPseudo);
-344|         if (senderInfo) {
-345|             let bioText = senderInfo.bio || "Pas de présentation";
-346|             showContactInfo(senderInfo.pseudo, senderInfo.age, senderInfo.gender, senderInfo.tendencies, senderInfo.locationName || senderInfo.locationCode, senderInfo.purpose, bioText);
-347|         } else {
-348|             showContactInfo(msg.fromPseudo, '?', '', '?', '?', '?', 'Bio non disponible');
-349|         }
-350| 
-351|         updateEnvelope(pendingMessages.length);
-352|         if (pendingMessages.length === 0) {
-353|             stopBlinking();
-354|         }
-355|     };
+215|         // Met à jour le compteur
+216|         const onlineCount = document.getElementById('onlineCount');
+217|         if (onlineCount) {
+218|             onlineCount.textContent = usersList.length;
+219|         }
+220| 
+221|         if (usersList.length === 0) {
+222|             usersDiv.innerHTML = '<em>Aucun connecté</em>';
+223|             return;
+224|         }
+225| 
+226|         usersDiv.innerHTML = '';
+227| 
+228|         usersList.forEach(u => {
+229|             const div = document.createElement('div');
+230|             div.className = 'user-item';
+231|             const orientationSymbol = getOrientationSymbol(u.tendencies);
+232| 
+233|             // Vérifier si c'est l'utilisateur courant (comparer les socketId)
+234|             if (u.socketId === socket.id) {
+235|                 div.innerHTML = `<strong>${escapeHtml(u.pseudo)} (moi)</strong> <span style="font-size:12px;">(${u.age} ans, ${orientationSymbol} ${u.locationName || u.locationCode})</span>`;
+236|                 div.style.background = '#e9ecef';
+237|                 div.style.fontStyle = 'italic';
+238|             } else {
+239|                 div.innerHTML = `<strong>${escapeHtml(u.pseudo)}</strong> <span style="font-size:12px;">(${u.age} ans, ${orientationSymbol} ${u.locationName || u.locationCode})</span>`;
+240|                 div.onclick = () => {
+241|                     document.querySelectorAll('.user-item').forEach(el => el.classList.remove('current-target'));
+242|                     div.classList.add('current-target');
+243| 
+244|                     currentTarget = u.socketId;
+245|                     currentTargetName = u.pseudo;
+246|                     messageInput.disabled = false;
+247|                     sendBtn.disabled = false;
+248|                     messageInput.placeholder = `Message pour ${u.pseudo}...`;
+249|                     messageInput.focus();
+250|                     clearMessageArea();
+251|                     loadHistory(u.pseudo);
+252| 
+253|                     showContactInfo(
+254|                         u.pseudo,
+255|                         u.age,
+256|                         u.gender,
+257|                         u.tendencies,
+258|                         u.locationName || u.locationCode,  // ← ici on passe la localité
+259|                         u.purpose,
+260|                         u.bio || 'Pas de présentation'
+261|                     );
+262|                 };
+263|             }
+264|             usersDiv.appendChild(div);
+265|         });
+266|     });
+267| 
+268|     // --------------------------------------------------------------
+269|     // ENVOI ET RÉCEPTION DES MESSAGES
+270|     // --------------------------------------------------------------
+271|     socket.on('message sent confirmation', async (data) => {
+272|         displayMessage(data.message, 'sent', null, currentTargetName);
+273|         addToHistory(currentTargetName, data.message, 'sent', user.pseudo, currentTargetName);
+274| 
+275|         // Sauvegarder en base
+276|         try {
+277|             await fetch('/api/messages/save', {
+278|                 method: 'POST',
+279|                 headers: { 'Content-Type': 'application/json' },
+280|                 body: JSON.stringify({
+281|                     from: user.pseudo,
+282|                     to: currentTargetName,
+283|                     message: data.message
+284|                 })
+285|             });
+286|         } catch (err) {
+287|             console.error('Erreur sauvegarde message:', err);
+288|         }
+289| 
+290|         messageInput.value = '';
+291|         messageInput.focus();
+292|     });
+293| 
+294|     socket.on('private message received', (data) => {
+295|         pendingMessages.push(data);
+296| 
+297|         // Sauvegarder en base
+298|         fetch('/api/messages/save', {
+299|             method: 'POST',
+300|             headers: { 'Content-Type': 'application/json' },
+301|             body: JSON.stringify({
+302|                 from: data.fromPseudo,
+303|                 to: user.pseudo,
+304|                 message: data.message
+305|             })
+306|         }).catch(err => console.error('Erreur sauvegarde message reçu:', err));
+307| 
+308|         updateEnvelope(pendingMessages.length);
+309|         startBlinking();
+310|     });
+311| 
+312|     socket.on('error', (msg) => {
+313|         console.error('Erreur:', msg);
+314|     });
+315| 
+316|     socket.on('force logout', (data) => {
+317|         alert(data.reason);
+318|         localStorage.removeItem('meetgay_token');
+319|         localStorage.removeItem('meetgay_user');
+320|         window.location.href = '/login.html';
+321|     });
+322| 
+323|     // --------------------------------------------------------------
+324|     // ENVELOPPE (messages reçus)
+325|     // --------------------------------------------------------------
+326|     envelope.onclick = () => {
+327| 
+328|         if (pendingMessages.length === 0) return;
+329| 
+330|         const msg = pendingMessages.shift();
+331|         displayMessage(msg.message, 'received', msg.fromPseudo);
+332|         addToHistory(msg.fromPseudo, msg.message, 'received', msg.fromPseudo, user.pseudo);
+333|         loadHistory(msg.fromPseudo);  // ← AJOUTE CETTE LIGNE
+334| 
+335|         currentTarget = msg.fromSocketId;
+336|         currentTargetName = msg.fromPseudo;
+337|         messageInput.disabled = false;
+338|         sendBtn.disabled = false;
+339|         messageInput.placeholder = `Répondre à ${msg.fromPseudo}...`;
+340|         messageInput.focus();
+341| 
+342|         document.querySelectorAll('.user-item').forEach(el => {
+343|             if (el.textContent.includes(msg.fromPseudo) && !el.textContent.includes('(moi)')) {
+344|                 document.querySelectorAll('.user-item').forEach(e => e.classList.remove('current-target'));
+345|                 el.classList.add('current-target');
+346|             }
+347|         });
+348| 
+349|         const senderInfo = usersList.find(u => u.pseudo === msg.fromPseudo);
+350|         if (senderInfo) {
+351|             let bioText = senderInfo.bio || "Pas de présentation";
+352|             showContactInfo(senderInfo.pseudo, senderInfo.age, senderInfo.gender, senderInfo.tendencies, senderInfo.locationName || senderInfo.locationCode, senderInfo.purpose, bioText);
+353|         } else {
+354|             showContactInfo(msg.fromPseudo, '?', '', '?', '?', '?', 'Bio non disponible');
+355|         }
 356| 
-357|     // --------------------------------------------------------------
-358|     // ENVOI DE MESSAGE
-359|     // --------------------------------------------------------------
-360|     sendBtn.onclick = () => {
-361|         const text = messageInput.value.trim();
-362|         if (!text || !currentTarget) return;
-363| 
-364|         if (currentReceivedMessage !== null) {
-365|             clearMessageArea();
-366| 
-367|         }
-368| 
-369|         socket.emit('private message', {
-370|             toSocketId: currentTarget,
-371|             message: text,
-372|             fromPseudo: user.pseudo
-373|         });
-374|     };
-375| 
-376|     messageInput.addEventListener('keypress', (e) => {
-377|         if (e.key === 'Enter') sendBtn.click();
-378|     });
-379| 
-380|     // --------------------------------------------------------------
-381|     // CHAT PRIVÉ (POPUP)
-382|     // --------------------------------------------------------------
-383|     let privateChatAvailable = {};
-384| 
-385|     socket.on('privateChatAvailable', (data) => {
-386|         console.log(`🔔 Seuil atteint avec ${data.with}`);
-387|         privateChatAvailable[data.with] = true;
-388|         showPrivatePopup(data.with);
-389|     });
+357|         updateEnvelope(pendingMessages.length);
+358|         if (pendingMessages.length === 0) {
+359|             stopBlinking();
+360|         }
+361|     };
+362| 
+363|     // --------------------------------------------------------------
+364|     // ENVOI DE MESSAGE
+365|     // --------------------------------------------------------------
+366|     sendBtn.onclick = () => {
+367|         const text = messageInput.value.trim();
+368|         if (!text || !currentTarget) return;
+369| 
+370|         if (currentReceivedMessage !== null) {
+371|             clearMessageArea();
+372| 
+373|         }
+374| 
+375|         socket.emit('private message', {
+376|             toSocketId: currentTarget,
+377|             message: text,
+378|             fromPseudo: user.pseudo
+379|         });
+380|     };
+381| 
+382|     messageInput.addEventListener('keypress', (e) => {
+383|         if (e.key === 'Enter') sendBtn.click();
+384|     });
+385| 
+386|     // --------------------------------------------------------------
+387|     // CHAT PRIVÉ (POPUP)
+388|     // --------------------------------------------------------------
+389|     let privateChatAvailable = {};
 390| 
-391|     function showPrivatePopup(pseudo) {
-392|         if (document.getElementById('privatePopup')) return;
-393| 
-394|         const chatPanel = document.querySelector('.chat-panel');
-395|         if (!chatPanel) return;
+391|     socket.on('privateChatAvailable', (data) => {
+392|         console.log(`🔔 Seuil atteint avec ${data.with}`);
+393|         privateChatAvailable[data.with] = true;
+394|         showPrivatePopup(data.with);
+395|     });
 396| 
-397|         if (getComputedStyle(chatPanel).position !== 'relative') {
-398|             chatPanel.style.position = 'relative';
-399|         }
-400| 
-401|         const inputArea = document.querySelector('.input-area');
-402|         if (!inputArea) return;
-403| 
-404|         const inputRect = inputArea.getBoundingClientRect();
-405|         const chatRect = chatPanel.getBoundingClientRect();
-406|         const topPosition = inputRect.bottom - chatRect.top;
-407| 
-408|         const popup = document.createElement('div');
-409|         popup.id = 'privatePopup';
-410|         popup.style.cssText = `
-411|             position: absolute;
-412|             top: ${topPosition + 5}px;
-413|             left: 0;
-414|             right: 0;
-415|             background: #2c3e50;
-416|             color: white;
-417|             border-radius: 8px;
-418|             padding: 10px 12px;
-419|             z-index: 1000;
-420|             font-family: 'Segoe UI', sans-serif;
-421|             font-size: 12px;
-422|             display: flex;
-423|             justify-content: space-between;
-424|             align-items: center;
-425|             flex-wrap: wrap;
-426|             gap: 8px;
-427|             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-428|             opacity: 0;
-429|             transform: translateY(-10px);
-430|             transition: opacity 0.2s ease, transform 0.2s ease;
-431|         `;
-432| 
-433|         popup.innerHTML = `
-434|             <span>💬 <strong>${pseudo}</strong> : 3 messages échangés. Passer en privé ?</span>
-435|             <div style="display: flex; gap: 6px;">
-436|                 <button id="popupAccept" style="background:#27ae60; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">✅ Oui</button>
-437|                 <button id="popupDecline" style="background:#e74c3c; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">❌ Non</button>
-438|             </div>
-439|         `;
-440| 
-441|         chatPanel.appendChild(popup);
-442| 
-443|         setTimeout(() => {
-444|             popup.style.opacity = '1';
-445|             popup.style.transform = 'translateY(0)';
-446|         }, 10);
-447| 
-448|         document.getElementById('popupAccept').onclick = () => {
-449|             socket.emit('invitePrivate', { toPseudo: pseudo, fromPseudo: user.pseudo });
-450|             popup.remove();
-451|         };
-452| 
-453|         document.getElementById('popupDecline').onclick = () => {
-454|             popup.remove();
-455|         };
-456|     }
-457| 
-458|     socket.on('privateInviteReceived', (data) => {
-459|         if (document.getElementById('invitePopup')) return;
-460| 
-461|         const chatPanel = document.querySelector('.chat-panel');
-462|         if (!chatPanel) return;
+397|     function showPrivatePopup(pseudo) {
+398|         if (document.getElementById('privatePopup')) return;
+399| 
+400|         const chatPanel = document.querySelector('.chat-panel');
+401|         if (!chatPanel) return;
+402| 
+403|         if (getComputedStyle(chatPanel).position !== 'relative') {
+404|             chatPanel.style.position = 'relative';
+405|         }
+406| 
+407|         const inputArea = document.querySelector('.input-area');
+408|         if (!inputArea) return;
+409| 
+410|         const inputRect = inputArea.getBoundingClientRect();
+411|         const chatRect = chatPanel.getBoundingClientRect();
+412|         const topPosition = inputRect.bottom - chatRect.top;
+413| 
+414|         const popup = document.createElement('div');
+415|         popup.id = 'privatePopup';
+416|         popup.style.cssText = `
+417|             position: absolute;
+418|             top: ${topPosition + 5}px;
+419|             left: 0;
+420|             right: 0;
+421|             background: #2c3e50;
+422|             color: white;
+423|             border-radius: 8px;
+424|             padding: 10px 12px;
+425|             z-index: 1000;
+426|             font-family: 'Segoe UI', sans-serif;
+427|             font-size: 12px;
+428|             display: flex;
+429|             justify-content: space-between;
+430|             align-items: center;
+431|             flex-wrap: wrap;
+432|             gap: 8px;
+433|             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+434|             opacity: 0;
+435|             transform: translateY(-10px);
+436|             transition: opacity 0.2s ease, transform 0.2s ease;
+437|         `;
+438| 
+439|         popup.innerHTML = `
+440|             <span>💬 <strong>${pseudo}</strong> : 3 messages échangés. Passer en privé ?</span>
+441|             <div style="display: flex; gap: 6px;">
+442|                 <button id="popupAccept" style="background:#27ae60; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">✅ Oui</button>
+443|                 <button id="popupDecline" style="background:#e74c3c; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">❌ Non</button>
+444|             </div>
+445|         `;
+446| 
+447|         chatPanel.appendChild(popup);
+448| 
+449|         setTimeout(() => {
+450|             popup.style.opacity = '1';
+451|             popup.style.transform = 'translateY(0)';
+452|         }, 10);
+453| 
+454|         document.getElementById('popupAccept').onclick = () => {
+455|             socket.emit('invitePrivate', { toPseudo: pseudo, fromPseudo: user.pseudo });
+456|             popup.remove();
+457|         };
+458| 
+459|         document.getElementById('popupDecline').onclick = () => {
+460|             popup.remove();
+461|         };
+462|     }
 463| 
-464|         if (getComputedStyle(chatPanel).position !== 'relative') {
-465|             chatPanel.style.position = 'relative';
-466|         }
-467| 
-468|         const inputArea = document.querySelector('.input-area');
-469|         if (!inputArea) return;
-470| 
-471|         const inputRect = inputArea.getBoundingClientRect();
-472|         const chatRect = chatPanel.getBoundingClientRect();
-473|         const topPosition = inputRect.bottom - chatRect.top;
-474| 
-475|         const popup = document.createElement('div');
-476|         popup.id = 'invitePopup';
-477|         popup.style.cssText = `
-478|             position: absolute;
-479|             top: ${topPosition + 5}px;
-480|             left: 0;
-481|             right: 0;
-482|             background: #2c3e50;
-483|             color: white;
-484|             border-radius: 8px;
-485|             padding: 10px 12px;
-486|             z-index: 1000;
-487|             font-family: 'Segoe UI', sans-serif;
-488|             font-size: 12px;
-489|             display: flex;
-490|             justify-content: space-between;
-491|             align-items: center;
-492|             flex-wrap: wrap;
-493|             gap: 8px;
-494|             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-495|             opacity: 0;
-496|             transform: translateY(-10px);
-497|             transition: opacity 0.2s ease, transform 0.2s ease;
-498|         `;
-499| 
-500|         popup.innerHTML = `
-501|             <span>🔔 <strong>${data.from}</strong> vous invite en chat privé.</span>
-502|             <div style="display: flex; gap: 6px;">
-503|                 <button id="inviteAccept" style="background:#27ae60; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">✅ Accepter</button>
-504|                 <button id="inviteDecline" style="background:#e74c3c; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">❌ Refuser</button>
-505|             </div>
-506|         `;
-507| 
-508|         chatPanel.appendChild(popup);
-509| 
-510|         setTimeout(() => {
-511|             popup.style.opacity = '1';
-512|             popup.style.transform = 'translateY(0)';
-513|         }, 10);
-514| 
-515|         document.getElementById('inviteAccept').onclick = () => {
-516|             socket.emit('acceptPrivateInvite', { fromPseudo: data.from, toPseudo: user.pseudo });
-517|             popup.remove();
-518|             alert(`💬 Chat privé ouvert avec ${data.from} !`);
-519|         };
+464|     socket.on('privateInviteReceived', (data) => {
+465|         if (document.getElementById('invitePopup')) return;
+466| 
+467|         const chatPanel = document.querySelector('.chat-panel');
+468|         if (!chatPanel) return;
+469| 
+470|         if (getComputedStyle(chatPanel).position !== 'relative') {
+471|             chatPanel.style.position = 'relative';
+472|         }
+473| 
+474|         const inputArea = document.querySelector('.input-area');
+475|         if (!inputArea) return;
+476| 
+477|         const inputRect = inputArea.getBoundingClientRect();
+478|         const chatRect = chatPanel.getBoundingClientRect();
+479|         const topPosition = inputRect.bottom - chatRect.top;
+480| 
+481|         const popup = document.createElement('div');
+482|         popup.id = 'invitePopup';
+483|         popup.style.cssText = `
+484|             position: absolute;
+485|             top: ${topPosition + 5}px;
+486|             left: 0;
+487|             right: 0;
+488|             background: #2c3e50;
+489|             color: white;
+490|             border-radius: 8px;
+491|             padding: 10px 12px;
+492|             z-index: 1000;
+493|             font-family: 'Segoe UI', sans-serif;
+494|             font-size: 12px;
+495|             display: flex;
+496|             justify-content: space-between;
+497|             align-items: center;
+498|             flex-wrap: wrap;
+499|             gap: 8px;
+500|             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+501|             opacity: 0;
+502|             transform: translateY(-10px);
+503|             transition: opacity 0.2s ease, transform 0.2s ease;
+504|         `;
+505| 
+506|         popup.innerHTML = `
+507|             <span>🔔 <strong>${data.from}</strong> vous invite en chat privé.</span>
+508|             <div style="display: flex; gap: 6px;">
+509|                 <button id="inviteAccept" style="background:#27ae60; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">✅ Accepter</button>
+510|                 <button id="inviteDecline" style="background:#e74c3c; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">❌ Refuser</button>
+511|             </div>
+512|         `;
+513| 
+514|         chatPanel.appendChild(popup);
+515| 
+516|         setTimeout(() => {
+517|             popup.style.opacity = '1';
+518|             popup.style.transform = 'translateY(0)';
+519|         }, 10);
 520| 
-521|         document.getElementById('inviteDecline').onclick = () => {
-522|             socket.emit('declinePrivateInvite', { fromPseudo: user.pseudo, toPseudo: data.from });
+521|         document.getElementById('inviteAccept').onclick = () => {
+522|             socket.emit('acceptPrivateInvite', { fromPseudo: data.from, toPseudo: user.pseudo });
 523|             popup.remove();
-524|         };
-525|     });
+524|             alert(`💬 Chat privé ouvert avec ${data.from} !`);
+525|         };
 526| 
-527| 
-528| }
-529| 
-530| 
-531| 
-532| // ========== LANCEMENT ==========
-533| initUser();
+527|         document.getElementById('inviteDecline').onclick = () => {
+528|             socket.emit('declinePrivateInvite', { fromPseudo: user.pseudo, toPseudo: data.from });
+529|             popup.remove();
+530|         };
+531|     });
+532| 
+533| 
+534| }
+535| 
+536| 
+537| 
+538| // ========== LANCEMENT ==========
+539| initUser();
 
 # FILE: /var/www/meetgay/public/js/utils.js
 
@@ -3138,539 +3144,545 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 
 # FILE: /var/www/meetgay/public/js/chat.js
 
-1| // Blocage du retour arrière pour TOUS les navigateurs (Chrome + Firefox)
+1| // 1. Initialisation de l'historique au chargement
 2| history.pushState({ page: "chat" }, "Chat", location.href);
 3| 
-4| window.addEventListener('popstate', async function (event) {
-5|     if (confirm('Voulez-vous vraiment quitter le chat ?')) {
-6|         const stored = localStorage.getItem('meetgay_user');
-7|         let pseudo = null;
-8|         if (stored) {
-9|             try {
-10|                 pseudo = JSON.parse(stored).pseudo;
-11|             } catch (e) { }
+4| // 2. Gestion de l'interception du retour arrière
+5| window.addEventListener('popstate', function (event) {
+6|     if (confirm('Voulez-vous vraiment quitter le chat ?')) {
+7| 
+8|         const stored = localStorage.getItem('meetgay_user');
+9|         let pseudo = null;
+10|         if (stored) {
+11|             try { pseudo = JSON.parse(stored).pseudo; } catch (e) { }
 12|         }
-13|         if (pseudo) {
-14|             try {
-15|                 // Utilisation de fetch (asynchrone) + sendBeacon en fallback pour Firefox
-16|                 const response = await fetch('/api/delete-user', {
-17|                     method: 'POST',
-18|                     headers: { 'Content-Type': 'application/json' },
-19|                     body: JSON.stringify({ pseudo: pseudo })
-20|                 });
-21|                 if (!response.ok) {
-22|                     // Fallback silencieux : sendBeacon
-23|                     navigator.sendBeacon('/api/delete-user', JSON.stringify({ pseudo: pseudo }));
-24|                 }
-25|             } catch (err) {
-26|                 console.error('Erreur suppression:', err);
-27|                 // Dernier recours : sendBeacon
-28|                 navigator.sendBeacon('/api/delete-user', JSON.stringify({ pseudo: pseudo }));
-29|             }
-30|         }
-31|         localStorage.removeItem('meetgay_token');
-32|         localStorage.removeItem('meetgay_user');
-33|         localStorage.removeItem('meetgay_user_full');
-34|         window.location.href = '/';
-35|     } else {
-36|         // Remet l'état dans l'historique pour rester sur la page
-37|         history.pushState({ page: "chat" }, "Chat", location.href);
-38|     }
-39| });
-40| 
-41| // Écouter aussi pageshow pour Firefox (bfcache)
-42| window.addEventListener('pageshow', function (event) {
-43|     if (event.persisted) {
-44|         console.log("📄 Page restaurée depuis le cache Firefox");
-45|         // Remet un état propre dans l'historique
-46|         history.replaceState({ page: "chat" }, "Chat", location.href);
-47|         history.pushState({ page: "chat" }, "Chat", location.href);
-48|     }
-49| });
-50| 
-51| 
-52| 
-53| 
-54| 
-55| console.log('✅ chat.js chargé');
+13| 
+14|         if (pseudo) {
+15|             const data = JSON.stringify({ pseudo: pseudo });
+16| 
+17|             // Solution ultra-fiable pour Node.js : Envoyer un Blob avec le bon Content-Type
+18|             const blob = new Blob([data], { type: 'application/json' });
+19| 
+20|             // sendBeacon est synchrone pour le navigateur (il tire et oublie), 
+21|             // ce qui garantit que la requête part même si la page change immédiatement.
+22|             navigator.sendBeacon('/api/delete-user', blob);
+23|         }
+24| 
+25|         // Nettoyage local
+26|         localStorage.removeItem('meetgay_token');
+27|         localStorage.removeItem('meetgay_user');
+28|         localStorage.removeItem('meetgay_user_full');
+29| 
+30|         // Redirection immédiate et sécurisée
+31|         window.location.replace('/');
+32|     } else {
+33|         // L'utilisateur a annulé : on remet l'état dans l'historique pour bloquer le prochain coup
+34|         history.pushState({ page: "chat" }, "Chat", location.href);
+35|     }
+36| });
+37| 
+38| // 3. Protection contre le BfCache de Firefox
+39| window.addEventListener('pageshow', function (event) {
+40|     if (event.persisted) {
+41|         history.replaceState({ page: "chat" }, "Chat", location.href);
+42|         history.pushState({ page: "chat" }, "Chat", location.href);
+43|     }
+44| });
+45| 
+46| 
+47| // Écouter aussi pageshow pour Firefox (bfcache)
+48| window.addEventListener('pageshow', function (event) {
+49|     if (event.persisted) {
+50|         console.log("📄 Page restaurée depuis le cache Firefox");
+51|         // Remet un état propre dans l'historique
+52|         history.replaceState({ page: "chat" }, "Chat", location.href);
+53|         history.pushState({ page: "chat" }, "Chat", location.href);
+54|     }
+55| });
 56| 
-57| // 1. D'abord le token dans son propre bloc
-58| {
-59|     let token = localStorage.getItem('meetgay_token');
-60|     if (!token) {
-61|         window.location.href = '/login.html';
-62|     }
-63| }
-64| 
-65| // 2. Ensuite socket dans un autre bloc
-66| const socket = io();
-67| 
-68| // ========== RÉCUPÉRATION DES INFOS UTILISATEUR DEPUIS LA BASE ==========00000
-69| let user = null;
-70| const storedUser = JSON.parse(localStorage.getItem('meetgay_user'));
-71| 
-72| async function initUser() {
-73|     console.log('1. Début initUser');
-74|     if (!storedUser || !storedUser.pseudo) {
-75|         console.log('2. Pas de storedUser');
-76|         window.location.href = '/login.html';
-77|         return;
-78|     }
-79| 
-80|     try {
-81|         console.log('3. Appel fetch pour pseudo:', storedUser.pseudo);
-82|         const response = await fetch('/api/get-user', {
-83|             method: 'POST',
-84|             headers: { 'Content-Type': 'application/json' },
-85|             body: JSON.stringify({ pseudo: storedUser.pseudo })
-86|         });
-87|         console.log('4. Réponse reçue, status:', response.status);
-88|         const data = await response.json();
-89|         console.log('5. Data reçue:', data);
-90|         if (data.success) {
-91|             user = data.user;
-92|             localStorage.setItem('meetgay_user_full', JSON.stringify(user));
-93|             console.log('6. Utilisateur chargé, démarrage chat');
-94|             startChat();
-95|         } else {
-96|             console.log('7. Pas de success');
-97|             window.location.href = '/login.html';
-98|         }
-99|     } catch (err) {
-100|         console.error('Erreur:', err);
-101|         window.location.href = '/login.html';
-102|     }
-103| }
-104| 
-105| // ========== DÉMARRAGE DU CHAT (après récupération des infos) ==========
-106| function startChat() {
-107|     // Éléments DOM
-108| 
-109|     // Charger l'historique des messages pour une conversation
-110|     async function loadHistory(withPseudo) {
-111|         try {
-112|             const response = await fetch(`/api/messages/${encodeURIComponent(user.pseudo)}/${encodeURIComponent(withPseudo)}`);
-113|             const messages = await response.json();
+57| 
+58| 
+59| 
+60| 
+61| console.log('✅ chat.js chargé');
+62| 
+63| // 1. D'abord le token dans son propre bloc
+64| {
+65|     let token = localStorage.getItem('meetgay_token');
+66|     if (!token) {
+67|         window.location.href = '/login.html';
+68|     }
+69| }
+70| 
+71| // 2. Ensuite socket dans un autre bloc
+72| const socket = io();
+73| 
+74| // ========== RÉCUPÉRATION DES INFOS UTILISATEUR DEPUIS LA BASE ==========00000
+75| let user = null;
+76| const storedUser = JSON.parse(localStorage.getItem('meetgay_user'));
+77| 
+78| async function initUser() {
+79|     console.log('1. Début initUser');
+80|     if (!storedUser || !storedUser.pseudo) {
+81|         console.log('2. Pas de storedUser');
+82|         window.location.href = '/login.html';
+83|         return;
+84|     }
+85| 
+86|     try {
+87|         console.log('3. Appel fetch pour pseudo:', storedUser.pseudo);
+88|         const response = await fetch('/api/get-user', {
+89|             method: 'POST',
+90|             headers: { 'Content-Type': 'application/json' },
+91|             body: JSON.stringify({ pseudo: storedUser.pseudo })
+92|         });
+93|         console.log('4. Réponse reçue, status:', response.status);
+94|         const data = await response.json();
+95|         console.log('5. Data reçue:', data);
+96|         if (data.success) {
+97|             user = data.user;
+98|             localStorage.setItem('meetgay_user_full', JSON.stringify(user));
+99|             console.log('6. Utilisateur chargé, démarrage chat');
+100|             startChat();
+101|         } else {
+102|             console.log('7. Pas de success');
+103|             window.location.href = '/login.html';
+104|         }
+105|     } catch (err) {
+106|         console.error('Erreur:', err);
+107|         window.location.href = '/login.html';
+108|     }
+109| }
+110| 
+111| // ========== DÉMARRAGE DU CHAT (après récupération des infos) ==========
+112| function startChat() {
+113|     // Éléments DOM
 114| 
-115|             // Nettoyer l'historique existant pour ce contact
-116|             if (!conversationHistory[withPseudo]) {
-117|                 conversationHistory[withPseudo] = [];
-118|             } else {
-119|                 conversationHistory[withPseudo] = [];
-120|             }
-121| 
-122|             // Ajouter les messages chargés
-123|             messages.forEach(msg => {
-124|                 const type = msg.from_pseudo === user.pseudo ? 'sent' : 'received';
-125|                 conversationHistory[withPseudo].push({
-126|                     text: msg.message,
-127|                     type: type,
-128|                     from: msg.from_pseudo,
-129|                     to: msg.to_pseudo,
-130|                     timestamp: new Date(msg.created_at)
-131|                 });
-132|             });
-133| 
-134|             updateHistoryDisplay();
-135|         } catch (err) {
-136|             console.error('Erreur chargement historique:', err);
-137|         }
-138|         ce
-139|     }
-140| 
-141|     const usersDiv = document.getElementById('usersList');
-142|     const messageInput = document.getElementById('messageInput');
-143|     const sendBtn = document.getElementById('sendBtn');
-144|     const envelope = document.getElementById('envelope');
-145| 
-146|     // Bouton déconnexion
-147|     const logoutBtn = document.getElementById('logoutBtn');
-148|     if (logoutBtn) {
-149|         logoutBtn.onclick = async () => {
-150|             try {
-151|                 await fetch('/api/delete-user', {
-152|                     method: 'POST',
-153|                     headers: { 'Content-Type': 'application/json' },
-154|                     body: JSON.stringify({ pseudo: user.pseudo })
-155|                 });
-156|             } catch (err) {
-157|                 console.error('Erreur suppression utilisateur:', err);
-158|             }
-159| 
-160|             localStorage.removeItem('meetgay_token');
-161|             localStorage.removeItem('meetgay_user');
-162|             localStorage.removeItem('meetgay_user_full');
-163|             socket.disconnect();
-164|             window.location.href = '/login.html';
-165|         };
-166|     }
-167| 
-168| 
-169|     // Variables d'état
-170|     let currentTarget = null;
-171|     let currentTargetName = null;
-172|     let pendingMessages = [];
-173|     let usersList = [];
+115|     // Charger l'historique des messages pour une conversation
+116|     async function loadHistory(withPseudo) {
+117|         try {
+118|             const response = await fetch(`/api/messages/${encodeURIComponent(user.pseudo)}/${encodeURIComponent(withPseudo)}`);
+119|             const messages = await response.json();
+120| 
+121|             // Nettoyer l'historique existant pour ce contact
+122|             if (!conversationHistory[withPseudo]) {
+123|                 conversationHistory[withPseudo] = [];
+124|             } else {
+125|                 conversationHistory[withPseudo] = [];
+126|             }
+127| 
+128|             // Ajouter les messages chargés
+129|             messages.forEach(msg => {
+130|                 const type = msg.from_pseudo === user.pseudo ? 'sent' : 'received';
+131|                 conversationHistory[withPseudo].push({
+132|                     text: msg.message,
+133|                     type: type,
+134|                     from: msg.from_pseudo,
+135|                     to: msg.to_pseudo,
+136|                     timestamp: new Date(msg.created_at)
+137|                 });
+138|             });
+139| 
+140|             updateHistoryDisplay();
+141|         } catch (err) {
+142|             console.error('Erreur chargement historique:', err);
+143|         }
+144|         ce
+145|     }
+146| 
+147|     const usersDiv = document.getElementById('usersList');
+148|     const messageInput = document.getElementById('messageInput');
+149|     const sendBtn = document.getElementById('sendBtn');
+150|     const envelope = document.getElementById('envelope');
+151| 
+152|     // Bouton déconnexion
+153|     const logoutBtn = document.getElementById('logoutBtn');
+154|     if (logoutBtn) {
+155|         logoutBtn.onclick = async () => {
+156|             try {
+157|                 await fetch('/api/delete-user', {
+158|                     method: 'POST',
+159|                     headers: { 'Content-Type': 'application/json' },
+160|                     body: JSON.stringify({ pseudo: user.pseudo })
+161|                 });
+162|             } catch (err) {
+163|                 console.error('Erreur suppression utilisateur:', err);
+164|             }
+165| 
+166|             localStorage.removeItem('meetgay_token');
+167|             localStorage.removeItem('meetgay_user');
+168|             localStorage.removeItem('meetgay_user_full');
+169|             socket.disconnect();
+170|             window.location.href = '/login.html';
+171|         };
+172|     }
+173| 
 174| 
-175|     // Afficher le pseudo dans le header
-176|     const userBadge = document.getElementById('userBadge');
-177|     if (userBadge) {
-178|         userBadge.innerHTML = `👤 ${escapeHtml(user.pseudo)} | ${user.age} ans`;
-179|     }
+175|     // Variables d'état
+176|     let currentTarget = null;
+177|     let currentTargetName = null;
+178|     let pendingMessages = [];
+179|     let usersList = [];
 180| 
-181|     // Initialiser l'utilisateur sur le serveur
-182|     socket.emit('user join', {
-183|         pseudo: user.pseudo,
-184|         age: user.age,
-185|         tendencies: user.tendencies,
-186|         locationCode: user.location_code,
-187|         locationName: user.location_name,
-188|         bio: user.bio || 'Aucune présentation',
-189|         gender: user.gender,
-190|         purpose: user.purpose,
-191|         language: localStorage.getItem('MeetGay_lang') || 'fr'
-192|     });
-193| 
-194| 
-195|     socket.on('join confirmed', (data) => {
-196|         console.log('✅ Join confirmé par le serveur:', data);
-197|     });
-198| 
-199|     socket.on('join error', (error) => {
-200|         console.error('❌ Erreur join:', error);
-201|     });
-202| 
-203|     // --------------------------------------------------------------
-204|     // GESTION DE LA LISTE DES CONNECTÉS
-205|     // --------------------------------------------------------------
-206|     socket.on('update users', (usersListData) => {
-207|         usersList = usersListData;
+181|     // Afficher le pseudo dans le header
+182|     const userBadge = document.getElementById('userBadge');
+183|     if (userBadge) {
+184|         userBadge.innerHTML = `👤 ${escapeHtml(user.pseudo)} | ${user.age} ans`;
+185|     }
+186| 
+187|     // Initialiser l'utilisateur sur le serveur
+188|     socket.emit('user join', {
+189|         pseudo: user.pseudo,
+190|         age: user.age,
+191|         tendencies: user.tendencies,
+192|         locationCode: user.location_code,
+193|         locationName: user.location_name,
+194|         bio: user.bio || 'Aucune présentation',
+195|         gender: user.gender,
+196|         purpose: user.purpose,
+197|         language: localStorage.getItem('MeetGay_lang') || 'fr'
+198|     });
+199| 
+200| 
+201|     socket.on('join confirmed', (data) => {
+202|         console.log('✅ Join confirmé par le serveur:', data);
+203|     });
+204| 
+205|     socket.on('join error', (error) => {
+206|         console.error('❌ Erreur join:', error);
+207|     });
 208| 
-209|         // Met à jour le compteur
-210|         const onlineCount = document.getElementById('onlineCount');
-211|         if (onlineCount) {
-212|             onlineCount.textContent = usersList.length;
-213|         }
+209|     // --------------------------------------------------------------
+210|     // GESTION DE LA LISTE DES CONNECTÉS
+211|     // --------------------------------------------------------------
+212|     socket.on('update users', (usersListData) => {
+213|         usersList = usersListData;
 214| 
-215|         if (usersList.length === 0) {
-216|             usersDiv.innerHTML = '<em>Aucun connecté</em>';
-217|             return;
-218|         }
-219| 
-220|         usersDiv.innerHTML = '';
-221| 
-222|         usersList.forEach(u => {
-223|             const div = document.createElement('div');
-224|             div.className = 'user-item';
-225|             const orientationSymbol = getOrientationSymbol(u.tendencies);
-226| 
-227|             // Vérifier si c'est l'utilisateur courant (comparer les socketId)
-228|             if (u.socketId === socket.id) {
-229|                 div.innerHTML = `<strong>${escapeHtml(u.pseudo)} (moi)</strong> <span style="font-size:12px;">(${u.age} ans, ${orientationSymbol} ${u.locationName || u.locationCode})</span>`;
-230|                 div.style.background = '#e9ecef';
-231|                 div.style.fontStyle = 'italic';
-232|             } else {
-233|                 div.innerHTML = `<strong>${escapeHtml(u.pseudo)}</strong> <span style="font-size:12px;">(${u.age} ans, ${orientationSymbol} ${u.locationName || u.locationCode})</span>`;
-234|                 div.onclick = () => {
-235|                     document.querySelectorAll('.user-item').forEach(el => el.classList.remove('current-target'));
-236|                     div.classList.add('current-target');
-237| 
-238|                     currentTarget = u.socketId;
-239|                     currentTargetName = u.pseudo;
-240|                     messageInput.disabled = false;
-241|                     sendBtn.disabled = false;
-242|                     messageInput.placeholder = `Message pour ${u.pseudo}...`;
-243|                     messageInput.focus();
-244|                     clearMessageArea();
-245|                     loadHistory(u.pseudo);
-246| 
-247|                     showContactInfo(
-248|                         u.pseudo,
-249|                         u.age,
-250|                         u.gender,
-251|                         u.tendencies,
-252|                         u.locationName || u.locationCode,  // ← ici on passe la localité
-253|                         u.purpose,
-254|                         u.bio || 'Pas de présentation'
-255|                     );
-256|                 };
-257|             }
-258|             usersDiv.appendChild(div);
-259|         });
-260|     });
-261| 
-262|     // --------------------------------------------------------------
-263|     // ENVOI ET RÉCEPTION DES MESSAGES
-264|     // --------------------------------------------------------------
-265|     socket.on('message sent confirmation', async (data) => {
-266|         displayMessage(data.message, 'sent', null, currentTargetName);
-267|         addToHistory(currentTargetName, data.message, 'sent', user.pseudo, currentTargetName);
-268| 
-269|         // Sauvegarder en base
-270|         try {
-271|             await fetch('/api/messages/save', {
-272|                 method: 'POST',
-273|                 headers: { 'Content-Type': 'application/json' },
-274|                 body: JSON.stringify({
-275|                     from: user.pseudo,
-276|                     to: currentTargetName,
-277|                     message: data.message
-278|                 })
-279|             });
-280|         } catch (err) {
-281|             console.error('Erreur sauvegarde message:', err);
-282|         }
-283| 
-284|         messageInput.value = '';
-285|         messageInput.focus();
-286|     });
-287| 
-288|     socket.on('private message received', (data) => {
-289|         pendingMessages.push(data);
-290| 
-291|         // Sauvegarder en base
-292|         fetch('/api/messages/save', {
-293|             method: 'POST',
-294|             headers: { 'Content-Type': 'application/json' },
-295|             body: JSON.stringify({
-296|                 from: data.fromPseudo,
-297|                 to: user.pseudo,
-298|                 message: data.message
-299|             })
-300|         }).catch(err => console.error('Erreur sauvegarde message reçu:', err));
-301| 
-302|         updateEnvelope(pendingMessages.length);
-303|         startBlinking();
-304|     });
-305| 
-306|     socket.on('error', (msg) => {
-307|         console.error('Erreur:', msg);
-308|     });
-309| 
-310|     socket.on('force logout', (data) => {
-311|         alert(data.reason);
-312|         localStorage.removeItem('meetgay_token');
-313|         localStorage.removeItem('meetgay_user');
-314|         window.location.href = '/login.html';
-315|     });
-316| 
-317|     // --------------------------------------------------------------
-318|     // ENVELOPPE (messages reçus)
-319|     // --------------------------------------------------------------
-320|     envelope.onclick = () => {
-321| 
-322|         if (pendingMessages.length === 0) return;
-323| 
-324|         const msg = pendingMessages.shift();
-325|         displayMessage(msg.message, 'received', msg.fromPseudo);
-326|         addToHistory(msg.fromPseudo, msg.message, 'received', msg.fromPseudo, user.pseudo);
-327|         loadHistory(msg.fromPseudo);  // ← AJOUTE CETTE LIGNE
-328| 
-329|         currentTarget = msg.fromSocketId;
-330|         currentTargetName = msg.fromPseudo;
-331|         messageInput.disabled = false;
-332|         sendBtn.disabled = false;
-333|         messageInput.placeholder = `Répondre à ${msg.fromPseudo}...`;
-334|         messageInput.focus();
-335| 
-336|         document.querySelectorAll('.user-item').forEach(el => {
-337|             if (el.textContent.includes(msg.fromPseudo) && !el.textContent.includes('(moi)')) {
-338|                 document.querySelectorAll('.user-item').forEach(e => e.classList.remove('current-target'));
-339|                 el.classList.add('current-target');
-340|             }
-341|         });
-342| 
-343|         const senderInfo = usersList.find(u => u.pseudo === msg.fromPseudo);
-344|         if (senderInfo) {
-345|             let bioText = senderInfo.bio || "Pas de présentation";
-346|             showContactInfo(senderInfo.pseudo, senderInfo.age, senderInfo.gender, senderInfo.tendencies, senderInfo.locationName || senderInfo.locationCode, senderInfo.purpose, bioText);
-347|         } else {
-348|             showContactInfo(msg.fromPseudo, '?', '', '?', '?', '?', 'Bio non disponible');
-349|         }
-350| 
-351|         updateEnvelope(pendingMessages.length);
-352|         if (pendingMessages.length === 0) {
-353|             stopBlinking();
-354|         }
-355|     };
+215|         // Met à jour le compteur
+216|         const onlineCount = document.getElementById('onlineCount');
+217|         if (onlineCount) {
+218|             onlineCount.textContent = usersList.length;
+219|         }
+220| 
+221|         if (usersList.length === 0) {
+222|             usersDiv.innerHTML = '<em>Aucun connecté</em>';
+223|             return;
+224|         }
+225| 
+226|         usersDiv.innerHTML = '';
+227| 
+228|         usersList.forEach(u => {
+229|             const div = document.createElement('div');
+230|             div.className = 'user-item';
+231|             const orientationSymbol = getOrientationSymbol(u.tendencies);
+232| 
+233|             // Vérifier si c'est l'utilisateur courant (comparer les socketId)
+234|             if (u.socketId === socket.id) {
+235|                 div.innerHTML = `<strong>${escapeHtml(u.pseudo)} (moi)</strong> <span style="font-size:12px;">(${u.age} ans, ${orientationSymbol} ${u.locationName || u.locationCode})</span>`;
+236|                 div.style.background = '#e9ecef';
+237|                 div.style.fontStyle = 'italic';
+238|             } else {
+239|                 div.innerHTML = `<strong>${escapeHtml(u.pseudo)}</strong> <span style="font-size:12px;">(${u.age} ans, ${orientationSymbol} ${u.locationName || u.locationCode})</span>`;
+240|                 div.onclick = () => {
+241|                     document.querySelectorAll('.user-item').forEach(el => el.classList.remove('current-target'));
+242|                     div.classList.add('current-target');
+243| 
+244|                     currentTarget = u.socketId;
+245|                     currentTargetName = u.pseudo;
+246|                     messageInput.disabled = false;
+247|                     sendBtn.disabled = false;
+248|                     messageInput.placeholder = `Message pour ${u.pseudo}...`;
+249|                     messageInput.focus();
+250|                     clearMessageArea();
+251|                     loadHistory(u.pseudo);
+252| 
+253|                     showContactInfo(
+254|                         u.pseudo,
+255|                         u.age,
+256|                         u.gender,
+257|                         u.tendencies,
+258|                         u.locationName || u.locationCode,  // ← ici on passe la localité
+259|                         u.purpose,
+260|                         u.bio || 'Pas de présentation'
+261|                     );
+262|                 };
+263|             }
+264|             usersDiv.appendChild(div);
+265|         });
+266|     });
+267| 
+268|     // --------------------------------------------------------------
+269|     // ENVOI ET RÉCEPTION DES MESSAGES
+270|     // --------------------------------------------------------------
+271|     socket.on('message sent confirmation', async (data) => {
+272|         displayMessage(data.message, 'sent', null, currentTargetName);
+273|         addToHistory(currentTargetName, data.message, 'sent', user.pseudo, currentTargetName);
+274| 
+275|         // Sauvegarder en base
+276|         try {
+277|             await fetch('/api/messages/save', {
+278|                 method: 'POST',
+279|                 headers: { 'Content-Type': 'application/json' },
+280|                 body: JSON.stringify({
+281|                     from: user.pseudo,
+282|                     to: currentTargetName,
+283|                     message: data.message
+284|                 })
+285|             });
+286|         } catch (err) {
+287|             console.error('Erreur sauvegarde message:', err);
+288|         }
+289| 
+290|         messageInput.value = '';
+291|         messageInput.focus();
+292|     });
+293| 
+294|     socket.on('private message received', (data) => {
+295|         pendingMessages.push(data);
+296| 
+297|         // Sauvegarder en base
+298|         fetch('/api/messages/save', {
+299|             method: 'POST',
+300|             headers: { 'Content-Type': 'application/json' },
+301|             body: JSON.stringify({
+302|                 from: data.fromPseudo,
+303|                 to: user.pseudo,
+304|                 message: data.message
+305|             })
+306|         }).catch(err => console.error('Erreur sauvegarde message reçu:', err));
+307| 
+308|         updateEnvelope(pendingMessages.length);
+309|         startBlinking();
+310|     });
+311| 
+312|     socket.on('error', (msg) => {
+313|         console.error('Erreur:', msg);
+314|     });
+315| 
+316|     socket.on('force logout', (data) => {
+317|         alert(data.reason);
+318|         localStorage.removeItem('meetgay_token');
+319|         localStorage.removeItem('meetgay_user');
+320|         window.location.href = '/login.html';
+321|     });
+322| 
+323|     // --------------------------------------------------------------
+324|     // ENVELOPPE (messages reçus)
+325|     // --------------------------------------------------------------
+326|     envelope.onclick = () => {
+327| 
+328|         if (pendingMessages.length === 0) return;
+329| 
+330|         const msg = pendingMessages.shift();
+331|         displayMessage(msg.message, 'received', msg.fromPseudo);
+332|         addToHistory(msg.fromPseudo, msg.message, 'received', msg.fromPseudo, user.pseudo);
+333|         loadHistory(msg.fromPseudo);  // ← AJOUTE CETTE LIGNE
+334| 
+335|         currentTarget = msg.fromSocketId;
+336|         currentTargetName = msg.fromPseudo;
+337|         messageInput.disabled = false;
+338|         sendBtn.disabled = false;
+339|         messageInput.placeholder = `Répondre à ${msg.fromPseudo}...`;
+340|         messageInput.focus();
+341| 
+342|         document.querySelectorAll('.user-item').forEach(el => {
+343|             if (el.textContent.includes(msg.fromPseudo) && !el.textContent.includes('(moi)')) {
+344|                 document.querySelectorAll('.user-item').forEach(e => e.classList.remove('current-target'));
+345|                 el.classList.add('current-target');
+346|             }
+347|         });
+348| 
+349|         const senderInfo = usersList.find(u => u.pseudo === msg.fromPseudo);
+350|         if (senderInfo) {
+351|             let bioText = senderInfo.bio || "Pas de présentation";
+352|             showContactInfo(senderInfo.pseudo, senderInfo.age, senderInfo.gender, senderInfo.tendencies, senderInfo.locationName || senderInfo.locationCode, senderInfo.purpose, bioText);
+353|         } else {
+354|             showContactInfo(msg.fromPseudo, '?', '', '?', '?', '?', 'Bio non disponible');
+355|         }
 356| 
-357|     // --------------------------------------------------------------
-358|     // ENVOI DE MESSAGE
-359|     // --------------------------------------------------------------
-360|     sendBtn.onclick = () => {
-361|         const text = messageInput.value.trim();
-362|         if (!text || !currentTarget) return;
-363| 
-364|         if (currentReceivedMessage !== null) {
-365|             clearMessageArea();
-366| 
-367|         }
-368| 
-369|         socket.emit('private message', {
-370|             toSocketId: currentTarget,
-371|             message: text,
-372|             fromPseudo: user.pseudo
-373|         });
-374|     };
-375| 
-376|     messageInput.addEventListener('keypress', (e) => {
-377|         if (e.key === 'Enter') sendBtn.click();
-378|     });
-379| 
-380|     // --------------------------------------------------------------
-381|     // CHAT PRIVÉ (POPUP)
-382|     // --------------------------------------------------------------
-383|     let privateChatAvailable = {};
-384| 
-385|     socket.on('privateChatAvailable', (data) => {
-386|         console.log(`🔔 Seuil atteint avec ${data.with}`);
-387|         privateChatAvailable[data.with] = true;
-388|         showPrivatePopup(data.with);
-389|     });
+357|         updateEnvelope(pendingMessages.length);
+358|         if (pendingMessages.length === 0) {
+359|             stopBlinking();
+360|         }
+361|     };
+362| 
+363|     // --------------------------------------------------------------
+364|     // ENVOI DE MESSAGE
+365|     // --------------------------------------------------------------
+366|     sendBtn.onclick = () => {
+367|         const text = messageInput.value.trim();
+368|         if (!text || !currentTarget) return;
+369| 
+370|         if (currentReceivedMessage !== null) {
+371|             clearMessageArea();
+372| 
+373|         }
+374| 
+375|         socket.emit('private message', {
+376|             toSocketId: currentTarget,
+377|             message: text,
+378|             fromPseudo: user.pseudo
+379|         });
+380|     };
+381| 
+382|     messageInput.addEventListener('keypress', (e) => {
+383|         if (e.key === 'Enter') sendBtn.click();
+384|     });
+385| 
+386|     // --------------------------------------------------------------
+387|     // CHAT PRIVÉ (POPUP)
+388|     // --------------------------------------------------------------
+389|     let privateChatAvailable = {};
 390| 
-391|     function showPrivatePopup(pseudo) {
-392|         if (document.getElementById('privatePopup')) return;
-393| 
-394|         const chatPanel = document.querySelector('.chat-panel');
-395|         if (!chatPanel) return;
+391|     socket.on('privateChatAvailable', (data) => {
+392|         console.log(`🔔 Seuil atteint avec ${data.with}`);
+393|         privateChatAvailable[data.with] = true;
+394|         showPrivatePopup(data.with);
+395|     });
 396| 
-397|         if (getComputedStyle(chatPanel).position !== 'relative') {
-398|             chatPanel.style.position = 'relative';
-399|         }
-400| 
-401|         const inputArea = document.querySelector('.input-area');
-402|         if (!inputArea) return;
-403| 
-404|         const inputRect = inputArea.getBoundingClientRect();
-405|         const chatRect = chatPanel.getBoundingClientRect();
-406|         const topPosition = inputRect.bottom - chatRect.top;
-407| 
-408|         const popup = document.createElement('div');
-409|         popup.id = 'privatePopup';
-410|         popup.style.cssText = `
-411|             position: absolute;
-412|             top: ${topPosition + 5}px;
-413|             left: 0;
-414|             right: 0;
-415|             background: #2c3e50;
-416|             color: white;
-417|             border-radius: 8px;
-418|             padding: 10px 12px;
-419|             z-index: 1000;
-420|             font-family: 'Segoe UI', sans-serif;
-421|             font-size: 12px;
-422|             display: flex;
-423|             justify-content: space-between;
-424|             align-items: center;
-425|             flex-wrap: wrap;
-426|             gap: 8px;
-427|             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-428|             opacity: 0;
-429|             transform: translateY(-10px);
-430|             transition: opacity 0.2s ease, transform 0.2s ease;
-431|         `;
-432| 
-433|         popup.innerHTML = `
-434|             <span>💬 <strong>${pseudo}</strong> : 3 messages échangés. Passer en privé ?</span>
-435|             <div style="display: flex; gap: 6px;">
-436|                 <button id="popupAccept" style="background:#27ae60; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">✅ Oui</button>
-437|                 <button id="popupDecline" style="background:#e74c3c; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">❌ Non</button>
-438|             </div>
-439|         `;
-440| 
-441|         chatPanel.appendChild(popup);
-442| 
-443|         setTimeout(() => {
-444|             popup.style.opacity = '1';
-445|             popup.style.transform = 'translateY(0)';
-446|         }, 10);
-447| 
-448|         document.getElementById('popupAccept').onclick = () => {
-449|             socket.emit('invitePrivate', { toPseudo: pseudo, fromPseudo: user.pseudo });
-450|             popup.remove();
-451|         };
-452| 
-453|         document.getElementById('popupDecline').onclick = () => {
-454|             popup.remove();
-455|         };
-456|     }
-457| 
-458|     socket.on('privateInviteReceived', (data) => {
-459|         if (document.getElementById('invitePopup')) return;
-460| 
-461|         const chatPanel = document.querySelector('.chat-panel');
-462|         if (!chatPanel) return;
+397|     function showPrivatePopup(pseudo) {
+398|         if (document.getElementById('privatePopup')) return;
+399| 
+400|         const chatPanel = document.querySelector('.chat-panel');
+401|         if (!chatPanel) return;
+402| 
+403|         if (getComputedStyle(chatPanel).position !== 'relative') {
+404|             chatPanel.style.position = 'relative';
+405|         }
+406| 
+407|         const inputArea = document.querySelector('.input-area');
+408|         if (!inputArea) return;
+409| 
+410|         const inputRect = inputArea.getBoundingClientRect();
+411|         const chatRect = chatPanel.getBoundingClientRect();
+412|         const topPosition = inputRect.bottom - chatRect.top;
+413| 
+414|         const popup = document.createElement('div');
+415|         popup.id = 'privatePopup';
+416|         popup.style.cssText = `
+417|             position: absolute;
+418|             top: ${topPosition + 5}px;
+419|             left: 0;
+420|             right: 0;
+421|             background: #2c3e50;
+422|             color: white;
+423|             border-radius: 8px;
+424|             padding: 10px 12px;
+425|             z-index: 1000;
+426|             font-family: 'Segoe UI', sans-serif;
+427|             font-size: 12px;
+428|             display: flex;
+429|             justify-content: space-between;
+430|             align-items: center;
+431|             flex-wrap: wrap;
+432|             gap: 8px;
+433|             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+434|             opacity: 0;
+435|             transform: translateY(-10px);
+436|             transition: opacity 0.2s ease, transform 0.2s ease;
+437|         `;
+438| 
+439|         popup.innerHTML = `
+440|             <span>💬 <strong>${pseudo}</strong> : 3 messages échangés. Passer en privé ?</span>
+441|             <div style="display: flex; gap: 6px;">
+442|                 <button id="popupAccept" style="background:#27ae60; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">✅ Oui</button>
+443|                 <button id="popupDecline" style="background:#e74c3c; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">❌ Non</button>
+444|             </div>
+445|         `;
+446| 
+447|         chatPanel.appendChild(popup);
+448| 
+449|         setTimeout(() => {
+450|             popup.style.opacity = '1';
+451|             popup.style.transform = 'translateY(0)';
+452|         }, 10);
+453| 
+454|         document.getElementById('popupAccept').onclick = () => {
+455|             socket.emit('invitePrivate', { toPseudo: pseudo, fromPseudo: user.pseudo });
+456|             popup.remove();
+457|         };
+458| 
+459|         document.getElementById('popupDecline').onclick = () => {
+460|             popup.remove();
+461|         };
+462|     }
 463| 
-464|         if (getComputedStyle(chatPanel).position !== 'relative') {
-465|             chatPanel.style.position = 'relative';
-466|         }
-467| 
-468|         const inputArea = document.querySelector('.input-area');
-469|         if (!inputArea) return;
-470| 
-471|         const inputRect = inputArea.getBoundingClientRect();
-472|         const chatRect = chatPanel.getBoundingClientRect();
-473|         const topPosition = inputRect.bottom - chatRect.top;
-474| 
-475|         const popup = document.createElement('div');
-476|         popup.id = 'invitePopup';
-477|         popup.style.cssText = `
-478|             position: absolute;
-479|             top: ${topPosition + 5}px;
-480|             left: 0;
-481|             right: 0;
-482|             background: #2c3e50;
-483|             color: white;
-484|             border-radius: 8px;
-485|             padding: 10px 12px;
-486|             z-index: 1000;
-487|             font-family: 'Segoe UI', sans-serif;
-488|             font-size: 12px;
-489|             display: flex;
-490|             justify-content: space-between;
-491|             align-items: center;
-492|             flex-wrap: wrap;
-493|             gap: 8px;
-494|             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-495|             opacity: 0;
-496|             transform: translateY(-10px);
-497|             transition: opacity 0.2s ease, transform 0.2s ease;
-498|         `;
-499| 
-500|         popup.innerHTML = `
-501|             <span>🔔 <strong>${data.from}</strong> vous invite en chat privé.</span>
-502|             <div style="display: flex; gap: 6px;">
-503|                 <button id="inviteAccept" style="background:#27ae60; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">✅ Accepter</button>
-504|                 <button id="inviteDecline" style="background:#e74c3c; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">❌ Refuser</button>
-505|             </div>
-506|         `;
-507| 
-508|         chatPanel.appendChild(popup);
-509| 
-510|         setTimeout(() => {
-511|             popup.style.opacity = '1';
-512|             popup.style.transform = 'translateY(0)';
-513|         }, 10);
-514| 
-515|         document.getElementById('inviteAccept').onclick = () => {
-516|             socket.emit('acceptPrivateInvite', { fromPseudo: data.from, toPseudo: user.pseudo });
-517|             popup.remove();
-518|             alert(`💬 Chat privé ouvert avec ${data.from} !`);
-519|         };
+464|     socket.on('privateInviteReceived', (data) => {
+465|         if (document.getElementById('invitePopup')) return;
+466| 
+467|         const chatPanel = document.querySelector('.chat-panel');
+468|         if (!chatPanel) return;
+469| 
+470|         if (getComputedStyle(chatPanel).position !== 'relative') {
+471|             chatPanel.style.position = 'relative';
+472|         }
+473| 
+474|         const inputArea = document.querySelector('.input-area');
+475|         if (!inputArea) return;
+476| 
+477|         const inputRect = inputArea.getBoundingClientRect();
+478|         const chatRect = chatPanel.getBoundingClientRect();
+479|         const topPosition = inputRect.bottom - chatRect.top;
+480| 
+481|         const popup = document.createElement('div');
+482|         popup.id = 'invitePopup';
+483|         popup.style.cssText = `
+484|             position: absolute;
+485|             top: ${topPosition + 5}px;
+486|             left: 0;
+487|             right: 0;
+488|             background: #2c3e50;
+489|             color: white;
+490|             border-radius: 8px;
+491|             padding: 10px 12px;
+492|             z-index: 1000;
+493|             font-family: 'Segoe UI', sans-serif;
+494|             font-size: 12px;
+495|             display: flex;
+496|             justify-content: space-between;
+497|             align-items: center;
+498|             flex-wrap: wrap;
+499|             gap: 8px;
+500|             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+501|             opacity: 0;
+502|             transform: translateY(-10px);
+503|             transition: opacity 0.2s ease, transform 0.2s ease;
+504|         `;
+505| 
+506|         popup.innerHTML = `
+507|             <span>🔔 <strong>${data.from}</strong> vous invite en chat privé.</span>
+508|             <div style="display: flex; gap: 6px;">
+509|                 <button id="inviteAccept" style="background:#27ae60; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">✅ Accepter</button>
+510|                 <button id="inviteDecline" style="background:#e74c3c; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">❌ Refuser</button>
+511|             </div>
+512|         `;
+513| 
+514|         chatPanel.appendChild(popup);
+515| 
+516|         setTimeout(() => {
+517|             popup.style.opacity = '1';
+518|             popup.style.transform = 'translateY(0)';
+519|         }, 10);
 520| 
-521|         document.getElementById('inviteDecline').onclick = () => {
-522|             socket.emit('declinePrivateInvite', { fromPseudo: user.pseudo, toPseudo: data.from });
+521|         document.getElementById('inviteAccept').onclick = () => {
+522|             socket.emit('acceptPrivateInvite', { fromPseudo: data.from, toPseudo: user.pseudo });
 523|             popup.remove();
-524|         };
-525|     });
+524|             alert(`💬 Chat privé ouvert avec ${data.from} !`);
+525|         };
 526| 
-527| 
-528| }
-529| 
-530| 
-531| 
-532| // ========== LANCEMENT ==========
-533| initUser();
+527|         document.getElementById('inviteDecline').onclick = () => {
+528|             socket.emit('declinePrivateInvite', { fromPseudo: user.pseudo, toPseudo: data.from });
+529|             popup.remove();
+530|         };
+531|     });
+532| 
+533| 
+534| }
+535| 
+536| 
+537| 
+538| // ========== LANCEMENT ==========
+539| initUser();
 
 # FILE: /var/www/meetgay/public/js/utils.js
 
