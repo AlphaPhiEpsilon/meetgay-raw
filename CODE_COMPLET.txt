@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-09 22:12:46
+# Généré le 2026-06-09 22:13:17
 
 ==============================================================================
 # SYSTEME DE CLONE DE FICHIER MIS A JOUR EN TEMPS REEL 
@@ -2170,68 +2170,77 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 729|         socket.emit('join confirmed', { success: true, user: userInfo });
 730|     });
 731| 
-732|     socket.on('private message', (data) => {
-733|         const { toSocketId, message, fromPseudo } = data;
-734|         console.log(`💬 Message privé de ${fromPseudo} vers ${toSocketId}: ${message}`);
-735|         updateActivity(socket.id);
-736|         socket.to(toSocketId).emit('private message received', {
-737|             message: message,
-738|             fromPseudo: fromPseudo,
-739|             fromSocketId: socket.id
-740|         });
-741|         socket.emit('message sent confirmation', { message: message, to: toSocketId });
-742|     });
-743| 
-744|     // 👇 AJOUTEZ UNIQUEMENT CE BLOC ICI (Délai de grâce Anti-F5)
-745|     socket.on('disconnect', () => {
-746|         const userInfo = users[socket.id];
-747|         if (userInfo && userInfo.pseudo) {
-748|             const pseudo = userInfo.pseudo;
-749|             console.log(`🔌 Déconnexion temporaire de ${pseudo} (Socket: ${socket.id}). Lancement du délai de grâce de 5s...`);
-750| 
-751|             // Lancement du compte à rebours de 5 secondes
-752|             disconnectionTimers[pseudo] = setTimeout(async () => {
-753|                 console.log(`🚨 Délai dépassé (5s) : Suppression définitive de ${pseudo}`);
-754| 
-755|                 // 1. Nettoyage de la mémoire des connectés
-756|                 delete users[socket.id];
-757| 
-758|                 // Renvoi de la liste mise à jour aux autres utilisateurs
-759|                 const usersList = Object.values(users).sort((a, b) => (b.firstConnectedAt || 0) - (a.firstConnectedAt || 0)).map(u => ({
-760|                     pseudo: u.pseudo,
-761|                     age: u.age,
-762|                     tendencies: u.tendencies,
-763|                     gender: u.gender,
-764|                     purpose: u.purpose,
-765|                     bio: u.bio,
-766|                     locationCode: u.locationCode,
-767|                     locationName: u.locationName,
-768|                     socketId: u.socketId
-769|                 }));
-770|                 io.emit('update users', usersList);
-771| 
-772|                 // 2. Suppression de la base de données PostgreSQL
-773|                 try {
-774|                     await pool.query('DELETE FROM users WHERE pseudo = $1', [pseudo]);
-775|                     console.log(`🗑️ Utilisateur ${pseudo} supprimé de la base de données.`);
-776|                 } catch (err) {
-777|                     console.error(`❌ Erreur SQL lors de la suppression de ${pseudo}:`, err);
-778|                 }
-779| 
-780|                 delete disconnectionTimers[pseudo];
-781|             }, 1000); // 5 secondes
-782|         }
-783|     });
-784| });
-785| 
-786| // ========== 9. OPTIONS EXTERNALISÉES ==========
-787| startCleanup(pool, () => Object.values(users).map(u => u.pseudo), CLEANUP_INTERVAL_MINUTES * 60 * 1000);
+732| 
+733|     // Heartbeat pour mettre à jour lastSeen
+734|     socket.on('heartbeat', () => {
+735|         if (users[socket.id]) {
+736|             users[socket.id].lastSeen = Date.now();
+737|         }
+738|     });
+739| 
+740| 
+741|     socket.on('private message', (data) => {
+742|         const { toSocketId, message, fromPseudo } = data;
+743|         console.log(`💬 Message privé de ${fromPseudo} vers ${toSocketId}: ${message}`);
+744|         updateActivity(socket.id);
+745|         socket.to(toSocketId).emit('private message received', {
+746|             message: message,
+747|             fromPseudo: fromPseudo,
+748|             fromSocketId: socket.id
+749|         });
+750|         socket.emit('message sent confirmation', { message: message, to: toSocketId });
+751|     });
+752| 
+753|     // 👇 AJOUTEZ UNIQUEMENT CE BLOC ICI (Délai de grâce Anti-F5)
+754|     socket.on('disconnect', () => {
+755|         const userInfo = users[socket.id];
+756|         if (userInfo && userInfo.pseudo) {
+757|             const pseudo = userInfo.pseudo;
+758|             console.log(`🔌 Déconnexion temporaire de ${pseudo} (Socket: ${socket.id}). Lancement du délai de grâce de 5s...`);
+759| 
+760|             // Lancement du compte à rebours de 5 secondes
+761|             disconnectionTimers[pseudo] = setTimeout(async () => {
+762|                 console.log(`🚨 Délai dépassé (5s) : Suppression définitive de ${pseudo}`);
+763| 
+764|                 // 1. Nettoyage de la mémoire des connectés
+765|                 delete users[socket.id];
+766| 
+767|                 // Renvoi de la liste mise à jour aux autres utilisateurs
+768|                 const usersList = Object.values(users).sort((a, b) => (b.firstConnectedAt || 0) - (a.firstConnectedAt || 0)).map(u => ({
+769|                     pseudo: u.pseudo,
+770|                     age: u.age,
+771|                     tendencies: u.tendencies,
+772|                     gender: u.gender,
+773|                     purpose: u.purpose,
+774|                     bio: u.bio,
+775|                     locationCode: u.locationCode,
+776|                     locationName: u.locationName,
+777|                     socketId: u.socketId
+778|                 }));
+779|                 io.emit('update users', usersList);
+780| 
+781|                 // 2. Suppression de la base de données PostgreSQL
+782|                 try {
+783|                     await pool.query('DELETE FROM users WHERE pseudo = $1', [pseudo]);
+784|                     console.log(`🗑️ Utilisateur ${pseudo} supprimé de la base de données.`);
+785|                 } catch (err) {
+786|                     console.error(`❌ Erreur SQL lors de la suppression de ${pseudo}:`, err);
+787|                 }
 788| 
-789| // ========== 10. DÉMARRAGE ==========
-790| const PORT = process.env.PORT || 3005;
-791| server.listen(PORT, '0.0.0.0', () => {
-792|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+789|                 delete disconnectionTimers[pseudo];
+790|             }, 1000); // 5 secondes
+791|         }
+792|     });
 793| });
+794| 
+795| // ========== 9. OPTIONS EXTERNALISÉES ==========
+796| startCleanup(pool, () => Object.values(users).map(u => u.pseudo), CLEANUP_INTERVAL_MINUTES * 60 * 1000);
+797| 
+798| // ========== 10. DÉMARRAGE ==========
+799| const PORT = process.env.PORT || 3005;
+800| server.listen(PORT, '0.0.0.0', () => {
+801|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+802| });
 
 # FILE: /var/www/meetgay/options.js
 
