@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-09 01:56:59
+# Généré le 2026-06-09 01:57:30
 
 ==============================================================================
 # SYSTEME DE CLONE DE FICHIER MIS A JOUR EN TEMPS REEL 
@@ -191,55 +191,55 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 6|     self.skipWaiting();
 7| });
 8| 
-9| // Ouvrir la porte (donner l'accès à login.html pendant 30 secondes)
+9| // ========== GESTION DE LA PORTE ==========
 10| async function openTheDoor() {
 11|     const cache = await caches.open('door_permission');
-12|     const permission = new Response(JSON.stringify({ allow: true, expires: Date.now() + 30000 }));
-13|     await cache.put('/door', permission);
-14|     console.log('🚪 Porte ouverte pour 30 secondes');
-15| }
-16| 
-17| // Vérifier si la porte est ouverte
-18| async function isDoorOpen() {
-19|     const cache = await caches.open('door_permission');
-20|     const response = await cache.match('/door');
-21|     if (!response) return false;
-22| 
-23|     const data = await response.json();
-24|     if (data.allow && Date.now() < data.expires) {
-25|         return true;
-26|     }
-27|     // Porte expirée → on la ferme proprement
-28|     await cache.delete('/door');
-29|     return false;
-30| }
-31| 
-32| // Fermer la porte (supprimer la permission)
+12|     const permission = new Response(JSON.stringify({
+13|         allow: true,
+14|         expires: Date.now() + 30000  // 30 secondes
+15|     }));
+16|     await cache.put('/door', permission);
+17|     console.log('🚪 Porte ouverte pour 30 secondes');
+18| }
+19| 
+20| async function isDoorOpen() {
+21|     const cache = await caches.open('door_permission');
+22|     const response = await cache.match('/door');
+23|     if (!response) return false;
+24| 
+25|     const data = await response.json();
+26|     if (data.allow && Date.now() < data.expires) {
+27|         return true;
+28|     }
+29|     await cache.delete('/door');
+30|     return false;
+31| }
+32| 
 33| async function closeTheDoor() {
 34|     const cache = await caches.open('door_permission');
 35|     await cache.delete('/door');
 36|     console.log('🚪 Porte fermée');
 37| }
 38| 
-39| self.addEventListener('fetch', event => {
-40|     const url = new URL(event.request.url);
-41| 
-42|     // CAS 1 : L'utilisateur quitte chat.html (retour arrière)
-43|     // On détecte ça en voyant une requête vers chat.html avec un referrer qui contient chat.html
-44|     if (url.pathname === '/chat.html' && event.request.referrer && event.request.referrer.includes('/chat.html')) {
-45|         console.log('🔙 Retour arrière détecté depuis chat.html');
-46|         event.waitUntil(openTheDoor());  // Ouvre la porte pour 30 secondes
-47|         event.respondWith(fetch(event.request));
-48|         return;
-49|     }
+39| // ========== ÉCOUTE LES MESSAGES DE LA PAGE ==========
+40| self.addEventListener('message', event => {
+41|     if (event.data && event.data.action === 'openDoor') {
+42|         console.log('🔑 SW reçoit demande d\'ouverture de la porte');
+43|         openTheDoor();
+44|     }
+45| });
+46| 
+47| // ========== INTERCEPTION DES REQUÊTES ==========
+48| self.addEventListener('fetch', event => {
+49|     const url = new URL(event.request.url);
 50| 
-51|     // CAS 2 : L'utilisateur essaie d'aller sur login.html
+51|     // Tentative d'accès à login.html
 52|     if (url.pathname === '/login.html') {
 53|         event.respondWith(
 54|             isDoorOpen().then(open => {
 55|                 if (open) {
 56|                     console.log('✅ Porte ouverte → accès à login.html autorisé');
-57|                     event.waitUntil(closeTheDoor());  // La porte se referme après usage
+57|                     event.waitUntil(closeTheDoor());
 58|                     return fetch(event.request);
 59|                 } else {
 60|                     console.log('🚫 Porte fermée → redirection vers index');
@@ -250,7 +250,7 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 65|         return;
 66|     }
 67| 
-68|     // Tous les autres fichiers
+68|     // Toutes les autres requêtes
 69|     event.respondWith(
 70|         caches.match(event.request).then(response => response || fetch(event.request))
 71|     );
@@ -1323,52 +1323,29 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 491|         };
 492|     });
 493| 
-494|     // Blocage retour arrière
-495|     history.pushState(null, null, location.href);
-496| 
-497|     // Pour Firefox (bfcache)
-498|     window.addEventListener('pageshow', (event) => {
-499|         if (event.persisted) window.location.replace('/');
-500|     });
+494| 
+495| 
+496|     // ========== OUVRE LA PORTE AU RETOUR ARRIÈRE ==========
+497|     window.addEventListener('pageshow', function (event) {
+498|         // Détecte si la page vient du cache arrière (retour arrière)
+499|         if (event.persisted) {
+500|             console.log('🔙 Retour arrière détecté depuis chat.html');
 501| 
-502|     // Pour les autres navigateurs
-503|     window.addEventListener('popstate', () => window.location.replace('/'));
-504| 
-505|     // ==========================================
-506|     // SÉCURITÉ : NETTOYAGE À LA SORTIE
-507|     // ==========================================
-508| 
-509|     window.addEventListener('beforeunload', function () {
-510|         const stored = localStorage.getItem('meetgay_user');
-511|         if (stored) {
-512|             try {
-513|                 const pseudo = JSON.parse(stored).pseudo;
-514|                 navigator.sendBeacon('/api/delete-user', JSON.stringify({ pseudo }));
-515|             } catch (e) { }
-516|         }
-517|     });
-518| 
-519|     // ========== OUVRE LA PORTE AU RETOUR ARRIÈRE ==========
-520|     window.addEventListener('pageshow', function (event) {
-521|         // Détecte si la page vient du cache arrière (retour arrière)
-522|         if (event.persisted) {
-523|             console.log('🔙 Retour arrière détecté depuis chat.html');
-524| 
-525|             // Envoie un message au Service Worker pour ouvrir la porte
-526|             if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-527|                 navigator.serviceWorker.controller.postMessage({
-528|                     action: 'openDoor'
-529|                 });
-530|             }
-531|         }
-532|     });
-533| 
-534| 
-535| 
-536| }
-537| 
-538| // ========== LANCEMENT ==========
-539| initUser();
+502|             // Envoie un message au Service Worker pour ouvrir la porte
+503|             if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+504|                 navigator.serviceWorker.controller.postMessage({
+505|                     action: 'openDoor'
+506|                 });
+507|             }
+508|         }
+509|     });
+510| 
+511| 
+512| 
+513| }
+514| 
+515| // ========== LANCEMENT ==========
+516| initUser();
 
 # FILE: /var/www/meetgay/public/js/utils.js
 
@@ -2752,55 +2729,55 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 6|     self.skipWaiting();
 7| });
 8| 
-9| // Ouvrir la porte (donner l'accès à login.html pendant 30 secondes)
+9| // ========== GESTION DE LA PORTE ==========
 10| async function openTheDoor() {
 11|     const cache = await caches.open('door_permission');
-12|     const permission = new Response(JSON.stringify({ allow: true, expires: Date.now() + 30000 }));
-13|     await cache.put('/door', permission);
-14|     console.log('🚪 Porte ouverte pour 30 secondes');
-15| }
-16| 
-17| // Vérifier si la porte est ouverte
-18| async function isDoorOpen() {
-19|     const cache = await caches.open('door_permission');
-20|     const response = await cache.match('/door');
-21|     if (!response) return false;
-22| 
-23|     const data = await response.json();
-24|     if (data.allow && Date.now() < data.expires) {
-25|         return true;
-26|     }
-27|     // Porte expirée → on la ferme proprement
-28|     await cache.delete('/door');
-29|     return false;
-30| }
-31| 
-32| // Fermer la porte (supprimer la permission)
+12|     const permission = new Response(JSON.stringify({
+13|         allow: true,
+14|         expires: Date.now() + 30000  // 30 secondes
+15|     }));
+16|     await cache.put('/door', permission);
+17|     console.log('🚪 Porte ouverte pour 30 secondes');
+18| }
+19| 
+20| async function isDoorOpen() {
+21|     const cache = await caches.open('door_permission');
+22|     const response = await cache.match('/door');
+23|     if (!response) return false;
+24| 
+25|     const data = await response.json();
+26|     if (data.allow && Date.now() < data.expires) {
+27|         return true;
+28|     }
+29|     await cache.delete('/door');
+30|     return false;
+31| }
+32| 
 33| async function closeTheDoor() {
 34|     const cache = await caches.open('door_permission');
 35|     await cache.delete('/door');
 36|     console.log('🚪 Porte fermée');
 37| }
 38| 
-39| self.addEventListener('fetch', event => {
-40|     const url = new URL(event.request.url);
-41| 
-42|     // CAS 1 : L'utilisateur quitte chat.html (retour arrière)
-43|     // On détecte ça en voyant une requête vers chat.html avec un referrer qui contient chat.html
-44|     if (url.pathname === '/chat.html' && event.request.referrer && event.request.referrer.includes('/chat.html')) {
-45|         console.log('🔙 Retour arrière détecté depuis chat.html');
-46|         event.waitUntil(openTheDoor());  // Ouvre la porte pour 30 secondes
-47|         event.respondWith(fetch(event.request));
-48|         return;
-49|     }
+39| // ========== ÉCOUTE LES MESSAGES DE LA PAGE ==========
+40| self.addEventListener('message', event => {
+41|     if (event.data && event.data.action === 'openDoor') {
+42|         console.log('🔑 SW reçoit demande d\'ouverture de la porte');
+43|         openTheDoor();
+44|     }
+45| });
+46| 
+47| // ========== INTERCEPTION DES REQUÊTES ==========
+48| self.addEventListener('fetch', event => {
+49|     const url = new URL(event.request.url);
 50| 
-51|     // CAS 2 : L'utilisateur essaie d'aller sur login.html
+51|     // Tentative d'accès à login.html
 52|     if (url.pathname === '/login.html') {
 53|         event.respondWith(
 54|             isDoorOpen().then(open => {
 55|                 if (open) {
 56|                     console.log('✅ Porte ouverte → accès à login.html autorisé');
-57|                     event.waitUntil(closeTheDoor());  // La porte se referme après usage
+57|                     event.waitUntil(closeTheDoor());
 58|                     return fetch(event.request);
 59|                 } else {
 60|                     console.log('🚫 Porte fermée → redirection vers index');
@@ -2811,7 +2788,7 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 65|         return;
 66|     }
 67| 
-68|     // Tous les autres fichiers
+68|     // Toutes les autres requêtes
 69|     event.respondWith(
 70|         caches.match(event.request).then(response => response || fetch(event.request))
 71|     );
@@ -3884,52 +3861,29 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 491|         };
 492|     });
 493| 
-494|     // Blocage retour arrière
-495|     history.pushState(null, null, location.href);
-496| 
-497|     // Pour Firefox (bfcache)
-498|     window.addEventListener('pageshow', (event) => {
-499|         if (event.persisted) window.location.replace('/');
-500|     });
+494| 
+495| 
+496|     // ========== OUVRE LA PORTE AU RETOUR ARRIÈRE ==========
+497|     window.addEventListener('pageshow', function (event) {
+498|         // Détecte si la page vient du cache arrière (retour arrière)
+499|         if (event.persisted) {
+500|             console.log('🔙 Retour arrière détecté depuis chat.html');
 501| 
-502|     // Pour les autres navigateurs
-503|     window.addEventListener('popstate', () => window.location.replace('/'));
-504| 
-505|     // ==========================================
-506|     // SÉCURITÉ : NETTOYAGE À LA SORTIE
-507|     // ==========================================
-508| 
-509|     window.addEventListener('beforeunload', function () {
-510|         const stored = localStorage.getItem('meetgay_user');
-511|         if (stored) {
-512|             try {
-513|                 const pseudo = JSON.parse(stored).pseudo;
-514|                 navigator.sendBeacon('/api/delete-user', JSON.stringify({ pseudo }));
-515|             } catch (e) { }
-516|         }
-517|     });
-518| 
-519|     // ========== OUVRE LA PORTE AU RETOUR ARRIÈRE ==========
-520|     window.addEventListener('pageshow', function (event) {
-521|         // Détecte si la page vient du cache arrière (retour arrière)
-522|         if (event.persisted) {
-523|             console.log('🔙 Retour arrière détecté depuis chat.html');
-524| 
-525|             // Envoie un message au Service Worker pour ouvrir la porte
-526|             if (navigator.serviceWorker && navigator.serviceWorker.controller) {
-527|                 navigator.serviceWorker.controller.postMessage({
-528|                     action: 'openDoor'
-529|                 });
-530|             }
-531|         }
-532|     });
-533| 
-534| 
-535| 
-536| }
-537| 
-538| // ========== LANCEMENT ==========
-539| initUser();
+502|             // Envoie un message au Service Worker pour ouvrir la porte
+503|             if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+504|                 navigator.serviceWorker.controller.postMessage({
+505|                     action: 'openDoor'
+506|                 });
+507|             }
+508|         }
+509|     });
+510| 
+511| 
+512| 
+513| }
+514| 
+515| // ========== LANCEMENT ==========
+516| initUser();
 
 # FILE: /var/www/meetgay/public/js/utils.js
 
