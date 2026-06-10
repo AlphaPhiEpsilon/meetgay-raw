@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-10 14:38:06
+# Généré le 2026-06-10 14:38:39
 
 ==============================================================================
 # SYSTEME DE CLONE DE FICHIER MIS A JOUR EN TEMPS REEL 
@@ -1721,190 +1721,157 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 183| 
 184| 
 185| 
-186| // ========== MESSAGES ==========
-187| app.post('/api/messages/save', async (req, res) => {
-188|     const { from, to, message } = req.body;
-189|     if (!from || !to || !message) {
-190|         return res.status(400).json({ error: 'Champs requis' });
-191|     }
-192|     try {
-193|         await pool.query(
-194|             'INSERT INTO messages (from_pseudo, to_pseudo, message) VALUES ($1, $2, $3)',
-195|             [from, to, message]
-196|         );
-197|         res.json({ success: true });
-198|     } catch (err) {
-199|         console.error('Erreur save message:', err);
-200|         res.status(500).json({ error: 'Erreur serveur' });
-201|     }
-202| });
+186| 
+187| 
+188| // ========== CONTACT AVEC EMAIL ==========
+189| const nodemailer = require('nodemailer');
+190| 
+191| // Configuration SMTP OVH
+192| const transporter = nodemailer.createTransport({
+193|     host: process.env.SMTP_HOST,
+194|     port: parseInt(process.env.SMTP_PORT),
+195|     secure: process.env.SMTP_SECURE === 'true',
+196|     auth: {
+197|         user: process.env.SMTP_USER,
+198|         pass: process.env.SMTP_PASS
+199|     }
+200| });
+201| 
+202| 
 203| 
-204| app.get('/api/messages/:pseudo1/:pseudo2', async (req, res) => {
-205|     const { pseudo1, pseudo2 } = req.params;
-206|     try {
-207|         const result = await pool.query(
-208|             `SELECT * FROM messages 
-209|              WHERE (from_pseudo = $1 AND to_pseudo = $2) 
-210|                 OR (from_pseudo = $2 AND to_pseudo = $1)
-211|              ORDER BY created_at ASC`,
-212|             [pseudo1, pseudo2]
-213|         );
-214|         res.json(result.rows);
-215|     } catch (err) {
-216|         console.error('Erreur get messages:', err);
-217|         res.status(500).json({ error: 'Erreur serveur' });
-218|     }
-219| });
-220| 
-221| // ========== CONTACT AVEC EMAIL ==========
-222| const nodemailer = require('nodemailer');
-223| 
-224| // Configuration SMTP OVH
-225| const transporter = nodemailer.createTransport({
-226|     host: process.env.SMTP_HOST,
-227|     port: parseInt(process.env.SMTP_PORT),
-228|     secure: process.env.SMTP_SECURE === 'true',
-229|     auth: {
-230|         user: process.env.SMTP_USER,
-231|         pass: process.env.SMTP_PASS
-232|     }
-233| });
-234| 
-235| 
-236| 
-237| 
-238| 
-239| // Initialiser la surveillance d’inactivité (5 minutes sans activité)
-240| const { updateActivity } = startInactivityWatch(io, users, pool, INACTIVITY_MINUTES, 60 * 1000);
-241| 
-242| io.on('connection', (socket) => {
-243|     console.log('🔌 Nouvelle connexion :', socket.id);
+204| 
+205| 
+206| // Initialiser la surveillance d’inactivité (5 minutes sans activité)
+207| const { updateActivity } = startInactivityWatch(io, users, pool, INACTIVITY_MINUTES, 60 * 1000);
+208| 
+209| io.on('connection', (socket) => {
+210|     console.log('🔌 Nouvelle connexion :', socket.id);
+211| 
+212|     socket.on('user join', async (userInfo) => {
+213|         if (!userInfo || !userInfo.pseudo) {
+214|             socket.emit('join error', { error: 'Pseudo requis pour rejoindre' });
+215|             return;
+216|         }
+217| 
+218|         // ♻️ ANNUULATION DU MINUTEUR DE SUPPRESSION (Cas du F5)
+219|         if (disconnectionTimers[userInfo.pseudo]) {
+220|             clearTimeout(disconnectionTimers[userInfo.pseudo]);
+221|             delete disconnectionTimers[userInfo.pseudo];
+222|             console.log(`♻️ Reconnexion rapide (F5) détectée pour ${userInfo.pseudo}. Session préservée.`);
+223|         }
+224| 
+225|         // Récupérer la date de création depuis la base
+226|         let firstConnectedAt = Date.now();
+227|         try {
+228|             const result = await pool.query(
+229|                 `SELECT first_connected_at FROM users WHERE pseudo = $1`,
+230|                 [userInfo.pseudo]
+231|             );
+232|             if (result.rows.length > 0 && result.rows[0].first_connected_at) {
+233|                 firstConnectedAt = new Date(result.rows[0].first_connected_at).getTime();
+234|             } else {
+235|                 // Si first_connected_at est NULL, on le met à jour avec l’heure actuelle
+236|                 await pool.query(
+237|                     `UPDATE users SET first_connected_at = NOW() WHERE pseudo = $1`,
+238|                     [userInfo.pseudo]
+239|                 );
+240|             }
+241|         } catch (err) {
+242|             console.error('Erreur récupération first_connected_at:', err.message);
+243|         }
 244| 
-245|     socket.on('user join', async (userInfo) => {
-246|         if (!userInfo || !userInfo.pseudo) {
-247|             socket.emit('join error', { error: 'Pseudo requis pour rejoindre' });
-248|             return;
-249|         }
-250| 
-251|         // ♻️ ANNUULATION DU MINUTEUR DE SUPPRESSION (Cas du F5)
-252|         if (disconnectionTimers[userInfo.pseudo]) {
-253|             clearTimeout(disconnectionTimers[userInfo.pseudo]);
-254|             delete disconnectionTimers[userInfo.pseudo];
-255|             console.log(`♻️ Reconnexion rapide (F5) détectée pour ${userInfo.pseudo}. Session préservée.`);
-256|         }
+245|         // Nettoyer les anciennes sockets du même pseudo
+246|         Object.keys(users).forEach((id) => {
+247|             if (users[id].pseudo === userInfo.pseudo) {
+248|                 console.log(`🧹 Suppression de l'ancienne socket ${id} de ${userInfo.pseudo}`);
+249|                 delete users[id];
+250|             }
+251|         });
+252| 
+253| 
+254|         users[socket.id] = { ...userInfo, socketId: socket.id, firstConnectedAt: firstConnectedAt };
+255|         console.log(`✅ ${userInfo.pseudo} a rejoint (${socket.id})`);
+256|         updateActivity(socket.id);
 257| 
-258|         // Récupérer la date de création depuis la base
-259|         let firstConnectedAt = Date.now();
-260|         try {
-261|             const result = await pool.query(
-262|                 `SELECT first_connected_at FROM users WHERE pseudo = $1`,
-263|                 [userInfo.pseudo]
-264|             );
-265|             if (result.rows.length > 0 && result.rows[0].first_connected_at) {
-266|                 firstConnectedAt = new Date(result.rows[0].first_connected_at).getTime();
-267|             } else {
-268|                 // Si first_connected_at est NULL, on le met à jour avec l’heure actuelle
-269|                 await pool.query(
-270|                     `UPDATE users SET first_connected_at = NOW() WHERE pseudo = $1`,
-271|                     [userInfo.pseudo]
-272|                 );
-273|             }
-274|         } catch (err) {
-275|             console.error('Erreur récupération first_connected_at:', err.message);
-276|         }
-277| 
-278|         // Nettoyer les anciennes sockets du même pseudo
-279|         Object.keys(users).forEach((id) => {
-280|             if (users[id].pseudo === userInfo.pseudo) {
-281|                 console.log(`🧹 Suppression de l'ancienne socket ${id} de ${userInfo.pseudo}`);
-282|                 delete users[id];
-283|             }
-284|         });
-285| 
-286| 
-287|         users[socket.id] = { ...userInfo, socketId: socket.id, firstConnectedAt: firstConnectedAt };
-288|         console.log(`✅ ${userInfo.pseudo} a rejoint (${socket.id})`);
-289|         updateActivity(socket.id);
-290| 
-291|         // Tri par date de première connexion (plus ancien en bas, plus récent en haut)
-292|         const usersList = Object.values(users).sort((a, b) => (b.firstConnectedAt || 0) - (a.firstConnectedAt || 0)).map(u => ({
-293|             pseudo: u.pseudo,
-294|             age: u.age,
-295|             tendencies: u.tendencies,
-296|             gender: u.gender,
-297|             purpose: u.purpose,
-298|             bio: u.bio,
-299|             locationCode: u.locationCode,
-300|             locationName: u.locationName,
-301|             socketId: u.socketId
-302|         }));
-303|         io.emit('update users', usersList);
-304|         socket.emit('join confirmed', { success: true, user: userInfo });
-305|     });
-306| 
-307| 
-308|     // Heartbeat pour mettre à jour lastSeen
-309|     socket.on('heartbeat', () => {
-310|         if (users[socket.id]) {
-311|             users[socket.id].lastSeen = Date.now();
-312|         }
-313|     });
-314| 
-315| 
-316|     socket.on('private message', (data) => {
-317|         const { toSocketId, message, fromPseudo } = data;
-318|         console.log(`💬 Message privé de ${fromPseudo} vers ${toSocketId}: ${message}`);
-319|         updateActivity(socket.id);
-320|         socket.to(toSocketId).emit('private message received', {
-321|             message: message,
-322|             fromPseudo: fromPseudo,
-323|             fromSocketId: socket.id
-324|         });
-325|         socket.emit('message sent confirmation', { message: message, to: toSocketId });
-326|     });
-327| 
-328|     socket.on('disconnect', () => {
-329|         console.log("🔥 DISCONNECT DÉCLENCHÉ pour socket:", socket.id);
-330|         console.log(`🔌 DISCONNECT: Suppression de ${users[socket.id]?.pseudo} (socket: ${socket.id})`);
-331|         const userInfo = users[socket.id];
-332|         // ... reste
-333|     });
-334|     const userInfo = users[socket.id];
-335|     if (userInfo && userInfo.pseudo) {
-336|         const pseudo = userInfo.pseudo;
-337|         console.log(`🔌 Déconnexion immédiate de ${pseudo}`);
-338| 
-339|         delete users[socket.id];
-340|         console.log(`🗑️ users après suppression:`, Object.keys(users).length, "connectés");
-341| 
-342|         pool.query('DELETE FROM users WHERE pseudo = $1', [pseudo]).catch(err => {
-343|             console.error(`❌ Erreur suppression ${pseudo}:`, err.message);
-344|         });
-345| 
-346|         const usersList = Object.values(users).map(u => ({
-347|             pseudo: u.pseudo,
-348|             age: u.age,
-349|             tendencies: u.tendencies,
-350|             gender: u.gender,
-351|             purpose: u.purpose,
-352|             bio: u.bio,
-353|             locationCode: u.locationCode,
-354|             locationName: u.locationName,
-355|             socketId: u.socketId
-356|         }));
-357|         io.emit('update users', usersList);
-358|     }
-359| });
-360| });
-361| 
-362| // ========== NETTOYAGE AUTOMATIQUE ==========
-363| startCleanup(pool, () => Object.values(users).map(u => u.pseudo), CLEANUP_INTERVAL_MINUTES * 60 * 1000);
-364| 
-365| // ========== DÉMARRAGE ==========
-366| const PORT = process.env.PORT || 3005;
-367| server.listen(PORT, '0.0.0.0', () => {
-368|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
-369| });
+258|         // Tri par date de première connexion (plus ancien en bas, plus récent en haut)
+259|         const usersList = Object.values(users).sort((a, b) => (b.firstConnectedAt || 0) - (a.firstConnectedAt || 0)).map(u => ({
+260|             pseudo: u.pseudo,
+261|             age: u.age,
+262|             tendencies: u.tendencies,
+263|             gender: u.gender,
+264|             purpose: u.purpose,
+265|             bio: u.bio,
+266|             locationCode: u.locationCode,
+267|             locationName: u.locationName,
+268|             socketId: u.socketId
+269|         }));
+270|         io.emit('update users', usersList);
+271|         socket.emit('join confirmed', { success: true, user: userInfo });
+272|     });
+273| 
+274| 
+275|     // Heartbeat pour mettre à jour lastSeen
+276|     socket.on('heartbeat', () => {
+277|         if (users[socket.id]) {
+278|             users[socket.id].lastSeen = Date.now();
+279|         }
+280|     });
+281| 
+282| 
+283|     socket.on('private message', (data) => {
+284|         const { toSocketId, message, fromPseudo } = data;
+285|         console.log(`💬 Message privé de ${fromPseudo} vers ${toSocketId}: ${message}`);
+286|         updateActivity(socket.id);
+287|         socket.to(toSocketId).emit('private message received', {
+288|             message: message,
+289|             fromPseudo: fromPseudo,
+290|             fromSocketId: socket.id
+291|         });
+292|         socket.emit('message sent confirmation', { message: message, to: toSocketId });
+293|     });
+294| 
+295|     socket.on('disconnect', () => {
+296|         console.log("🔥 DISCONNECT DÉCLENCHÉ pour socket:", socket.id);
+297|         console.log(`🔌 DISCONNECT: Suppression de ${users[socket.id]?.pseudo} (socket: ${socket.id})`);
+298|         const userInfo = users[socket.id];
+299|         // ... reste
+300|     });
+301|     const userInfo = users[socket.id];
+302|     if (userInfo && userInfo.pseudo) {
+303|         const pseudo = userInfo.pseudo;
+304|         console.log(`🔌 Déconnexion immédiate de ${pseudo}`);
+305| 
+306|         delete users[socket.id];
+307|         console.log(`🗑️ users après suppression:`, Object.keys(users).length, "connectés");
+308| 
+309|         pool.query('DELETE FROM users WHERE pseudo = $1', [pseudo]).catch(err => {
+310|             console.error(`❌ Erreur suppression ${pseudo}:`, err.message);
+311|         });
+312| 
+313|         const usersList = Object.values(users).map(u => ({
+314|             pseudo: u.pseudo,
+315|             age: u.age,
+316|             tendencies: u.tendencies,
+317|             gender: u.gender,
+318|             purpose: u.purpose,
+319|             bio: u.bio,
+320|             locationCode: u.locationCode,
+321|             locationName: u.locationName,
+322|             socketId: u.socketId
+323|         }));
+324|         io.emit('update users', usersList);
+325|     }
+326| });
+327| });
+328| 
+329| // ========== NETTOYAGE AUTOMATIQUE ==========
+330| startCleanup(pool, () => Object.values(users).map(u => u.pseudo), CLEANUP_INTERVAL_MINUTES * 60 * 1000);
+331| 
+332| // ========== DÉMARRAGE ==========
+333| const PORT = process.env.PORT || 3005;
+334| server.listen(PORT, '0.0.0.0', () => {
+335|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+336| });
 
 # FILE: /var/www/meetgay/ecosystem.config.js
 
