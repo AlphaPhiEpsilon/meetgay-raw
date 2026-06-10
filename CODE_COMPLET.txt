@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-10 14:05:32
+# Généré le 2026-06-10 14:06:05
 
 ==============================================================================
 # SYSTEME DE CLONE DE FICHIER MIS A JOUR EN TEMPS REEL 
@@ -2598,7 +2598,146 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 
 # FILE: /var/www/meetgay/modules/routes/api-auth.js
 
-1| ﻿
+1| ﻿// modules/routes/api-auth.js
+2| const jwt = require('jsonwebtoken');
+3| const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
+4| 
+5| module.exports = function (app, pool) {
+6|     // ========== CHECK TOKEN ==========
+7|     app.get('/api/check-token', (req, res) => {
+8|         const token = req.headers.authorization?.split(' ')[1];
+9|         if (!token) return res.status(401).json({ valid: false });
+10| 
+11|         try {
+12|             const decoded = jwt.verify(token, JWT_SECRET);
+13|             res.status(200).json({ valid: true, pseudo: decoded.pseudo });
+14|         } catch (err) {
+15|             res.status(401).json({ valid: false });
+16|         }
+17|     });
+18| 
+19|     // ========== REGISTER ==========
+20|     app.post('/api/register', async (req, res) => {
+21|         try {
+22|             console.log("🔵 1. Début register, body reçu:", req.body);
+23|             const { pseudo, age, tendencies, locationCode, locationName, bio, gender, purpose, fingerprint } = req.body;
+24| 
+25|             if (!pseudo || !age) {
+26|                 return res.status(400).json({ error: 'Pseudo et âge requis' });
+27|             }
+28|             if (!fingerprint) {
+29|                 return res.status(400).json({ error: 'Empreinte numérique requise' });
+30|             }
+31| 
+32|             const banCheck = await pool.query(
+33|                 `SELECT is_banned, ban_reason FROM fingerprints WHERE fingerprint_hash = $1`,
+34|                 [fingerprint]
+35|             );
+36|             if (banCheck.rows.length > 0 && banCheck.rows[0].is_banned) {
+37|                 return res.status(403).json({
+38|                     error: 'Accès refusé',
+39|                     reason: banCheck.rows[0].ban_reason || 'Votre empreinte est bannie'
+40|                 });
+41|             }
+42| 
+43|             const fingerprintResult = await pool.query(
+44|                 `INSERT INTO fingerprints (fingerprint_hash, last_seen) 
+45|                  VALUES ($1, NOW()) 
+46|                  ON CONFLICT (fingerprint_hash) 
+47|                  DO UPDATE SET last_seen = NOW()
+48|                  RETURNING id`,
+49|                 [fingerprint]
+50|             );
+51|             const fingerprintId = fingerprintResult.rows[0].id;
+52| 
+53|             const existingUser = await pool.query('SELECT id FROM users WHERE pseudo = $1', [pseudo]);
+54|             if (existingUser.rows.length > 0) {
+55|                 await pool.query('UPDATE users SET token_version = token_version + 1 WHERE pseudo = $1', [pseudo]);
+56|             }
+57| 
+58|             const result = await pool.query(
+59|                 `INSERT INTO users (pseudo, age, tendencies, location_code, location_name, bio, gender, purpose, fingerprint_id)
+60|                  VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+61|                  ON CONFLICT (pseudo) DO NOTHING
+62|                  RETURNING *`,
+63|                 [pseudo, age, tendencies, locationCode, locationName, bio, gender, purpose, fingerprintId]
+64|             );
+65| 
+66|             if (result.rows.length === 0) {
+67|                 return res.status(400).json({ error: 'Pseudo déjà utilisé' });
+68|             }
+69| 
+70|             res.json({ success: true, user: result.rows[0] });
+71|         } catch (err) {
+72|             console.error("Erreur inscription:", err);
+73|             res.status(500).json({ error: 'Erreur serveur' });
+74|         }
+75|     });
+76| 
+77|     // ========== LOGIN ==========
+78|     app.post('/api/login', async (req, res) => {
+79|         const { pseudo } = req.body;
+80|         if (!pseudo) return res.status(400).json({ error: 'Pseudo requis' });
+81|         try {
+82|             const result = await pool.query('SELECT * FROM users WHERE pseudo = $1', [pseudo]);
+83|             if (result.rows.length === 0) return res.status(404).json({ error: 'Utilisateur non trouvé' });
+84|             const user = result.rows[0];
+85|             const token = jwt.sign({ id: user.id, pseudo: user.pseudo, role: user.role || 'user' }, JWT_SECRET, { expiresIn: '24h' });
+86|             res.json({ success: true, token, user: { pseudo: user.pseudo, role: user.role } });
+87|         } catch (err) {
+88|             console.error('Erreur login:', err);
+89|             res.status(500).json({ error: 'Erreur serveur' });
+90|         }
+91|     });
+92| 
+93|     // ========== DELETE USER ==========
+94|     app.post('/api/delete-user', async (req, res) => {
+95|         let pseudo = req.body.pseudo;
+96| 
+97|         if (!pseudo && req.body) {
+98|             try {
+99|                 if (typeof req.body === 'object') pseudo = req.body.pseudo;
+100|                 else if (typeof req.body === 'string') {
+101|                     const parsed = JSON.parse(req.body);
+102|                     pseudo = parsed.pseudo;
+103|                 }
+104|             } catch (e) {
+105|                 // Ignoré silencieusement
+106|             }
+107|         }
+108| 
+109|         if (!pseudo) {
+110|             console.log(`🚪 Fermeture de page sans pseudo détecté (déjà géré par Socket.IO)`);
+111|             return res.json({ success: true, message: 'Déconnexion propre' });
+112|         }
+113| 
+114|         try {
+115|             const result = await pool.query('DELETE FROM users WHERE pseudo = $1 RETURNING pseudo', [pseudo]);
+116|             if (result.rows.length === 0) {
+117|                 return res.status(404).json({ error: 'Utilisateur non trouvé' });
+118|             }
+119|             console.log(`🗑️ Utilisateur ${pseudo} supprimé de la base`);
+120|             res.json({ success: true, message: 'Utilisateur supprimé' });
+121|         } catch (err) {
+122|             console.error('Erreur suppression utilisateur:', err.message);
+123|             res.status(500).json({ error: 'Erreur serveur' });
+124|         }
+125|     });
+126| 
+127|     // ========== GET USER ==========
+128|     app.post('/api/get-user', async (req, res) => {
+129|         const { pseudo } = req.body;
+130|         if (!pseudo) return res.status(400).json({ error: 'Pseudo requis' });
+131|         try {
+132|             const result = await pool.query('SELECT * FROM users WHERE pseudo = $1', [pseudo]);
+133|             if (result.rows.length === 0) return res.status(404).json({ error: 'Utilisateur non trouvé' });
+134|             res.json({ success: true, user: result.rows[0] });
+135|         } catch (err) {
+136|             console.error('Erreur get-user:', err);
+137|             res.status(500).json({ error: 'Erreur serveur' });
+138|         }
+139|     });
+140| };
 
 # FILE: /var/www/meetgay/public/sw.js
 
