@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-10 14:32:35
+# Généré le 2026-06-10 14:33:28
 
 ==============================================================================
 # SYSTEME DE CLONE DE FICHIER MIS A JOUR EN TEMPS REEL 
@@ -1539,7 +1539,7 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 2| // server.js - Cœur du chat MeetGay (version base de données)
 3| // ============================================================
 4| 
-5| // ========== 1. CHARGEMENT DES VARIABLES D'ENVIRONNEMENT ==========
+5| // ========== CHARGEMENT DES VARIABLES D'ENVIRONNEMENT ==========
 6| if (process.env.NODE_ENV !== 'production') {
 7|     try {
 8|         require('dotenv').config();
@@ -1551,7 +1551,7 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 14|     console.log('✅ Mode production, variables Render utilisées');
 15| }
 16| 
-17| // ========== 2. IMPORTS ==========
+17| // ========== IMPORTS ==========
 18| const express = require('express');
 19| const compression = require('compression');
 20| const http = require('http');
@@ -1559,337 +1559,350 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 22| const jwt = require('jsonwebtoken');
 23| const { Pool } = require('pg');
 24| const { disconnectBannedUser } = require('./moderation');
-25| const { startCleanup, startInactivityWatch } = require('./modules/cleanup.js');
-26| const contactRoutes = require('./modules/routes/api-contact.js');
-27| const pool = require('./modules/postgresql.js');
-28| const htmlRoutes = require('./modules/routes/html.js');
-29| const adminRoutes = require('./modules/routes/admin.js');
-30| const authRoutes = require('./modules/routes/api-auth.js');
-31| const path = require('path');
-32| const bcrypt = require('bcrypt');
-33| const TEST_MODE = true;  // ← Désactive le fingerprint si true
-34| // PARAMÈTRES DE NETTOYAGE ET SURVEILLANCE
-35| const INACTIVITY_MINUTES = 30;      // Déconnexion après X minutes sans activité
-36| const CLEANUP_INTERVAL_MINUTES = 1; // Nettoyage des absents toutes les X minutes
+25| const path = require('path');
+26| const bcrypt = require('bcrypt');
+27| const session = require('express-session');
+28| const pgSession = require('connect-pg-simple')(session);
+29| 
+30| // Modules internes
+31| const { startCleanup, startInactivityWatch } = require('./modules/cleanup.js');
+32| const contactRoutes = require('./modules/routes/api-contact.js');
+33| const pool = require('./modules/postgresql.js');
+34| const htmlRoutes = require('./modules/routes/html.js');
+35| const adminRoutes = require('./modules/routes/admin.js');
+36| const authRoutes = require('./modules/routes/api-auth.js');
 37| 
-38| const users = {};
-39| const disconnectionTimers = {}; // Stocke les comptes à rebours anti-F5
-40| 
-41| 
-42| console.log('🔍 DB_USER:', process.env.DB_USER);
-43| console.log('🔍 DB_PASSWORD:', process.env.DB_PASSWORD ? '******' : 'MISSING');
-44| 
-45| // ========== 4. CONFIGURATION EXPRESS ==========
-46| const app = express();
-47| const server = http.createServer(app);
+38| // ==========  VARIABLES GLOBALES ==========
+39| const users = {};
+40| const disconnectionTimers = {}; // Stocke les comptes à rebours anti-F5
+41| const TEST_MODE = true;  // ← Désactive le fingerprint si true
+42| // PARAMÈTRES DE NETTOYAGE ET SURVEILLANCE
+43| const INACTIVITY_MINUTES = 30;      // Déconnexion après X minutes sans activité
+44| const CLEANUP_INTERVAL_MINUTES = 1; // Nettoyage des absents toutes les X minutes
+45| // JWT_SECRET pour les utilisateurs normaux
+46| const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
+47| 
 48| 
-49| // ========== 8. SOCKET.IO ==========
-50| const io = socketIo(server, {
-51|     cors: {
-52|         origin: "*",
-53|         methods: ["GET", "POST"],
-54|         credentials: true,
-55|         allowedHeaders: ["*"]
-56|     },
-57|     transports: ['websocket', 'polling'],
-58|     allowEIO3: true,
-59|     pingTimeout: 60000,
-60|     pingInterval: 25000
-61| });
-62| 
-63| // Gestion d'erreur (port déjà utilisé)
-64| server.on('error', (err) => {
-65|     if (err.code === 'EADDRINUSE') {
-66|         console.error(`❌ Port déjà utilisé. Tue l'autre processus et redémarre.`);
-67|         process.exit(1);
-68|     }
-69| });
-70| 
-71| // Compression
-72| app.use(compression({
-73|     level: 6,
-74|     threshold: 1024,
-75|     filter: (req, res) => {
-76|         if (req.path === '/socket.io/') return false;
-77|         return compression.filter(req, res);
-78|     }
-79| }));
-80| 
-81| app.use(express.json());
-82| 
-83| app.use(session({
-84|     store: new pgSession({
-85|         pool: pool,
-86|         tableName: 'session',
-87|         createTableIfMissing: false,
-88|         pruneSessionInterval: 60
-89|     }),
-90|     secret: 'un-super-secret-change-moi',
-91|     resave: false,
-92|     saveUninitialized: false,
-93|     cookie: {
-94|         httpOnly: true,
-95|         secure: false,
-96|         maxAge: 30 * 24 * 60 * 60 * 1000 // 30 jours
-97|     }
-98| }));
+49| // ==========  CONFIGURATION EXPRESS ==========
+50| const app = express();
+51| const server = http.createServer(app);
+52| 
+53| 
+54| console.log('🔍 DB_USER:', process.env.DB_USER);
+55| console.log('🔍 DB_PASSWORD:', process.env.DB_PASSWORD ? '******' : 'MISSING');
+56| 
+57| // Compression
+58| app.use(compression({
+59|     level: 6,
+60|     threshold: 1024,
+61|     filter: (req, res) => {
+62|         if (req.path === '/socket.io/') return false;
+63|         return compression.filter(req, res);
+64|     }
+65| }));
+66| 
+67| app.use(express.json());
+68| 
+69| app.use(session({
+70|     store: new pgSession({
+71|         pool: pool,
+72|         tableName: 'session',
+73|         createTableIfMissing: false,
+74|         pruneSessionInterval: 60
+75|     }),
+76|     secret: 'un-super-secret-change-moi',
+77|     resave: false,
+78|     saveUninitialized: false,
+79|     cookie: {
+80|         httpOnly: true,
+81|         secure: false,
+82|         maxAge: 30 * 24 * 60 * 60 * 1000 // 30 jours
+83|     }
+84| }));
+85| 
+86| // Ajoute cette configuration AVANT tes routes
+87| app.use(express.static('/var/www/meetgay/public', {
+88|     setHeaders: function (res, path) {
+89|         if (path.endsWith('.css')) {
+90|             res.setHeader('Content-Type', 'text/css');
+91|         }
+92|     }
+93| }));
+94| 
+95| contactRoutes(app);
+96| htmlRoutes(app, pool);
+97| 
+98| authRoutes(app, pool);
 99| 
-100| contactRoutes(app);
-101| htmlRoutes(app, pool);
-102| adminRoutes(app, pool, io, users);
-103| authRoutes(app, pool);
-104| 
-105| 
-106| 
-107| 
-108| 
-109| const session = require('express-session');
-110| const pgSession = require('connect-pg-simple')(session);
-111| 
-112| 
+100| // ========== 8. SOCKET.IO ==========
+101| const io = socketIo(server, {
+102|     cors: {
+103|         origin: "*",
+104|         methods: ["GET", "POST"],
+105|         credentials: true,
+106|         allowedHeaders: ["*"]
+107|     },
+108|     transports: ['websocket', 'polling'],
+109|     allowEIO3: true,
+110|     pingTimeout: 60000,
+111|     pingInterval: 25000
+112| });
 113| 
-114| // JWT_SECRET pour les utilisateurs normaux
-115| const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
-116| 
-117| // ========== 5. MIDDLEWARE DE MAINTENANCE ==========
-118| app.use(async (req, res, next) => {
-119|     // Exclure assets
-120|     if (req.path.match(/\.(css|js|png|jpg|jpeg|gif|ico|svg|json|webmanifest)$/i) ||
-121|         req.path === '/api/admin/login' ||
-122|         req.path === '/api/admin/maintenance' ||
-123|         req.path === '/admin-login.html' ||
-124|         req.path === '/admin.html') {
-125|         return next();
-126|     }
+114| adminRoutes(app, pool, io, users);
+115| 
+116| // Gestion d'erreur (port déjà utilisé)
+117| server.on('error', (err) => {
+118|     if (err.code === 'EADDRINUSE') {
+119|         console.error(`❌ Port déjà utilisé. Tue l'autre processus et redémarre.`);
+120|         process.exit(1);
+121|     }
+122| });
+123| 
+124| 
+125| 
+126| 
 127| 
-128|     // ✅ VÉRIFIER LA SESSION (PAS UN FLAG GLOBAL)
-129|     const isAdmin = req.session && req.session.isAdmin === true;
+128| 
+129| 
 130| 
-131|     // Lire le mode maintenance
-132|     let maintenance = false;
-133|     try {
-134|         const result = await pool.query(`SELECT value FROM settings WHERE key = 'maintenance_mode'`);
-135|         maintenance = result.rows[0]?.value === 'true';
-136|     } catch (err) {
-137|         console.error('Erreur maintenance:', err.message);
-138|     }
-139| 
-140|     // Si maintenance OFF → tout le monde passe
-141|     if (!maintenance) {
-142|         return next();
-143|     }
-144| 
-145|     // Si admin → accès libre
-146|     if (isAdmin) {
-147|         console.log(`👑 Admin ${req.session.adminUsername} accède à ${req.path}`);
-148|         return next();
-149|     }
+131| 
+132| 
+133| 
+134| 
+135| 
+136| 
+137| // ========== 5. MIDDLEWARE DE MAINTENANCE ==========
+138| app.use(async (req, res, next) => {
+139|     // Exclure assets
+140|     if (req.path.match(/\.(css|js|png|jpg|jpeg|gif|ico|svg|json|webmanifest)$/i) ||
+141|         req.path === '/api/admin/login' ||
+142|         req.path === '/api/admin/maintenance' ||
+143|         req.path === '/admin-login.html' ||
+144|         req.path === '/admin.html') {
+145|         return next();
+146|     }
+147| 
+148|     // ✅ VÉRIFIER LA SESSION (PAS UN FLAG GLOBAL)
+149|     const isAdmin = req.session && req.session.isAdmin === true;
 150| 
-151|     // Maintenance ON et pas admin → rediriger vers /
-152|     if (req.path !== '/') {
-153|         console.log(`🚧 Redirection de ${req.path} vers /`);
-154|         return res.redirect('/');
-155|     }
-156| 
-157|     next();
-158| });
+151|     // Lire le mode maintenance
+152|     let maintenance = false;
+153|     try {
+154|         const result = await pool.query(`SELECT value FROM settings WHERE key = 'maintenance_mode'`);
+155|         maintenance = result.rows[0]?.value === 'true';
+156|     } catch (err) {
+157|         console.error('Erreur maintenance:', err.message);
+158|     }
 159| 
-160| 
-161| // Ajoute cette configuration AVANT tes routes
-162| app.use(express.static('/var/www/meetgay/public', {
-163|     setHeaders: function (res, path) {
-164|         if (path.endsWith('.css')) {
-165|             res.setHeader('Content-Type', 'text/css');
-166|         }
-167|     }
-168| }));
-169| 
+160|     // Si maintenance OFF → tout le monde passe
+161|     if (!maintenance) {
+162|         return next();
+163|     }
+164| 
+165|     // Si admin → accès libre
+166|     if (isAdmin) {
+167|         console.log(`👑 Admin ${req.session.adminUsername} accède à ${req.path}`);
+168|         return next();
+169|     }
 170| 
-171| // ========== MESSAGES ==========
-172| app.post('/api/messages/save', async (req, res) => {
-173|     const { from, to, message } = req.body;
-174|     if (!from || !to || !message) {
-175|         return res.status(400).json({ error: 'Champs requis' });
-176|     }
-177|     try {
-178|         await pool.query(
-179|             'INSERT INTO messages (from_pseudo, to_pseudo, message) VALUES ($1, $2, $3)',
-180|             [from, to, message]
-181|         );
-182|         res.json({ success: true });
-183|     } catch (err) {
-184|         console.error('Erreur save message:', err);
-185|         res.status(500).json({ error: 'Erreur serveur' });
-186|     }
-187| });
-188| 
-189| app.get('/api/messages/:pseudo1/:pseudo2', async (req, res) => {
-190|     const { pseudo1, pseudo2 } = req.params;
-191|     try {
-192|         const result = await pool.query(
-193|             `SELECT * FROM messages 
-194|              WHERE (from_pseudo = $1 AND to_pseudo = $2) 
-195|                 OR (from_pseudo = $2 AND to_pseudo = $1)
-196|              ORDER BY created_at ASC`,
-197|             [pseudo1, pseudo2]
-198|         );
-199|         res.json(result.rows);
-200|     } catch (err) {
-201|         console.error('Erreur get messages:', err);
-202|         res.status(500).json({ error: 'Erreur serveur' });
-203|     }
-204| });
-205| 
-206| // ========== CONTACT AVEC EMAIL ==========
-207| const nodemailer = require('nodemailer');
-208| 
-209| // Configuration SMTP OVH
-210| const transporter = nodemailer.createTransport({
-211|     host: process.env.SMTP_HOST,
-212|     port: parseInt(process.env.SMTP_PORT),
-213|     secure: process.env.SMTP_SECURE === 'true',
-214|     auth: {
-215|         user: process.env.SMTP_USER,
-216|         pass: process.env.SMTP_PASS
-217|     }
-218| });
-219| 
-220| 
+171|     // Maintenance ON et pas admin → rediriger vers /
+172|     if (req.path !== '/') {
+173|         console.log(`🚧 Redirection de ${req.path} vers /`);
+174|         return res.redirect('/');
+175|     }
+176| 
+177|     next();
+178| });
+179| 
+180| 
+181| 
+182| 
+183| 
+184| // ========== MESSAGES ==========
+185| app.post('/api/messages/save', async (req, res) => {
+186|     const { from, to, message } = req.body;
+187|     if (!from || !to || !message) {
+188|         return res.status(400).json({ error: 'Champs requis' });
+189|     }
+190|     try {
+191|         await pool.query(
+192|             'INSERT INTO messages (from_pseudo, to_pseudo, message) VALUES ($1, $2, $3)',
+193|             [from, to, message]
+194|         );
+195|         res.json({ success: true });
+196|     } catch (err) {
+197|         console.error('Erreur save message:', err);
+198|         res.status(500).json({ error: 'Erreur serveur' });
+199|     }
+200| });
+201| 
+202| app.get('/api/messages/:pseudo1/:pseudo2', async (req, res) => {
+203|     const { pseudo1, pseudo2 } = req.params;
+204|     try {
+205|         const result = await pool.query(
+206|             `SELECT * FROM messages 
+207|              WHERE (from_pseudo = $1 AND to_pseudo = $2) 
+208|                 OR (from_pseudo = $2 AND to_pseudo = $1)
+209|              ORDER BY created_at ASC`,
+210|             [pseudo1, pseudo2]
+211|         );
+212|         res.json(result.rows);
+213|     } catch (err) {
+214|         console.error('Erreur get messages:', err);
+215|         res.status(500).json({ error: 'Erreur serveur' });
+216|     }
+217| });
+218| 
+219| // ========== CONTACT AVEC EMAIL ==========
+220| const nodemailer = require('nodemailer');
 221| 
-222| 
-223| 
-224| // Initialiser la surveillance d’inactivité (5 minutes sans activité)
-225| const { updateActivity } = startInactivityWatch(io, users, pool, INACTIVITY_MINUTES, 60 * 1000);
-226| 
-227| io.on('connection', (socket) => {
-228|     console.log('🔌 Nouvelle connexion :', socket.id);
-229| 
-230|     socket.on('user join', async (userInfo) => {
-231|         if (!userInfo || !userInfo.pseudo) {
-232|             socket.emit('join error', { error: 'Pseudo requis pour rejoindre' });
-233|             return;
-234|         }
+222| // Configuration SMTP OVH
+223| const transporter = nodemailer.createTransport({
+224|     host: process.env.SMTP_HOST,
+225|     port: parseInt(process.env.SMTP_PORT),
+226|     secure: process.env.SMTP_SECURE === 'true',
+227|     auth: {
+228|         user: process.env.SMTP_USER,
+229|         pass: process.env.SMTP_PASS
+230|     }
+231| });
+232| 
+233| 
+234| 
 235| 
-236|         // ♻️ ANNUULATION DU MINUTEUR DE SUPPRESSION (Cas du F5)
-237|         if (disconnectionTimers[userInfo.pseudo]) {
-238|             clearTimeout(disconnectionTimers[userInfo.pseudo]);
-239|             delete disconnectionTimers[userInfo.pseudo];
-240|             console.log(`♻️ Reconnexion rapide (F5) détectée pour ${userInfo.pseudo}. Session préservée.`);
-241|         }
+236| 
+237| // Initialiser la surveillance d’inactivité (5 minutes sans activité)
+238| const { updateActivity } = startInactivityWatch(io, users, pool, INACTIVITY_MINUTES, 60 * 1000);
+239| 
+240| io.on('connection', (socket) => {
+241|     console.log('🔌 Nouvelle connexion :', socket.id);
 242| 
-243|         // Récupérer la date de création depuis la base
-244|         let firstConnectedAt = Date.now();
-245|         try {
-246|             const result = await pool.query(
-247|                 `SELECT first_connected_at FROM users WHERE pseudo = $1`,
-248|                 [userInfo.pseudo]
-249|             );
-250|             if (result.rows.length > 0 && result.rows[0].first_connected_at) {
-251|                 firstConnectedAt = new Date(result.rows[0].first_connected_at).getTime();
-252|             } else {
-253|                 // Si first_connected_at est NULL, on le met à jour avec l’heure actuelle
-254|                 await pool.query(
-255|                     `UPDATE users SET first_connected_at = NOW() WHERE pseudo = $1`,
-256|                     [userInfo.pseudo]
-257|                 );
-258|             }
-259|         } catch (err) {
-260|             console.error('Erreur récupération first_connected_at:', err.message);
-261|         }
-262| 
-263|         // Nettoyer les anciennes sockets du même pseudo
-264|         Object.keys(users).forEach((id) => {
-265|             if (users[id].pseudo === userInfo.pseudo) {
-266|                 console.log(`🧹 Suppression de l'ancienne socket ${id} de ${userInfo.pseudo}`);
-267|                 delete users[id];
-268|             }
-269|         });
-270| 
-271| 
-272|         users[socket.id] = { ...userInfo, socketId: socket.id, firstConnectedAt: firstConnectedAt };
-273|         console.log(`✅ ${userInfo.pseudo} a rejoint (${socket.id})`);
-274|         updateActivity(socket.id);
+243|     socket.on('user join', async (userInfo) => {
+244|         if (!userInfo || !userInfo.pseudo) {
+245|             socket.emit('join error', { error: 'Pseudo requis pour rejoindre' });
+246|             return;
+247|         }
+248| 
+249|         // ♻️ ANNUULATION DU MINUTEUR DE SUPPRESSION (Cas du F5)
+250|         if (disconnectionTimers[userInfo.pseudo]) {
+251|             clearTimeout(disconnectionTimers[userInfo.pseudo]);
+252|             delete disconnectionTimers[userInfo.pseudo];
+253|             console.log(`♻️ Reconnexion rapide (F5) détectée pour ${userInfo.pseudo}. Session préservée.`);
+254|         }
+255| 
+256|         // Récupérer la date de création depuis la base
+257|         let firstConnectedAt = Date.now();
+258|         try {
+259|             const result = await pool.query(
+260|                 `SELECT first_connected_at FROM users WHERE pseudo = $1`,
+261|                 [userInfo.pseudo]
+262|             );
+263|             if (result.rows.length > 0 && result.rows[0].first_connected_at) {
+264|                 firstConnectedAt = new Date(result.rows[0].first_connected_at).getTime();
+265|             } else {
+266|                 // Si first_connected_at est NULL, on le met à jour avec l’heure actuelle
+267|                 await pool.query(
+268|                     `UPDATE users SET first_connected_at = NOW() WHERE pseudo = $1`,
+269|                     [userInfo.pseudo]
+270|                 );
+271|             }
+272|         } catch (err) {
+273|             console.error('Erreur récupération first_connected_at:', err.message);
+274|         }
 275| 
-276|         // Tri par date de première connexion (plus ancien en bas, plus récent en haut)
-277|         const usersList = Object.values(users).sort((a, b) => (b.firstConnectedAt || 0) - (a.firstConnectedAt || 0)).map(u => ({
-278|             pseudo: u.pseudo,
-279|             age: u.age,
-280|             tendencies: u.tendencies,
-281|             gender: u.gender,
-282|             purpose: u.purpose,
-283|             bio: u.bio,
-284|             locationCode: u.locationCode,
-285|             locationName: u.locationName,
-286|             socketId: u.socketId
-287|         }));
-288|         io.emit('update users', usersList);
-289|         socket.emit('join confirmed', { success: true, user: userInfo });
-290|     });
-291| 
-292| 
-293|     // Heartbeat pour mettre à jour lastSeen
-294|     socket.on('heartbeat', () => {
-295|         if (users[socket.id]) {
-296|             users[socket.id].lastSeen = Date.now();
-297|         }
-298|     });
-299| 
-300| 
-301|     socket.on('private message', (data) => {
-302|         const { toSocketId, message, fromPseudo } = data;
-303|         console.log(`💬 Message privé de ${fromPseudo} vers ${toSocketId}: ${message}`);
-304|         updateActivity(socket.id);
-305|         socket.to(toSocketId).emit('private message received', {
-306|             message: message,
-307|             fromPseudo: fromPseudo,
-308|             fromSocketId: socket.id
-309|         });
-310|         socket.emit('message sent confirmation', { message: message, to: toSocketId });
+276|         // Nettoyer les anciennes sockets du même pseudo
+277|         Object.keys(users).forEach((id) => {
+278|             if (users[id].pseudo === userInfo.pseudo) {
+279|                 console.log(`🧹 Suppression de l'ancienne socket ${id} de ${userInfo.pseudo}`);
+280|                 delete users[id];
+281|             }
+282|         });
+283| 
+284| 
+285|         users[socket.id] = { ...userInfo, socketId: socket.id, firstConnectedAt: firstConnectedAt };
+286|         console.log(`✅ ${userInfo.pseudo} a rejoint (${socket.id})`);
+287|         updateActivity(socket.id);
+288| 
+289|         // Tri par date de première connexion (plus ancien en bas, plus récent en haut)
+290|         const usersList = Object.values(users).sort((a, b) => (b.firstConnectedAt || 0) - (a.firstConnectedAt || 0)).map(u => ({
+291|             pseudo: u.pseudo,
+292|             age: u.age,
+293|             tendencies: u.tendencies,
+294|             gender: u.gender,
+295|             purpose: u.purpose,
+296|             bio: u.bio,
+297|             locationCode: u.locationCode,
+298|             locationName: u.locationName,
+299|             socketId: u.socketId
+300|         }));
+301|         io.emit('update users', usersList);
+302|         socket.emit('join confirmed', { success: true, user: userInfo });
+303|     });
+304| 
+305| 
+306|     // Heartbeat pour mettre à jour lastSeen
+307|     socket.on('heartbeat', () => {
+308|         if (users[socket.id]) {
+309|             users[socket.id].lastSeen = Date.now();
+310|         }
 311|     });
 312| 
-313|     socket.on('disconnect', () => {
-314|         socket.on('disconnect', () => {
-315|             console.log("🔥 DISCONNECT DÉCLENCHÉ pour socket:", socket.id);
-316|             console.log(`🔌 DISCONNECT: Suppression de ${users[socket.id]?.pseudo} (socket: ${socket.id})`);
-317|             const userInfo = users[socket.id];
-318|             // ... reste
-319|         });
-320|         const userInfo = users[socket.id];
-321|         if (userInfo && userInfo.pseudo) {
-322|             const pseudo = userInfo.pseudo;
-323|             console.log(`🔌 Déconnexion immédiate de ${pseudo}`);
-324| 
-325|             delete users[socket.id];
-326|             console.log(`🗑️ users après suppression:`, Object.keys(users).length, "connectés");
-327| 
-328|             pool.query('DELETE FROM users WHERE pseudo = $1', [pseudo]).catch(err => {
-329|                 console.error(`❌ Erreur suppression ${pseudo}:`, err.message);
-330|             });
-331| 
-332|             const usersList = Object.values(users).map(u => ({
-333|                 pseudo: u.pseudo,
-334|                 age: u.age,
-335|                 tendencies: u.tendencies,
-336|                 gender: u.gender,
-337|                 purpose: u.purpose,
-338|                 bio: u.bio,
-339|                 locationCode: u.locationCode,
-340|                 locationName: u.locationName,
-341|                 socketId: u.socketId
-342|             }));
-343|             io.emit('update users', usersList);
-344|         }
-345|     });
-346| });
-347| 
-348| // ========== NETTOYAGE AUTOMATIQUE ==========
-349| startCleanup(pool, () => Object.values(users).map(u => u.pseudo), CLEANUP_INTERVAL_MINUTES * 60 * 1000);
-350| 
-351| // ========== DÉMARRAGE ==========
-352| const PORT = process.env.PORT || 3005;
-353| server.listen(PORT, '0.0.0.0', () => {
-354|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
-355| });
+313| 
+314|     socket.on('private message', (data) => {
+315|         const { toSocketId, message, fromPseudo } = data;
+316|         console.log(`💬 Message privé de ${fromPseudo} vers ${toSocketId}: ${message}`);
+317|         updateActivity(socket.id);
+318|         socket.to(toSocketId).emit('private message received', {
+319|             message: message,
+320|             fromPseudo: fromPseudo,
+321|             fromSocketId: socket.id
+322|         });
+323|         socket.emit('message sent confirmation', { message: message, to: toSocketId });
+324|     });
+325| 
+326|     socket.on('disconnect', () => {
+327|         socket.on('disconnect', () => {
+328|             console.log("🔥 DISCONNECT DÉCLENCHÉ pour socket:", socket.id);
+329|             console.log(`🔌 DISCONNECT: Suppression de ${users[socket.id]?.pseudo} (socket: ${socket.id})`);
+330|             const userInfo = users[socket.id];
+331|             // ... reste
+332|         });
+333|         const userInfo = users[socket.id];
+334|         if (userInfo && userInfo.pseudo) {
+335|             const pseudo = userInfo.pseudo;
+336|             console.log(`🔌 Déconnexion immédiate de ${pseudo}`);
+337| 
+338|             delete users[socket.id];
+339|             console.log(`🗑️ users après suppression:`, Object.keys(users).length, "connectés");
+340| 
+341|             pool.query('DELETE FROM users WHERE pseudo = $1', [pseudo]).catch(err => {
+342|                 console.error(`❌ Erreur suppression ${pseudo}:`, err.message);
+343|             });
+344| 
+345|             const usersList = Object.values(users).map(u => ({
+346|                 pseudo: u.pseudo,
+347|                 age: u.age,
+348|                 tendencies: u.tendencies,
+349|                 gender: u.gender,
+350|                 purpose: u.purpose,
+351|                 bio: u.bio,
+352|                 locationCode: u.locationCode,
+353|                 locationName: u.locationName,
+354|                 socketId: u.socketId
+355|             }));
+356|             io.emit('update users', usersList);
+357|         }
+358|     });
+359| });
+360| 
+361| // ========== NETTOYAGE AUTOMATIQUE ==========
+362| startCleanup(pool, () => Object.values(users).map(u => u.pseudo), CLEANUP_INTERVAL_MINUTES * 60 * 1000);
+363| 
+364| // ========== DÉMARRAGE ==========
+365| const PORT = process.env.PORT || 3005;
+366| server.listen(PORT, '0.0.0.0', () => {
+367|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+368| });
 
 # FILE: /var/www/meetgay/ecosystem.config.js
 
