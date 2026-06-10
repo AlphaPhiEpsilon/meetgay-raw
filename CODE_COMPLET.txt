@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-10 14:08:09
+# Généré le 2026-06-10 14:08:40
 
 ==============================================================================
 # SYSTEME DE CLONE DE FICHIER MIS A JOUR EN TEMPS REEL 
@@ -1699,337 +1699,191 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 162| }));
 163| 
 164| 
-165| 
-166| 
-167| app.get('/api/check-token', (req, res) => {
-168|     const token = req.headers.authorization?.split(' ')[1];
-169|     if (!token) return res.status(401).json({ valid: false });
-170| 
+165| // ========== MESSAGES ==========
+166| app.post('/api/messages/save', async (req, res) => {
+167|     const { from, to, message } = req.body;
+168|     if (!from || !to || !message) {
+169|         return res.status(400).json({ error: 'Champs requis' });
+170|     }
 171|     try {
-172|         const decoded = jwt.verify(token, JWT_SECRET);
-173|         res.status(200).json({ valid: true, pseudo: decoded.pseudo });
-174|     } catch (err) {
-175|         res.status(401).json({ valid: false });
-176|     }
-177| });
-178| 
-179| 
-180| 
-181| 
+172|         await pool.query(
+173|             'INSERT INTO messages (from_pseudo, to_pseudo, message) VALUES ($1, $2, $3)',
+174|             [from, to, message]
+175|         );
+176|         res.json({ success: true });
+177|     } catch (err) {
+178|         console.error('Erreur save message:', err);
+179|         res.status(500).json({ error: 'Erreur serveur' });
+180|     }
+181| });
 182| 
-183| 
-184| // ========== 6. ROUTES PUBLIQUES ==========
-185| app.post('/api/register', async (req, res) => {
-186|     try {
-187|         console.log("🔵 1. Début register, body reçu:", req.body);
-188|         const { pseudo, age, tendencies, locationCode, locationName, bio, gender, purpose, fingerprint } = req.body;
-189| 
-190|         if (!pseudo || !age) {
-191|             return res.status(400).json({ error: 'Pseudo et âge requis' });
-192|         }
-193|         if (!fingerprint) {
-194|             return res.status(400).json({ error: 'Empreinte numérique requise' });
-195|         }
-196| 
-197|         // Vérifier si l'empreinte est bannie
-198|         const banCheck = await pool.query(
-199|             `SELECT is_banned, ban_reason FROM fingerprints WHERE fingerprint_hash = $1`,
-200|             [fingerprint]
-201|         );
-202|         if (banCheck.rows.length > 0 && banCheck.rows[0].is_banned) {
-203|             return res.status(403).json({
-204|                 error: 'Accès refusé',
-205|                 reason: banCheck.rows[0].ban_reason || 'Votre empreinte est bannie'
-206|             });
-207|         }
-208| 
-209|         // Créer ou mettre à jour l'empreinte
-210|         const fingerprintResult = await pool.query(
-211|             `INSERT INTO fingerprints (fingerprint_hash, last_seen) 
-212|              VALUES ($1, NOW()) 
-213|              ON CONFLICT (fingerprint_hash) 
-214|              DO UPDATE SET last_seen = NOW()
-215|              RETURNING id`,
-216|             [fingerprint]
-217|         );
-218|         const fingerprintId = fingerprintResult.rows[0].id;
-219| 
-220|         // Invalider l'ancien token si l'utilisateur existe déjà
-221|         const existingUser = await pool.query('SELECT id FROM users WHERE pseudo = $1', [pseudo]);
-222|         if (existingUser.rows.length > 0) {
-223|             await pool.query('UPDATE users SET token_version = token_version + 1 WHERE pseudo = $1', [pseudo]);
-224|         }
-225| 
-226|         // Créer l'utilisateur
-227|         const result = await pool.query(
-228|             `INSERT INTO users (pseudo, age, tendencies, location_code, location_name, bio, gender, purpose, fingerprint_id)
-229|              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-230|              ON CONFLICT (pseudo) DO NOTHING
-231|              RETURNING *`,
-232|             [pseudo, age, tendencies, locationCode, locationName, bio, gender, purpose, fingerprintId]
-233|         );
-234| 
-235|         if (result.rows.length === 0) {
-236|             return res.status(400).json({ error: 'Pseudo déjà utilisé' });
-237|         }
-238| 
-239|         res.json({ success: true, user: result.rows[0] });
-240|     } catch (err) {
-241|         console.error("Erreur inscription:", err);
-242|         res.status(500).json({ error: 'Erreur serveur' });
-243|     }
-244| });
-245| 
-246| app.post('/api/login', async (req, res) => {
-247|     const { pseudo } = req.body;
-248|     if (!pseudo) return res.status(400).json({ error: 'Pseudo requis' });
-249|     try {
-250|         const result = await pool.query('SELECT * FROM users WHERE pseudo = $1', [pseudo]);
-251|         if (result.rows.length === 0) return res.status(404).json({ error: 'Utilisateur non trouvé' });
-252|         const user = result.rows[0];
-253|         const token = jwt.sign({ id: user.id, pseudo: user.pseudo, role: user.role || 'user' }, JWT_SECRET, { expiresIn: '24h' });
-254|         res.json({ success: true, token, user: { pseudo: user.pseudo, role: user.role } });
-255|     } catch (err) {
-256|         console.error('Erreur login:', err);
-257|         res.status(500).json({ error: 'Erreur serveur' });
-258|     }
-259| });
-260| 
-261| app.post('/api/delete-user', async (req, res) => {
-262|     let pseudo = req.body.pseudo;
-263| 
-264|     // Pour sendBeacon (Firefox), les données peuvent arriver sous forme brute
-265|     if (!pseudo && req.body) {
-266|         try {
-267|             if (typeof req.body === 'object') pseudo = req.body.pseudo;
-268|             else if (typeof req.body === 'string') {
-269|                 const parsed = JSON.parse(req.body);
-270|                 pseudo = parsed.pseudo;
-271|             }
-272|         } catch (e) {
-273|             // Ignoré silencieusement
-274|         }
-275|     }
-276| 
-277|     // Si pas de pseudo, c'est juste que la page a été fermée brutalement
-278|     if (!pseudo) {
-279|         console.log(`🚪 Fermeture de page sans pseudo détecté (déjà géré par Socket.IO)`);
-280|         return res.json({ success: true, message: 'Déconnexion propre' });
-281|     }
-282| 
-283|     try {
-284|         const result = await pool.query('DELETE FROM users WHERE pseudo = $1 RETURNING pseudo', [pseudo]);
-285|         if (result.rows.length === 0) {
-286|             return res.status(404).json({ error: 'Utilisateur non trouvé' });
-287|         }
-288|         console.log(`🗑️ Utilisateur ${pseudo} supprimé de la base`);
-289|         res.json({ success: true, message: 'Utilisateur supprimé' });
-290|     } catch (err) {
-291|         console.error('Erreur suppression utilisateur:', err.message);
-292|         res.status(500).json({ error: 'Erreur serveur' });
-293|     }
-294| });
-295| 
-296| app.post('/api/get-user', async (req, res) => {
-297|     const { pseudo } = req.body;
-298|     if (!pseudo) return res.status(400).json({ error: 'Pseudo requis' });
-299|     try {
-300|         const result = await pool.query('SELECT * FROM users WHERE pseudo = $1', [pseudo]);
-301|         if (result.rows.length === 0) return res.status(404).json({ error: 'Utilisateur non trouvé' });
-302|         res.json({ success: true, user: result.rows[0] });
-303|     } catch (err) {
-304|         console.error('Erreur get-user:', err);
-305|         res.status(500).json({ error: 'Erreur serveur' });
-306|     }
-307| });
-308| 
-309| 
-310| 
-311| // ========== MESSAGES ==========
-312| app.post('/api/messages/save', async (req, res) => {
-313|     const { from, to, message } = req.body;
-314|     if (!from || !to || !message) {
-315|         return res.status(400).json({ error: 'Champs requis' });
-316|     }
-317|     try {
-318|         await pool.query(
-319|             'INSERT INTO messages (from_pseudo, to_pseudo, message) VALUES ($1, $2, $3)',
-320|             [from, to, message]
-321|         );
-322|         res.json({ success: true });
-323|     } catch (err) {
-324|         console.error('Erreur save message:', err);
-325|         res.status(500).json({ error: 'Erreur serveur' });
-326|     }
-327| });
-328| 
-329| app.get('/api/messages/:pseudo1/:pseudo2', async (req, res) => {
-330|     const { pseudo1, pseudo2 } = req.params;
-331|     try {
-332|         const result = await pool.query(
-333|             `SELECT * FROM messages 
-334|              WHERE (from_pseudo = $1 AND to_pseudo = $2) 
-335|                 OR (from_pseudo = $2 AND to_pseudo = $1)
-336|              ORDER BY created_at ASC`,
-337|             [pseudo1, pseudo2]
-338|         );
-339|         res.json(result.rows);
-340|     } catch (err) {
-341|         console.error('Erreur get messages:', err);
-342|         res.status(500).json({ error: 'Erreur serveur' });
-343|     }
-344| });
-345| 
-346| // ========== CONTACT AVEC EMAIL ==========
-347| const nodemailer = require('nodemailer');
-348| 
-349| // Configuration SMTP OVH
-350| const transporter = nodemailer.createTransport({
-351|     host: process.env.SMTP_HOST,
-352|     port: parseInt(process.env.SMTP_PORT),
-353|     secure: process.env.SMTP_SECURE === 'true',
-354|     auth: {
-355|         user: process.env.SMTP_USER,
-356|         pass: process.env.SMTP_PASS
-357|     }
-358| });
-359| 
-360| 
-361| 
-362| 
-363| 
-364| // Initialiser la surveillance d’inactivité (5 minutes sans activité)
-365| const { updateActivity } = startInactivityWatch(io, users, pool, INACTIVITY_MINUTES, 60 * 1000);
-366| 
-367| io.on('connection', (socket) => {
-368|     console.log('🔌 Nouvelle connexion :', socket.id);
-369| 
-370|     socket.on('user join', async (userInfo) => {
-371|         if (!userInfo || !userInfo.pseudo) {
-372|             socket.emit('join error', { error: 'Pseudo requis pour rejoindre' });
-373|             return;
-374|         }
-375| 
-376|         // ♻️ ANNUULATION DU MINUTEUR DE SUPPRESSION (Cas du F5)
-377|         if (disconnectionTimers[userInfo.pseudo]) {
-378|             clearTimeout(disconnectionTimers[userInfo.pseudo]);
-379|             delete disconnectionTimers[userInfo.pseudo];
-380|             console.log(`♻️ Reconnexion rapide (F5) détectée pour ${userInfo.pseudo}. Session préservée.`);
-381|         }
-382| 
-383|         // Récupérer la date de création depuis la base
-384|         let firstConnectedAt = Date.now();
-385|         try {
-386|             const result = await pool.query(
-387|                 `SELECT first_connected_at FROM users WHERE pseudo = $1`,
-388|                 [userInfo.pseudo]
-389|             );
-390|             if (result.rows.length > 0 && result.rows[0].first_connected_at) {
-391|                 firstConnectedAt = new Date(result.rows[0].first_connected_at).getTime();
-392|             } else {
-393|                 // Si first_connected_at est NULL, on le met à jour avec l’heure actuelle
-394|                 await pool.query(
-395|                     `UPDATE users SET first_connected_at = NOW() WHERE pseudo = $1`,
-396|                     [userInfo.pseudo]
-397|                 );
-398|             }
-399|         } catch (err) {
-400|             console.error('Erreur récupération first_connected_at:', err.message);
-401|         }
-402| 
-403|         // Nettoyer les anciennes sockets du même pseudo
-404|         Object.keys(users).forEach((id) => {
-405|             if (users[id].pseudo === userInfo.pseudo) {
-406|                 console.log(`🧹 Suppression de l'ancienne socket ${id} de ${userInfo.pseudo}`);
-407|                 delete users[id];
-408|             }
-409|         });
-410| 
-411| 
-412|         users[socket.id] = { ...userInfo, socketId: socket.id, firstConnectedAt: firstConnectedAt };
-413|         console.log(`✅ ${userInfo.pseudo} a rejoint (${socket.id})`);
-414|         updateActivity(socket.id);
-415| 
-416|         // Tri par date de première connexion (plus ancien en bas, plus récent en haut)
-417|         const usersList = Object.values(users).sort((a, b) => (b.firstConnectedAt || 0) - (a.firstConnectedAt || 0)).map(u => ({
-418|             pseudo: u.pseudo,
-419|             age: u.age,
-420|             tendencies: u.tendencies,
-421|             gender: u.gender,
-422|             purpose: u.purpose,
-423|             bio: u.bio,
-424|             locationCode: u.locationCode,
-425|             locationName: u.locationName,
-426|             socketId: u.socketId
-427|         }));
-428|         io.emit('update users', usersList);
-429|         socket.emit('join confirmed', { success: true, user: userInfo });
-430|     });
-431| 
-432| 
-433|     // Heartbeat pour mettre à jour lastSeen
-434|     socket.on('heartbeat', () => {
-435|         if (users[socket.id]) {
-436|             users[socket.id].lastSeen = Date.now();
-437|         }
-438|     });
-439| 
-440| 
-441|     socket.on('private message', (data) => {
-442|         const { toSocketId, message, fromPseudo } = data;
-443|         console.log(`💬 Message privé de ${fromPseudo} vers ${toSocketId}: ${message}`);
-444|         updateActivity(socket.id);
-445|         socket.to(toSocketId).emit('private message received', {
-446|             message: message,
-447|             fromPseudo: fromPseudo,
-448|             fromSocketId: socket.id
-449|         });
-450|         socket.emit('message sent confirmation', { message: message, to: toSocketId });
-451|     });
-452| 
-453|     socket.on('disconnect', () => {
-454|         socket.on('disconnect', () => {
-455|             console.log("🔥 DISCONNECT DÉCLENCHÉ pour socket:", socket.id);
-456|             console.log(`🔌 DISCONNECT: Suppression de ${users[socket.id]?.pseudo} (socket: ${socket.id})`);
-457|             const userInfo = users[socket.id];
-458|             // ... reste
-459|         });
-460|         const userInfo = users[socket.id];
-461|         if (userInfo && userInfo.pseudo) {
-462|             const pseudo = userInfo.pseudo;
-463|             console.log(`🔌 Déconnexion immédiate de ${pseudo}`);
-464| 
-465|             delete users[socket.id];
-466|             console.log(`🗑️ users après suppression:`, Object.keys(users).length, "connectés");
-467| 
-468|             pool.query('DELETE FROM users WHERE pseudo = $1', [pseudo]).catch(err => {
-469|                 console.error(`❌ Erreur suppression ${pseudo}:`, err.message);
-470|             });
-471| 
-472|             const usersList = Object.values(users).map(u => ({
-473|                 pseudo: u.pseudo,
-474|                 age: u.age,
-475|                 tendencies: u.tendencies,
-476|                 gender: u.gender,
-477|                 purpose: u.purpose,
-478|                 bio: u.bio,
-479|                 locationCode: u.locationCode,
-480|                 locationName: u.locationName,
-481|                 socketId: u.socketId
-482|             }));
-483|             io.emit('update users', usersList);
-484|         }
-485|     });
-486| });
-487| 
-488| // ========== NETTOYAGE AUTOMATIQUE ==========
-489| startCleanup(pool, () => Object.values(users).map(u => u.pseudo), CLEANUP_INTERVAL_MINUTES * 60 * 1000);
-490| 
-491| // ========== DÉMARRAGE ==========
-492| const PORT = process.env.PORT || 3005;
-493| server.listen(PORT, '0.0.0.0', () => {
-494|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
-495| });
+183| app.get('/api/messages/:pseudo1/:pseudo2', async (req, res) => {
+184|     const { pseudo1, pseudo2 } = req.params;
+185|     try {
+186|         const result = await pool.query(
+187|             `SELECT * FROM messages 
+188|              WHERE (from_pseudo = $1 AND to_pseudo = $2) 
+189|                 OR (from_pseudo = $2 AND to_pseudo = $1)
+190|              ORDER BY created_at ASC`,
+191|             [pseudo1, pseudo2]
+192|         );
+193|         res.json(result.rows);
+194|     } catch (err) {
+195|         console.error('Erreur get messages:', err);
+196|         res.status(500).json({ error: 'Erreur serveur' });
+197|     }
+198| });
+199| 
+200| // ========== CONTACT AVEC EMAIL ==========
+201| const nodemailer = require('nodemailer');
+202| 
+203| // Configuration SMTP OVH
+204| const transporter = nodemailer.createTransport({
+205|     host: process.env.SMTP_HOST,
+206|     port: parseInt(process.env.SMTP_PORT),
+207|     secure: process.env.SMTP_SECURE === 'true',
+208|     auth: {
+209|         user: process.env.SMTP_USER,
+210|         pass: process.env.SMTP_PASS
+211|     }
+212| });
+213| 
+214| 
+215| 
+216| 
+217| 
+218| // Initialiser la surveillance d’inactivité (5 minutes sans activité)
+219| const { updateActivity } = startInactivityWatch(io, users, pool, INACTIVITY_MINUTES, 60 * 1000);
+220| 
+221| io.on('connection', (socket) => {
+222|     console.log('🔌 Nouvelle connexion :', socket.id);
+223| 
+224|     socket.on('user join', async (userInfo) => {
+225|         if (!userInfo || !userInfo.pseudo) {
+226|             socket.emit('join error', { error: 'Pseudo requis pour rejoindre' });
+227|             return;
+228|         }
+229| 
+230|         // ♻️ ANNUULATION DU MINUTEUR DE SUPPRESSION (Cas du F5)
+231|         if (disconnectionTimers[userInfo.pseudo]) {
+232|             clearTimeout(disconnectionTimers[userInfo.pseudo]);
+233|             delete disconnectionTimers[userInfo.pseudo];
+234|             console.log(`♻️ Reconnexion rapide (F5) détectée pour ${userInfo.pseudo}. Session préservée.`);
+235|         }
+236| 
+237|         // Récupérer la date de création depuis la base
+238|         let firstConnectedAt = Date.now();
+239|         try {
+240|             const result = await pool.query(
+241|                 `SELECT first_connected_at FROM users WHERE pseudo = $1`,
+242|                 [userInfo.pseudo]
+243|             );
+244|             if (result.rows.length > 0 && result.rows[0].first_connected_at) {
+245|                 firstConnectedAt = new Date(result.rows[0].first_connected_at).getTime();
+246|             } else {
+247|                 // Si first_connected_at est NULL, on le met à jour avec l’heure actuelle
+248|                 await pool.query(
+249|                     `UPDATE users SET first_connected_at = NOW() WHERE pseudo = $1`,
+250|                     [userInfo.pseudo]
+251|                 );
+252|             }
+253|         } catch (err) {
+254|             console.error('Erreur récupération first_connected_at:', err.message);
+255|         }
+256| 
+257|         // Nettoyer les anciennes sockets du même pseudo
+258|         Object.keys(users).forEach((id) => {
+259|             if (users[id].pseudo === userInfo.pseudo) {
+260|                 console.log(`🧹 Suppression de l'ancienne socket ${id} de ${userInfo.pseudo}`);
+261|                 delete users[id];
+262|             }
+263|         });
+264| 
+265| 
+266|         users[socket.id] = { ...userInfo, socketId: socket.id, firstConnectedAt: firstConnectedAt };
+267|         console.log(`✅ ${userInfo.pseudo} a rejoint (${socket.id})`);
+268|         updateActivity(socket.id);
+269| 
+270|         // Tri par date de première connexion (plus ancien en bas, plus récent en haut)
+271|         const usersList = Object.values(users).sort((a, b) => (b.firstConnectedAt || 0) - (a.firstConnectedAt || 0)).map(u => ({
+272|             pseudo: u.pseudo,
+273|             age: u.age,
+274|             tendencies: u.tendencies,
+275|             gender: u.gender,
+276|             purpose: u.purpose,
+277|             bio: u.bio,
+278|             locationCode: u.locationCode,
+279|             locationName: u.locationName,
+280|             socketId: u.socketId
+281|         }));
+282|         io.emit('update users', usersList);
+283|         socket.emit('join confirmed', { success: true, user: userInfo });
+284|     });
+285| 
+286| 
+287|     // Heartbeat pour mettre à jour lastSeen
+288|     socket.on('heartbeat', () => {
+289|         if (users[socket.id]) {
+290|             users[socket.id].lastSeen = Date.now();
+291|         }
+292|     });
+293| 
+294| 
+295|     socket.on('private message', (data) => {
+296|         const { toSocketId, message, fromPseudo } = data;
+297|         console.log(`💬 Message privé de ${fromPseudo} vers ${toSocketId}: ${message}`);
+298|         updateActivity(socket.id);
+299|         socket.to(toSocketId).emit('private message received', {
+300|             message: message,
+301|             fromPseudo: fromPseudo,
+302|             fromSocketId: socket.id
+303|         });
+304|         socket.emit('message sent confirmation', { message: message, to: toSocketId });
+305|     });
+306| 
+307|     socket.on('disconnect', () => {
+308|         socket.on('disconnect', () => {
+309|             console.log("🔥 DISCONNECT DÉCLENCHÉ pour socket:", socket.id);
+310|             console.log(`🔌 DISCONNECT: Suppression de ${users[socket.id]?.pseudo} (socket: ${socket.id})`);
+311|             const userInfo = users[socket.id];
+312|             // ... reste
+313|         });
+314|         const userInfo = users[socket.id];
+315|         if (userInfo && userInfo.pseudo) {
+316|             const pseudo = userInfo.pseudo;
+317|             console.log(`🔌 Déconnexion immédiate de ${pseudo}`);
+318| 
+319|             delete users[socket.id];
+320|             console.log(`🗑️ users après suppression:`, Object.keys(users).length, "connectés");
+321| 
+322|             pool.query('DELETE FROM users WHERE pseudo = $1', [pseudo]).catch(err => {
+323|                 console.error(`❌ Erreur suppression ${pseudo}:`, err.message);
+324|             });
+325| 
+326|             const usersList = Object.values(users).map(u => ({
+327|                 pseudo: u.pseudo,
+328|                 age: u.age,
+329|                 tendencies: u.tendencies,
+330|                 gender: u.gender,
+331|                 purpose: u.purpose,
+332|                 bio: u.bio,
+333|                 locationCode: u.locationCode,
+334|                 locationName: u.locationName,
+335|                 socketId: u.socketId
+336|             }));
+337|             io.emit('update users', usersList);
+338|         }
+339|     });
+340| });
+341| 
+342| // ========== NETTOYAGE AUTOMATIQUE ==========
+343| startCleanup(pool, () => Object.values(users).map(u => u.pseudo), CLEANUP_INTERVAL_MINUTES * 60 * 1000);
+344| 
+345| // ========== DÉMARRAGE ==========
+346| const PORT = process.env.PORT || 3005;
+347| server.listen(PORT, '0.0.0.0', () => {
+348|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+349| });
 
 # FILE: /var/www/meetgay/ecosystem.config.js
 
