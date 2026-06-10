@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-10 12:35:38
+# Généré le 2026-06-10 12:36:09
 
 ==============================================================================
 # SYSTEME DE CLONE DE FICHIER MIS A JOUR EN TEMPS REEL 
@@ -140,6 +140,7 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 #     📄 simulateur.js
 #     📄 test-db.js
 #     modules/
+#         📄 cleanup.js
 #     protected/
 #         📄 admin.html
 #     public/
@@ -176,6 +177,7 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 #             common/
 #                 📄 reset.css
 #     meetgay-split/
+#         modules/
 #         public/
 #             js/
 
@@ -2541,6 +2543,91 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 58| });
 59| 
 60| console.log('🎉 Toutes les icônes ont été générées !');
+
+# FILE: /var/www/meetgay/modules/cleanup.js
+
+1| // options.js - Tâches annexes (nettoyage, surveillance inactivité)
+2| 
+3| // 1. NETTOYAGE PÉRIODIQUE DES VISITEURS DÉCONNECTÉS
+4| function startCleanup(pool, getOnlineUsers, intervalMs = 60 * 1000) {
+5|     console.log(`🧹 Nettoyage programmé toutes les ${intervalMs / 1000} secondes`);
+6|     setInterval(async () => {
+7|         try {
+8|             const onlinePseudos = getOnlineUsers();
+9|             if (onlinePseudos.length > 0) {
+10|                 const placeholders = onlinePseudos.map((_, i) => `$${i + 1}`).join(',');
+11|                 const result = await pool.query(
+12|                     `DELETE FROM users WHERE pseudo NOT IN (${placeholders}) AND (is_member = false OR is_member IS NULL)`,
+13|                     onlinePseudos
+14|                 );
+15|                 if (result.rowCount > 0) console.log(`🧹 ${result.rowCount} visiteur(s) supprimé(s)`);
+16|             } else {
+17|                 const result = await pool.query("DELETE FROM users WHERE is_member = false OR is_member IS NULL");
+18|                 if (result.rowCount > 0) console.log(`🧹 Nettoyage complet: ${result.rowCount} visiteur(s) supprimé(s)`);
+19|             }
+20|         } catch (err) {
+21|             console.error('❌ Erreur nettoyage:', err.message);
+22|         }
+23|     }, intervalMs);
+24| }
+25| 
+26| // 2. SURVEILLANCE D’INACTIVITÉ
+27| function startInactivityWatch(io, users, pool, inactivityMinutes = 5, checkIntervalMs = 60 * 1000) {
+28|     console.log(`⏱️ Surveillance inactivité : déconnexion après ${inactivityMinutes} minutes sans activité`);
+29| 
+30|     const lastActivity = new Map();
+31| 
+32|     function updateActivity(socketId) {
+33|         lastActivity.set(socketId, Date.now());
+34|     }
+35| 
+36|     setInterval(async () => {
+37|         const now = Date.now();
+38|         const timeoutMs = inactivityMinutes * 60 * 1000;
+39| 
+40|         for (const [socketId, user] of Object.entries(users)) {
+41|             const last = lastActivity.get(socketId);
+42|             if (last && (now - last) > timeoutMs) {
+43|                 console.log(`⏰ ${user.pseudo} déconnecté pour inactivité (${inactivityMinutes} min)`);
+44| 
+45|                 const socket = io.sockets.sockets.get(socketId);
+46|                 if (socket) {
+47|                     socket.emit('force logout', {
+48|                         reason: `Inactivité prolongée (${inactivityMinutes} minutes sans activité). Vous avez été déconnecté.`
+49|                     });
+50|                     socket.disconnect(true);
+51|                 }
+52| 
+53|                 try {
+54|                     await pool.query('DELETE FROM users WHERE pseudo = $1', [user.pseudo]);
+55|                     console.log(`🗑️ ${user.pseudo} supprimé de la base pour inactivité`);
+56|                 } catch (err) {
+57|                     console.error('Erreur suppression inactif:', err.message);
+58|                 }
+59| 
+60|                 delete users[socketId];
+61|                 lastActivity.delete(socketId);
+62| 
+63|                 const usersList = Object.values(users).sort((a, b) => (b.firstConnectedAt || 0) - (a.firstConnectedAt || 0)).map(u => ({
+64|                     pseudo: u.pseudo,
+65|                     age: u.age,
+66|                     tendencies: u.tendencies,
+67|                     gender: u.gender,
+68|                     purpose: u.purpose,
+69|                     bio: u.bio,
+70|                     locationCode: u.locationCode,
+71|                     locationName: u.locationName,
+72|                     socketId: u.socketId
+73|                 }));
+74|                 io.emit('update users', usersList);
+75|             }
+76|         }
+77|     }, checkIntervalMs);
+78| 
+79|     return { updateActivity };
+80| }
+81| 
+82| module.exports = { startCleanup, startInactivityWatch };
 
 # FILE: /var/www/meetgay/public/sw.js
 
