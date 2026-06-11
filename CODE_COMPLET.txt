@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-11 11:26:44
+# Généré le 2026-06-11 11:27:15
 
 ==============================================================================
 # SYSTEME DE CLONE DE FICHIER MIS A JOUR EN TEMPS REEL 
@@ -3742,79 +3742,111 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 83|             if (result.rows.length === 0) return res.status(404).json({ error: 'Utilisateur non trouvé' });
 84|             const user = result.rows[0];
 85| 
-86|             // 🔍 VÉRIFICATION BAN TEMPORAIRE
-87|             const banCheck = await pool.query(
-88|                 `SELECT expires_at FROM temp_bans 
-89|                  WHERE user_pseudo = $1 AND expires_at > NOW()`,
-90|                 [pseudo]
-91|             );
-92| 
-93|             if (banCheck.rows.length > 0) {
-94|                 const expiresAt = banCheck.rows[0].expires_at;
-95|                 const dateStr = new Date(expiresAt).toLocaleString();
-96|                 return res.status(403).json({
-97|                     error: 'banni_temporaire',
-98|                     message: `⛔ Vous êtes banni jusqu'au ${dateStr} pour comportement abusif.`
-99|                 });
-100|             }
-101|             // FIN VÉRIFICATION BAN
-102| 
-103|             const token = jwt.sign({ id: user.id, pseudo: user.pseudo, role: user.role || 'user' }, JWT_SECRET, { expiresIn: '24h' });
-104|             res.json({ success: true, token, user: { pseudo: user.pseudo, role: user.role } });
-105|         } catch (err) {
-106|             console.error('Erreur login:', err);
-107|             res.status(500).json({ error: 'Erreur serveur' });
-108|         }
-109|     });
-110| 
-111|     // ========== DELETE USER ==========
-112|     app.post('/api/delete-user', async (req, res) => {
-113|         let pseudo = req.body.pseudo;
-114| 
-115|         if (!pseudo && req.body) {
-116|             try {
-117|                 if (typeof req.body === 'object') pseudo = req.body.pseudo;
-118|                 else if (typeof req.body === 'string') {
-119|                     const parsed = JSON.parse(req.body);
-120|                     pseudo = parsed.pseudo;
-121|                 }
-122|             } catch (e) {
-123|                 // Ignoré silencieusement
-124|             }
-125|         }
-126| 
-127|         if (!pseudo) {
-128|             console.log(`🚪 Fermeture de page sans pseudo détecté (déjà géré par Socket.IO)`);
-129|             return res.json({ success: true, message: 'Déconnexion propre' });
-130|         }
-131| 
-132|         try {
-133|             const result = await pool.query('DELETE FROM users WHERE pseudo = $1 RETURNING pseudo', [pseudo]);
-134|             if (result.rows.length === 0) {
-135|                 return res.status(404).json({ error: 'Utilisateur non trouvé' });
-136|             }
-137|             console.log(`🗑️ Utilisateur ${pseudo} supprimé de la base`);
-138|             res.json({ success: true, message: 'Utilisateur supprimé' });
-139|         } catch (err) {
-140|             console.error('Erreur suppression utilisateur:', err.message);
-141|             res.status(500).json({ error: 'Erreur serveur' });
-142|         }
-143|     });
-144| 
-145|     // ========== GET USER ==========
-146|     app.post('/api/get-user', async (req, res) => {
-147|         const { pseudo } = req.body;
-148|         if (!pseudo) return res.status(400).json({ error: 'Pseudo requis' });
-149|         try {
-150|             const result = await pool.query('SELECT * FROM users WHERE pseudo = $1', [pseudo]);
-151|             if (result.rows.length === 0) return res.status(404).json({ error: 'Utilisateur non trouvé' });
-152|             res.json({ success: true, user: result.rows[0] });
-153|         } catch (err) {
-154|             console.error('Erreur get-user:', err);
-155|             res.status(500).json({ error: 'Erreur serveur' });
-156|         }
-157|     });
-158| };
+86|             // Vérifier si le fingerprint est banni
+87|             if (user.fingerprint_id) {
+88|                 const bannedCheck = await pool.query(
+89|                     `SELECT is_banned, ban_reason, banned_at FROM fingerprints 
+90|          WHERE id = $1 AND is_banned = true`,
+91|                     [user.fingerprint_id]
+92|                 );
+93| 
+94|                 if (bannedCheck.rows.length > 0) {
+95|                     const ban = bannedCheck.rows[0];
+96|                     return res.status(403).json({
+97|                         success: false,
+98|                         error: 'fingerprint_banned',
+99|                         message: `⛔ Votre navigateur est banni depuis le ${new Date(ban.banned_at).toLocaleString()}. Raison: ${ban.ban_reason || 'Comportement abusif'}`
+100|                     });
+101|                 }
+102|             }
+103| 
+104|             // Vérifier si l'IP est bannie (optionnel)
+105|             const ip = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
+106|             const ipBanned = await pool.query(
+107|                 `SELECT is_banned FROM ip_bans WHERE ip_address = $1 AND is_banned = true`,
+108|                 [ip]
+109|             );
+110|             if (ipBanned.rows.length > 0) {
+111|                 return res.status(403).json({
+112|                     success: false,
+113|                     error: 'ip_banned',
+114|                     message: '⛔ Votre adresse IP est bannie.'
+115|                 });
+116|             }
+117| 
+118|             // 🔍 VÉRIFICATION BAN TEMPORAIRE
+119|             const banCheck = await pool.query(
+120|                 `SELECT expires_at FROM temp_bans 
+121|                  WHERE user_pseudo = $1 AND expires_at > NOW()`,
+122|                 [pseudo]
+123|             );
+124| 
+125|             if (banCheck.rows.length > 0) {
+126|                 const expiresAt = banCheck.rows[0].expires_at;
+127|                 const dateStr = new Date(expiresAt).toLocaleString();
+128|                 return res.status(403).json({
+129|                     error: 'banni_temporaire',
+130|                     message: `⛔ Vous êtes banni jusqu'au ${dateStr} pour comportement abusif.`
+131|                 });
+132|             }
+133|             // FIN VÉRIFICATION BAN
+134| 
+135|             const token = jwt.sign({ id: user.id, pseudo: user.pseudo, role: user.role || 'user' }, JWT_SECRET, { expiresIn: '24h' });
+136|             res.json({ success: true, token, user: { pseudo: user.pseudo, role: user.role } });
+137|         } catch (err) {
+138|             console.error('Erreur login:', err);
+139|             res.status(500).json({ error: 'Erreur serveur' });
+140|         }
+141|     });
+142| 
+143|     // ========== DELETE USER ==========
+144|     app.post('/api/delete-user', async (req, res) => {
+145|         let pseudo = req.body.pseudo;
+146| 
+147|         if (!pseudo && req.body) {
+148|             try {
+149|                 if (typeof req.body === 'object') pseudo = req.body.pseudo;
+150|                 else if (typeof req.body === 'string') {
+151|                     const parsed = JSON.parse(req.body);
+152|                     pseudo = parsed.pseudo;
+153|                 }
+154|             } catch (e) {
+155|                 // Ignoré silencieusement
+156|             }
+157|         }
+158| 
+159|         if (!pseudo) {
+160|             console.log(`🚪 Fermeture de page sans pseudo détecté (déjà géré par Socket.IO)`);
+161|             return res.json({ success: true, message: 'Déconnexion propre' });
+162|         }
+163| 
+164|         try {
+165|             const result = await pool.query('DELETE FROM users WHERE pseudo = $1 RETURNING pseudo', [pseudo]);
+166|             if (result.rows.length === 0) {
+167|                 return res.status(404).json({ error: 'Utilisateur non trouvé' });
+168|             }
+169|             console.log(`🗑️ Utilisateur ${pseudo} supprimé de la base`);
+170|             res.json({ success: true, message: 'Utilisateur supprimé' });
+171|         } catch (err) {
+172|             console.error('Erreur suppression utilisateur:', err.message);
+173|             res.status(500).json({ error: 'Erreur serveur' });
+174|         }
+175|     });
+176| 
+177|     // ========== GET USER ==========
+178|     app.post('/api/get-user', async (req, res) => {
+179|         const { pseudo } = req.body;
+180|         if (!pseudo) return res.status(400).json({ error: 'Pseudo requis' });
+181|         try {
+182|             const result = await pool.query('SELECT * FROM users WHERE pseudo = $1', [pseudo]);
+183|             if (result.rows.length === 0) return res.status(404).json({ error: 'Utilisateur non trouvé' });
+184|             res.json({ success: true, user: result.rows[0] });
+185|         } catch (err) {
+186|             console.error('Erreur get-user:', err);
+187|             res.status(500).json({ error: 'Erreur serveur' });
+188|         }
+189|     });
+190| };
 
 # FILE: /var/www/meetgay/modules/middleware/maintenance.js
 
