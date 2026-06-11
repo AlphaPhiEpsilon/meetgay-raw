@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-11 08:07:17
+# Généré le 2026-06-11 08:07:48
 
 ==============================================================================
 # SYSTEME DE CLONE DE FICHIER MIS A JOUR EN TEMPS REEL 
@@ -639,44 +639,174 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 320|     alert('⚠️ Fonction à implémenter côté serveur');
 321| }
 322| 
-323| // ========== 7. UTILITAIRES ==========
-324| function escapeHtml(str) {
-325|     if (!str) return '';
-326|     return str.replace(/[&<>]/g, function (m) {
-327|         if (m === '&') return '&amp;';
-328|         if (m === '<') return '&lt;';
-329|         if (m === '>') return '&gt;';
-330|         return m;
-331|     });
-332| }
-333| 
-334| // ========== 8. DÉCONNEXION ==========
-335| async function logout() {
-336|     if (!confirm('Se déconnecter ?')) return;
-337|     try {
-338|         await fetch('/api/admin/logout', { method: 'POST' });
-339|         window.location.href = '/admin-login.html';
-340|     } catch (err) {
-341|         console.error(err);
-342|         alert('Erreur lors de la déconnexion');
-343|     }
-344| }
-345| 
-346| // ========== 9. INITIALISATION ==========
-347| (async function () {
-348|     await loadUsers();
-349| 
-350|     if (searchBtn) searchBtn.addEventListener('click', applyFilters);
-351|     if (searchInput) searchInput.addEventListener('keyup', (e) => {
-352|         if (e.key === 'Enter') applyFilters();
-353|     });
-354|     if (roleFilter) roleFilter.addEventListener('change', applyFilters);
-355|     if (statusFilter) statusFilter.addEventListener('change', applyFilters);
-356| 
-357|     if (maintenanceBtn) maintenanceBtn.addEventListener('click', toggleMaintenance);
-358|     if (backupDbBtn) backupDbBtn.addEventListener('click', backupDatabase);
-359|     if (cleanupBtn) cleanupBtn.addEventListener('click', manualCleanup);
-360| })();
+323| // ========== SECTION SIGNALEMENTS ==========
+324| async function loadReports() {
+325|     const reportsDiv = document.getElementById('reportsList');
+326|     if (!reportsDiv) return;
+327| 
+328|     try {
+329|         const response = await fetch('/api/admin/reports');
+330|         const reports = await response.json();
+331| 
+332|         if (reports.length === 0) {
+333|             reportsDiv.innerHTML = '<div class="loading">✅ Aucun signalement en attente</div>';
+334|             return;
+335|         }
+336| 
+337|         let html = '<table class="admin-table"><thead><tr><th>Date</th><th>Signalé par</th><th>Cible</th><th>Actions</th></tr></thead><tbody>';
+338| 
+339|         reports.forEach(r => {
+340|             html += `
+341|                 <tr>
+342|                     <td>${new Date(r.created_at).toLocaleString()}</td>
+343|                     <td>${escapeHtml(r.reporter_pseudo)}</td>
+344|                     <td><strong>${escapeHtml(r.target_pseudo)}</strong></td>
+345|                     <td class="action-buttons">
+346|                         <button class="action-btn btn-warn" onclick="warnUser('${escapeHtml(r.target_pseudo)}')">⚠️ Warn</button>
+347|                         <button class="action-btn btn-ban" onclick="banUser('${escapeHtml(r.target_pseudo)}')">🚫 Ban</button>
+348|                         <button class="action-btn btn-ignore" onclick="ignoreReport(${r.id})">✅ Ignorer</button>
+349|                     </td>
+350|                 </tr>
+351|             `;
+352|         });
+353| 
+354|         html += '</tbody></table>';
+355|         reportsDiv.innerHTML = html;
+356|     } catch (err) {
+357|         console.error(err);
+358|         reportsDiv.innerHTML = '<div class="loading">❌ Erreur chargement</div>';
+359|     }
+360| }
+361| 
+362| async function ignoreReport(reportId) {
+363|     if (!confirm('Ignorer ce signalement ?')) return;
+364| 
+365|     try {
+366|         const response = await fetch('/api/admin/ignore-report', {
+367|             method: 'POST',
+368|             headers: { 'Content-Type': 'application/json' },
+369|             body: JSON.stringify({ reportId })
+370|         });
+371| 
+372|         if (response.ok) {
+373|             alert('✅ Signalement ignoré');
+374|             loadReports();
+375|         } else {
+376|             alert('❌ Erreur');
+377|         }
+378|     } catch (err) {
+379|         console.error(err);
+380|         alert('❌ Erreur réseau');
+381|     }
+382| }
+383| 
+384| // ========== SECTION JOURNAL ==========
+385| async function loadModerationLogs() {
+386|     const logsDiv = document.getElementById('logsList');
+387|     if (!logsDiv) return;
+388| 
+389|     try {
+390|         const response = await fetch('/api/admin/moderation-logs');
+391|         const logs = await response.json();
+392| 
+393|         if (logs.length === 0) {
+394|             logsDiv.innerHTML = '<div class="loading">📭 Aucune action enregistrée</div>';
+395|             return;
+396|         }
+397| 
+398|         let html = '<table class="admin-table"><thead><tr><th>Date</th><th>Admin</th><th>Action</th><th>Cible</th><th>Détails</th></tr></thead><tbody>';
+399| 
+400|         logs.forEach(log => {
+401|             let actionIcon = '';
+402|             if (log.action_type === 'warn') actionIcon = '⚠️';
+403|             else if (log.action_type === 'ban') actionIcon = '🚫';
+404|             else if (log.action_type === 'temp_ban') actionIcon = '⏱️';
+405|             else if (log.action_type === 'unban') actionIcon = '🔓';
+406|             else if (log.action_type === 'set_modo') actionIcon = '👮';
+407|             else if (log.action_type === 'set_admin') actionIcon = '👑';
+408|             else actionIcon = '📝';
+409| 
+410|             let details = log.reason || '';
+411|             if (log.duration_minutes) details += ` (${log.duration_minutes} min)`;
+412| 
+413|             html += `
+414|                 <tr>
+415|                     <td>${new Date(log.created_at).toLocaleString()}</td>
+416|                     <td>${escapeHtml(log.admin_pseudo)}</td>
+417|                     <td>${actionIcon} ${escapeHtml(log.action_type)}</td>
+418|                     <td><strong>${escapeHtml(log.target_pseudo)}</strong></td>
+419|                     <td>${escapeHtml(details)}</td>
+420|                 </tr>
+421|             `;
+422|         });
+423| 
+424|         html += '</tbody></table>';
+425|         logsDiv.innerHTML = html;
+426|     } catch (err) {
+427|         console.error(err);
+428|         logsDiv.innerHTML = '<div class="loading">❌ Erreur chargement</div>';
+429|     }
+430| }
+431| 
+432| // Gestion des onglets
+433| function initTabs() {
+434|     const tabs = document.querySelectorAll('.tab-btn');
+435|     tabs.forEach(btn => {
+436|         btn.addEventListener('click', () => {
+437|             tabs.forEach(b => b.classList.remove('active'));
+438|             btn.classList.add('active');
+439| 
+440|             document.querySelectorAll('.tab-content').forEach(content => {
+441|                 content.classList.remove('active');
+442|             });
+443| 
+444|             const tabId = `tab-${btn.dataset.tab}`;
+445|             document.getElementById(tabId).classList.add('active');
+446| 
+447|             if (btn.dataset.tab === 'reports') loadReports();
+448|             if (btn.dataset.tab === 'logs') loadModerationLogs();
+449|         });
+450|     });
+451| }
+452| 
+453| // ========== 7. UTILITAIRES ==========
+454| function escapeHtml(str) {
+455|     if (!str) return '';
+456|     return str.replace(/[&<>]/g, function (m) {
+457|         if (m === '&') return '&amp;';
+458|         if (m === '<') return '&lt;';
+459|         if (m === '>') return '&gt;';
+460|         return m;
+461|     });
+462| }
+463| 
+464| // ========== 8. DÉCONNEXION ==========
+465| async function logout() {
+466|     if (!confirm('Se déconnecter ?')) return;
+467|     try {
+468|         await fetch('/api/admin/logout', { method: 'POST' });
+469|         window.location.href = '/admin-login.html';
+470|     } catch (err) {
+471|         console.error(err);
+472|         alert('Erreur lors de la déconnexion');
+473|     }
+474| }
+475| 
+476| // ========== 9. INITIALISATION ==========
+477| (async function () {
+478|     await loadUsers();
+479| 
+480|     if (searchBtn) searchBtn.addEventListener('click', applyFilters);
+481|     if (searchInput) searchInput.addEventListener('keyup', (e) => {
+482|         if (e.key === 'Enter') applyFilters();
+483|     });
+484|     if (roleFilter) roleFilter.addEventListener('change', applyFilters);
+485|     if (statusFilter) statusFilter.addEventListener('change', applyFilters);
+486| 
+487|     if (maintenanceBtn) maintenanceBtn.addEventListener('click', toggleMaintenance);
+488|     if (backupDbBtn) backupDbBtn.addEventListener('click', backupDatabase);
+489|     if (cleanupBtn) cleanupBtn.addEventListener('click', manualCleanup);
+490| })();
 
 # FILE: /var/www/meetgay/public/js/popup.js
 
@@ -3308,44 +3438,174 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 320|     alert('⚠️ Fonction à implémenter côté serveur');
 321| }
 322| 
-323| // ========== 7. UTILITAIRES ==========
-324| function escapeHtml(str) {
-325|     if (!str) return '';
-326|     return str.replace(/[&<>]/g, function (m) {
-327|         if (m === '&') return '&amp;';
-328|         if (m === '<') return '&lt;';
-329|         if (m === '>') return '&gt;';
-330|         return m;
-331|     });
-332| }
-333| 
-334| // ========== 8. DÉCONNEXION ==========
-335| async function logout() {
-336|     if (!confirm('Se déconnecter ?')) return;
-337|     try {
-338|         await fetch('/api/admin/logout', { method: 'POST' });
-339|         window.location.href = '/admin-login.html';
-340|     } catch (err) {
-341|         console.error(err);
-342|         alert('Erreur lors de la déconnexion');
-343|     }
-344| }
-345| 
-346| // ========== 9. INITIALISATION ==========
-347| (async function () {
-348|     await loadUsers();
-349| 
-350|     if (searchBtn) searchBtn.addEventListener('click', applyFilters);
-351|     if (searchInput) searchInput.addEventListener('keyup', (e) => {
-352|         if (e.key === 'Enter') applyFilters();
-353|     });
-354|     if (roleFilter) roleFilter.addEventListener('change', applyFilters);
-355|     if (statusFilter) statusFilter.addEventListener('change', applyFilters);
-356| 
-357|     if (maintenanceBtn) maintenanceBtn.addEventListener('click', toggleMaintenance);
-358|     if (backupDbBtn) backupDbBtn.addEventListener('click', backupDatabase);
-359|     if (cleanupBtn) cleanupBtn.addEventListener('click', manualCleanup);
-360| })();
+323| // ========== SECTION SIGNALEMENTS ==========
+324| async function loadReports() {
+325|     const reportsDiv = document.getElementById('reportsList');
+326|     if (!reportsDiv) return;
+327| 
+328|     try {
+329|         const response = await fetch('/api/admin/reports');
+330|         const reports = await response.json();
+331| 
+332|         if (reports.length === 0) {
+333|             reportsDiv.innerHTML = '<div class="loading">✅ Aucun signalement en attente</div>';
+334|             return;
+335|         }
+336| 
+337|         let html = '<table class="admin-table"><thead><tr><th>Date</th><th>Signalé par</th><th>Cible</th><th>Actions</th></tr></thead><tbody>';
+338| 
+339|         reports.forEach(r => {
+340|             html += `
+341|                 <tr>
+342|                     <td>${new Date(r.created_at).toLocaleString()}</td>
+343|                     <td>${escapeHtml(r.reporter_pseudo)}</td>
+344|                     <td><strong>${escapeHtml(r.target_pseudo)}</strong></td>
+345|                     <td class="action-buttons">
+346|                         <button class="action-btn btn-warn" onclick="warnUser('${escapeHtml(r.target_pseudo)}')">⚠️ Warn</button>
+347|                         <button class="action-btn btn-ban" onclick="banUser('${escapeHtml(r.target_pseudo)}')">🚫 Ban</button>
+348|                         <button class="action-btn btn-ignore" onclick="ignoreReport(${r.id})">✅ Ignorer</button>
+349|                     </td>
+350|                 </tr>
+351|             `;
+352|         });
+353| 
+354|         html += '</tbody></table>';
+355|         reportsDiv.innerHTML = html;
+356|     } catch (err) {
+357|         console.error(err);
+358|         reportsDiv.innerHTML = '<div class="loading">❌ Erreur chargement</div>';
+359|     }
+360| }
+361| 
+362| async function ignoreReport(reportId) {
+363|     if (!confirm('Ignorer ce signalement ?')) return;
+364| 
+365|     try {
+366|         const response = await fetch('/api/admin/ignore-report', {
+367|             method: 'POST',
+368|             headers: { 'Content-Type': 'application/json' },
+369|             body: JSON.stringify({ reportId })
+370|         });
+371| 
+372|         if (response.ok) {
+373|             alert('✅ Signalement ignoré');
+374|             loadReports();
+375|         } else {
+376|             alert('❌ Erreur');
+377|         }
+378|     } catch (err) {
+379|         console.error(err);
+380|         alert('❌ Erreur réseau');
+381|     }
+382| }
+383| 
+384| // ========== SECTION JOURNAL ==========
+385| async function loadModerationLogs() {
+386|     const logsDiv = document.getElementById('logsList');
+387|     if (!logsDiv) return;
+388| 
+389|     try {
+390|         const response = await fetch('/api/admin/moderation-logs');
+391|         const logs = await response.json();
+392| 
+393|         if (logs.length === 0) {
+394|             logsDiv.innerHTML = '<div class="loading">📭 Aucune action enregistrée</div>';
+395|             return;
+396|         }
+397| 
+398|         let html = '<table class="admin-table"><thead><tr><th>Date</th><th>Admin</th><th>Action</th><th>Cible</th><th>Détails</th></tr></thead><tbody>';
+399| 
+400|         logs.forEach(log => {
+401|             let actionIcon = '';
+402|             if (log.action_type === 'warn') actionIcon = '⚠️';
+403|             else if (log.action_type === 'ban') actionIcon = '🚫';
+404|             else if (log.action_type === 'temp_ban') actionIcon = '⏱️';
+405|             else if (log.action_type === 'unban') actionIcon = '🔓';
+406|             else if (log.action_type === 'set_modo') actionIcon = '👮';
+407|             else if (log.action_type === 'set_admin') actionIcon = '👑';
+408|             else actionIcon = '📝';
+409| 
+410|             let details = log.reason || '';
+411|             if (log.duration_minutes) details += ` (${log.duration_minutes} min)`;
+412| 
+413|             html += `
+414|                 <tr>
+415|                     <td>${new Date(log.created_at).toLocaleString()}</td>
+416|                     <td>${escapeHtml(log.admin_pseudo)}</td>
+417|                     <td>${actionIcon} ${escapeHtml(log.action_type)}</td>
+418|                     <td><strong>${escapeHtml(log.target_pseudo)}</strong></td>
+419|                     <td>${escapeHtml(details)}</td>
+420|                 </tr>
+421|             `;
+422|         });
+423| 
+424|         html += '</tbody></table>';
+425|         logsDiv.innerHTML = html;
+426|     } catch (err) {
+427|         console.error(err);
+428|         logsDiv.innerHTML = '<div class="loading">❌ Erreur chargement</div>';
+429|     }
+430| }
+431| 
+432| // Gestion des onglets
+433| function initTabs() {
+434|     const tabs = document.querySelectorAll('.tab-btn');
+435|     tabs.forEach(btn => {
+436|         btn.addEventListener('click', () => {
+437|             tabs.forEach(b => b.classList.remove('active'));
+438|             btn.classList.add('active');
+439| 
+440|             document.querySelectorAll('.tab-content').forEach(content => {
+441|                 content.classList.remove('active');
+442|             });
+443| 
+444|             const tabId = `tab-${btn.dataset.tab}`;
+445|             document.getElementById(tabId).classList.add('active');
+446| 
+447|             if (btn.dataset.tab === 'reports') loadReports();
+448|             if (btn.dataset.tab === 'logs') loadModerationLogs();
+449|         });
+450|     });
+451| }
+452| 
+453| // ========== 7. UTILITAIRES ==========
+454| function escapeHtml(str) {
+455|     if (!str) return '';
+456|     return str.replace(/[&<>]/g, function (m) {
+457|         if (m === '&') return '&amp;';
+458|         if (m === '<') return '&lt;';
+459|         if (m === '>') return '&gt;';
+460|         return m;
+461|     });
+462| }
+463| 
+464| // ========== 8. DÉCONNEXION ==========
+465| async function logout() {
+466|     if (!confirm('Se déconnecter ?')) return;
+467|     try {
+468|         await fetch('/api/admin/logout', { method: 'POST' });
+469|         window.location.href = '/admin-login.html';
+470|     } catch (err) {
+471|         console.error(err);
+472|         alert('Erreur lors de la déconnexion');
+473|     }
+474| }
+475| 
+476| // ========== 9. INITIALISATION ==========
+477| (async function () {
+478|     await loadUsers();
+479| 
+480|     if (searchBtn) searchBtn.addEventListener('click', applyFilters);
+481|     if (searchInput) searchInput.addEventListener('keyup', (e) => {
+482|         if (e.key === 'Enter') applyFilters();
+483|     });
+484|     if (roleFilter) roleFilter.addEventListener('change', applyFilters);
+485|     if (statusFilter) statusFilter.addEventListener('change', applyFilters);
+486| 
+487|     if (maintenanceBtn) maintenanceBtn.addEventListener('click', toggleMaintenance);
+488|     if (backupDbBtn) backupDbBtn.addEventListener('click', backupDatabase);
+489|     if (cleanupBtn) cleanupBtn.addEventListener('click', manualCleanup);
+490| })();
 
 # FILE: /var/www/meetgay/public/js/popup.js
 
