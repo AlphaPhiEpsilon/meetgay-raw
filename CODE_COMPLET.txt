@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-11 19:12:18
+# Généré le 2026-06-11 19:12:49
 
 ==============================================================================
 # SYSTEME DE CLONE DE FICHIER MIS A JOUR EN TEMPS REEL 
@@ -4805,141 +4805,143 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 26| const bcrypt = require('bcrypt');
 27| const session = require('express-session');
 28| const pgSession = require('connect-pg-simple')(session);
-29| 
-30| // Modules internes
-31| const { startCleanup, startInactivityWatch, cleanOldData } = require('./modules/cleanup.js');
-32| const contactRoutes = require('./modules/routes/api-contact.js');
-33| const pool = require('./modules/postgresql.js');
-34| const htmlRoutes = require('./modules/routes/html.js');
-35| const adminRoutes = require('./modules/routes/admin.js');
-36| const authRoutes = require('./modules/routes/api-auth.js');
-37| const messagesRoutes = require('./modules/routes/api-messages.js');
-38| const maintenanceMiddleware = require('./modules/middleware/maintenance.js');
-39| const socketHandlers = require('./modules/socket-handlers.js');
-40| 
-41| // ==========  VARIABLES GLOBALES ==========
-42| const users = {};
-43| const disconnectionTimers = {}; // Stocke les comptes à rebours anti-F5
-44| const TEST_MODE = false;  // ← Désactive le fingerprint si true
-45| 
-46| // PARAMÈTRES DE NETTOYAGE ET SURVEILLANCE
-47| const INACTIVITY_MINUTES = 180;      // Déconnexion après X minutes sans activité
-48| const CLEANUP_INTERVAL_MINUTES = 1; // Nettoyage des absents toutes les X minutes
-49| // JWT_SECRET pour les utilisateurs normaux
-50| const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
-51| 
-52| // PARAMÈTRES DE MODÉRATION
-53| const REPORTS_THRESHOLD = 2;        // Nombre de signalements (personnes différentes) avant auto-ban
-54| const REPORTS_WINDOW_MINUTES = 60;  // Fenêtre de temps en minutes
-55| const TEMP_BAN_MINUTES = 10;        // Durée du bannissement temporaire
-56| 
-57| // PARAMÈTRES DE NETTOYAGE AUTO
-58| const LOGS_RETENTION_DAYS = 30;     // Garder 30 jours de journal
-59| const REPORTS_RETENTION_DAYS = 60;  // Garder 60 jours de signalements
-60| const AUTO_CLEANUP_ENABLED = true;   // Activer/désactiver le nettoyage auto
-61| 
-62| 
+29| const crypto = require('crypto');
+30| const cspMiddleware = require('./modules/middleware/csp.js');
+31| 
+32| // Modules internes
+33| const { startCleanup, startInactivityWatch, cleanOldData } = require('./modules/cleanup.js');
+34| const contactRoutes = require('./modules/routes/api-contact.js');
+35| const pool = require('./modules/postgresql.js');
+36| const htmlRoutes = require('./modules/routes/html.js');
+37| const adminRoutes = require('./modules/routes/admin.js');
+38| const authRoutes = require('./modules/routes/api-auth.js');
+39| const messagesRoutes = require('./modules/routes/api-messages.js');
+40| const maintenanceMiddleware = require('./modules/middleware/maintenance.js');
+41| const socketHandlers = require('./modules/socket-handlers.js');
+42| 
+43| // ==========  VARIABLES GLOBALES ==========
+44| const users = {};
+45| const disconnectionTimers = {}; // Stocke les comptes à rebours anti-F5
+46| const TEST_MODE = false;  // ← Désactive le fingerprint si true
+47| 
+48| // PARAMÈTRES DE NETTOYAGE ET SURVEILLANCE
+49| const INACTIVITY_MINUTES = 180;      // Déconnexion après X minutes sans activité
+50| const CLEANUP_INTERVAL_MINUTES = 1; // Nettoyage des absents toutes les X minutes
+51| // JWT_SECRET pour les utilisateurs normaux
+52| const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
+53| 
+54| // PARAMÈTRES DE MODÉRATION
+55| const REPORTS_THRESHOLD = 2;        // Nombre de signalements (personnes différentes) avant auto-ban
+56| const REPORTS_WINDOW_MINUTES = 60;  // Fenêtre de temps en minutes
+57| const TEMP_BAN_MINUTES = 10;        // Durée du bannissement temporaire
+58| 
+59| // PARAMÈTRES DE NETTOYAGE AUTO
+60| const LOGS_RETENTION_DAYS = 30;     // Garder 30 jours de journal
+61| const REPORTS_RETENTION_DAYS = 60;  // Garder 60 jours de signalements
+62| const AUTO_CLEANUP_ENABLED = true;   // Activer/désactiver le nettoyage auto
 63| 
 64| 
 65| 
-66| // ==========  CONFIGURATION EXPRESS ==========
-67| const app = express();
-68| const server = http.createServer(app);
-69| 
-70| console.log('🔍 DB_USER:', process.env.DB_USER);
-71| console.log('🔍 DB_PASSWORD:', process.env.DB_PASSWORD ? '******' : 'MISSING');
-72| 
-73| // Compression
-74| app.use(compression({
-75|     level: 6,
-76|     threshold: 1024,
-77|     filter: (req, res) => {
-78|         if (req.path === '/socket.io/') return false;
-79|         return compression.filter(req, res);
-80|     }
-81| }));
-82| 
-83| app.use(express.json());
+66| 
+67| 
+68| // ==========  CONFIGURATION EXPRESS ==========
+69| const app = express();
+70| const server = http.createServer(app);
+71| 
+72| console.log('🔍 DB_USER:', process.env.DB_USER);
+73| console.log('🔍 DB_PASSWORD:', process.env.DB_PASSWORD ? '******' : 'MISSING');
+74| 
+75| // Compression
+76| app.use(compression({
+77|     level: 6,
+78|     threshold: 1024,
+79|     filter: (req, res) => {
+80|         if (req.path === '/socket.io/') return false;
+81|         return compression.filter(req, res);
+82|     }
+83| }));
 84| 
-85| app.use(session({
-86|     store: new pgSession({
-87|         pool: pool,
-88|         tableName: 'session',
-89|         createTableIfMissing: false,
-90|         pruneSessionInterval: 60
-91|     }),
-92|     secret: 'un-super-secret-change-moi',
-93|     resave: false,
-94|     saveUninitialized: false,
-95|     cookie: {
-96|         httpOnly: true,
-97|         secure: false,
-98|         maxAge: 30 * 24 * 60 * 60 * 1000 // 30 jours
-99|     }
-100| }));
-101| 
-102| app.use(maintenanceMiddleware(pool));
-103| contactRoutes(app);
-104| htmlRoutes(app, pool);
-105| messagesRoutes(app, pool);
-106| authRoutes(app, pool);
-107| 
-108| // Ajoute cette configuration AVANT tes routes
-109| app.use(express.static('/var/www/meetgay/public', {
-110|     setHeaders: function (res, path) {
-111|         if (path.endsWith('.css')) {
-112|             res.setHeader('Content-Type', 'text/css');
-113|         }
-114|     }
-115| }));
-116| 
-117| // ========== SOCKET.IO ==========
-118| const io = socketIo(server, {
-119|     cors: {
-120|         origin: "*",
-121|         methods: ["GET", "POST"],
-122|         credentials: true,
-123|         allowedHeaders: ["*"]
-124|     },
-125|     transports: ['websocket', 'polling'],
-126|     allowEIO3: true,
-127|     pingTimeout: 60000,
-128|     pingInterval: 25000
-129| });
-130| 
-131| adminRoutes(app, pool, io, users);
+85| app.use(express.json());
+86| 
+87| app.use(session({
+88|     store: new pgSession({
+89|         pool: pool,
+90|         tableName: 'session',
+91|         createTableIfMissing: false,
+92|         pruneSessionInterval: 60
+93|     }),
+94|     secret: 'un-super-secret-change-moi',
+95|     resave: false,
+96|     saveUninitialized: false,
+97|     cookie: {
+98|         httpOnly: true,
+99|         secure: false,
+100|         maxAge: 30 * 24 * 60 * 60 * 1000 // 30 jours
+101|     }
+102| }));
+103| 
+104| app.use(maintenanceMiddleware(pool));
+105| contactRoutes(app);
+106| htmlRoutes(app, pool);
+107| messagesRoutes(app, pool);
+108| authRoutes(app, pool);
+109| 
+110| // Ajoute cette configuration AVANT tes routes
+111| app.use(express.static('/var/www/meetgay/public', {
+112|     setHeaders: function (res, path) {
+113|         if (path.endsWith('.css')) {
+114|             res.setHeader('Content-Type', 'text/css');
+115|         }
+116|     }
+117| }));
+118| 
+119| // ========== SOCKET.IO ==========
+120| const io = socketIo(server, {
+121|     cors: {
+122|         origin: "*",
+123|         methods: ["GET", "POST"],
+124|         credentials: true,
+125|         allowedHeaders: ["*"]
+126|     },
+127|     transports: ['websocket', 'polling'],
+128|     allowEIO3: true,
+129|     pingTimeout: 60000,
+130|     pingInterval: 25000
+131| });
 132| 
-133| // Gestion d'erreur (port déjà utilisé)
-134| server.on('error', (err) => {
-135|     if (err.code === 'EADDRINUSE') {
-136|         console.error(`❌ Port déjà utilisé. Tue l'autre processus et redémarre.`);
-137|         process.exit(1);
-138|     }
-139| });
-140| 
-141| // Initialiser la surveillance d’inactivité (5 minutes sans activité)
-142| const { updateActivity } = startInactivityWatch(io, users, pool, INACTIVITY_MINUTES, 60 * 1000);
-143| 
-144| // ========== LANCEMENT DES HANDLERS SOCKET (APRÈS io, users, constants) ==========
-145| socketHandlers(io, pool, users, disconnectionTimers, updateActivity, REPORTS_THRESHOLD, REPORTS_WINDOW_MINUTES, TEMP_BAN_MINUTES);
-146| 
-147| // ========== NETTOYAGE AUTOMATIQUE ==========
-148| // Nettoyage des utilisateurs inactifs
-149| startCleanup(pool, () => Object.values(users).map(u => u.pseudo), CLEANUP_INTERVAL_MINUTES * 60 * 1000);
-150| 
-151| // Nettoyage auto du journal et signalements (toutes les 24h)
-152| if (AUTO_CLEANUP_ENABLED) {
-153|     setInterval(async () => {
-154|         await cleanOldData(pool, LOGS_RETENTION_DAYS, REPORTS_RETENTION_DAYS);
-155|     }, 24 * 60 * 60 * 1000); // 24 heures
-156|     console.log(`🧹 Nettoyage auto activé: journal ${LOGS_RETENTION_DAYS} jours, signalements ${REPORTS_RETENTION_DAYS} jours`);
-157| }
-158| 
-159| // ========== DÉMARRAGE ==========
-160| const PORT = process.env.PORT || 3005;
-161| server.listen(PORT, '0.0.0.0', () => {
-162|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
-163| });
+133| adminRoutes(app, pool, io, users);
+134| 
+135| // Gestion d'erreur (port déjà utilisé)
+136| server.on('error', (err) => {
+137|     if (err.code === 'EADDRINUSE') {
+138|         console.error(`❌ Port déjà utilisé. Tue l'autre processus et redémarre.`);
+139|         process.exit(1);
+140|     }
+141| });
+142| 
+143| // Initialiser la surveillance d’inactivité (5 minutes sans activité)
+144| const { updateActivity } = startInactivityWatch(io, users, pool, INACTIVITY_MINUTES, 60 * 1000);
+145| 
+146| // ========== LANCEMENT DES HANDLERS SOCKET (APRÈS io, users, constants) ==========
+147| socketHandlers(io, pool, users, disconnectionTimers, updateActivity, REPORTS_THRESHOLD, REPORTS_WINDOW_MINUTES, TEMP_BAN_MINUTES);
+148| 
+149| // ========== NETTOYAGE AUTOMATIQUE ==========
+150| // Nettoyage des utilisateurs inactifs
+151| startCleanup(pool, () => Object.values(users).map(u => u.pseudo), CLEANUP_INTERVAL_MINUTES * 60 * 1000);
+152| 
+153| // Nettoyage auto du journal et signalements (toutes les 24h)
+154| if (AUTO_CLEANUP_ENABLED) {
+155|     setInterval(async () => {
+156|         await cleanOldData(pool, LOGS_RETENTION_DAYS, REPORTS_RETENTION_DAYS);
+157|     }, 24 * 60 * 60 * 1000); // 24 heures
+158|     console.log(`🧹 Nettoyage auto activé: journal ${LOGS_RETENTION_DAYS} jours, signalements ${REPORTS_RETENTION_DAYS} jours`);
+159| }
+160| 
+161| // ========== DÉMARRAGE ==========
+162| const PORT = process.env.PORT || 3005;
+163| server.listen(PORT, '0.0.0.0', () => {
+164|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+165| });
 
 # FILE: /var/www/meetgay/ecosystem.config.js
 
