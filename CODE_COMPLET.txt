@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-11 19:24:42
+# Généré le 2026-06-11 19:25:16
 
 ==============================================================================
 # SYSTEME DE CLONE DE FICHIER MIS A JOUR EN TEMPS REEL 
@@ -150,7 +150,6 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 #             📄 api-messages.js
 #             📄 html.js
 #         middleware/
-#             📄 csp.js
 #             📄 maintenance.js
 #     protected/
 #         📄 admin.html
@@ -4805,158 +4804,142 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 26| const bcrypt = require('bcrypt');
 27| const session = require('express-session');
 28| const pgSession = require('connect-pg-simple')(session);
-29| const crypto = require('crypto');
-30| const cspMiddleware = require('./modules/middleware/csp.js');
-31| 
-32| // Modules internes
-33| const { startCleanup, startInactivityWatch, cleanOldData } = require('./modules/cleanup.js');
-34| const contactRoutes = require('./modules/routes/api-contact.js');
-35| const pool = require('./modules/postgresql.js');
-36| const htmlRoutes = require('./modules/routes/html.js');
-37| const adminRoutes = require('./modules/routes/admin.js');
-38| const authRoutes = require('./modules/routes/api-auth.js');
-39| const messagesRoutes = require('./modules/routes/api-messages.js');
-40| const maintenanceMiddleware = require('./modules/middleware/maintenance.js');
-41| const socketHandlers = require('./modules/socket-handlers.js');
-42| 
-43| // ==========  VARIABLES GLOBALES ==========
-44| const users = {};
-45| const disconnectionTimers = {}; // Stocke les comptes à rebours anti-F5
-46| const TEST_MODE = false;  // ← Désactive le fingerprint si true
-47| 
-48| // PARAMÈTRES DE NETTOYAGE ET SURVEILLANCE
-49| const INACTIVITY_MINUTES = 180;      // Déconnexion après X minutes sans activité
-50| const CLEANUP_INTERVAL_MINUTES = 1; // Nettoyage des absents toutes les X minutes
-51| // JWT_SECRET pour les utilisateurs normaux
-52| const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
-53| 
-54| // PARAMÈTRES DE MODÉRATION
-55| const REPORTS_THRESHOLD = 2;        // Nombre de signalements (personnes différentes) avant auto-ban
-56| const REPORTS_WINDOW_MINUTES = 60;  // Fenêtre de temps en minutes
-57| const TEMP_BAN_MINUTES = 10;        // Durée du bannissement temporaire
-58| 
-59| // PARAMÈTRES DE NETTOYAGE AUTO
-60| const LOGS_RETENTION_DAYS = 30;     // Garder 30 jours de journal
-61| const REPORTS_RETENTION_DAYS = 60;  // Garder 60 jours de signalements
-62| const AUTO_CLEANUP_ENABLED = true;   // Activer/désactiver le nettoyage auto
+29| 
+30| 
+31| // Modules internes
+32| const { startCleanup, startInactivityWatch, cleanOldData } = require('./modules/cleanup.js');
+33| const contactRoutes = require('./modules/routes/api-contact.js');
+34| const pool = require('./modules/postgresql.js');
+35| const htmlRoutes = require('./modules/routes/html.js');
+36| const adminRoutes = require('./modules/routes/admin.js');
+37| const authRoutes = require('./modules/routes/api-auth.js');
+38| const messagesRoutes = require('./modules/routes/api-messages.js');
+39| const maintenanceMiddleware = require('./modules/middleware/maintenance.js');
+40| const socketHandlers = require('./modules/socket-handlers.js');
+41| 
+42| // ==========  VARIABLES GLOBALES ==========
+43| const users = {};
+44| const disconnectionTimers = {}; // Stocke les comptes à rebours anti-F5
+45| const TEST_MODE = false;  // ← Désactive le fingerprint si true
+46| 
+47| // PARAMÈTRES DE NETTOYAGE ET SURVEILLANCE
+48| const INACTIVITY_MINUTES = 180;      // Déconnexion après X minutes sans activité
+49| const CLEANUP_INTERVAL_MINUTES = 1; // Nettoyage des absents toutes les X minutes
+50| // JWT_SECRET pour les utilisateurs normaux
+51| const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
+52| 
+53| // PARAMÈTRES DE MODÉRATION
+54| const REPORTS_THRESHOLD = 2;        // Nombre de signalements (personnes différentes) avant auto-ban
+55| const REPORTS_WINDOW_MINUTES = 60;  // Fenêtre de temps en minutes
+56| const TEMP_BAN_MINUTES = 10;        // Durée du bannissement temporaire
+57| 
+58| // PARAMÈTRES DE NETTOYAGE AUTO
+59| const LOGS_RETENTION_DAYS = 30;     // Garder 30 jours de journal
+60| const REPORTS_RETENTION_DAYS = 60;  // Garder 60 jours de signalements
+61| const AUTO_CLEANUP_ENABLED = true;   // Activer/désactiver le nettoyage auto
+62| 
 63| 
 64| 
 65| 
 66| 
-67| 
-68| // ==========  CONFIGURATION EXPRESS ==========
-69| const app = express();
-70| const server = http.createServer(app);
-71| 
-72| console.log('🔍 DB_USER:', process.env.DB_USER);
-73| console.log('🔍 DB_PASSWORD:', process.env.DB_PASSWORD ? '******' : 'MISSING');
-74| 
-75| // Compression
-76| app.use(compression({
-77|     level: 6,
-78|     threshold: 1024,
-79|     filter: (req, res) => {
-80|         if (req.path === '/socket.io/') return false;
-81|         return compression.filter(req, res);
-82|     }
-83| }));
-84| 
-85| app.use(express.json());
-86| 
-87| app.use(session({
-88|     store: new pgSession({
-89|         pool: pool,
-90|         tableName: 'session',
-91|         createTableIfMissing: false,
-92|         pruneSessionInterval: 60
-93|     }),
-94|     secret: 'un-super-secret-change-moi',
-95|     resave: false,
-96|     saveUninitialized: false,
-97|     cookie: {
-98|         httpOnly: true,
-99|         secure: false,
-100|         maxAge: 30 * 24 * 60 * 60 * 1000 // 30 jours
-101|     }
-102| }));
-103| 
-104| // Appliquer le middleware CSP pour chat.html
-105| cspMiddleware(app);
-106| 
-107| // Ajoute cette configuration AVANT tes routes
-108| app.use(express.static('/var/www/meetgay/public', {
-109|     setHeaders: function (res, path) {
-110|         if (path.endsWith('.css')) {
-111|             res.setHeader('Content-Type', 'text/css');
-112|         }
-113|         if (path.endsWith('.js')) {
-114|             res.setHeader('Content-Type', 'application/javascript');
-115|         }
-116|     }
-117| }));
-118| 
-119| app.use(maintenanceMiddleware(pool));
-120| contactRoutes(app);
-121| htmlRoutes(app, pool);
-122| messagesRoutes(app, pool);
-123| authRoutes(app, pool);
-124| 
-125| // Ajoute cette configuration AVANT tes routes
-126| app.use(express.static('/var/www/meetgay/public', {
-127|     setHeaders: function (res, path) {
-128|         if (path.endsWith('.css')) {
-129|             res.setHeader('Content-Type', 'text/css');
-130|         }
-131|     }
-132| }));
+67| // ==========  CONFIGURATION EXPRESS ==========
+68| const app = express();
+69| const server = http.createServer(app);
+70| 
+71| console.log('🔍 DB_USER:', process.env.DB_USER);
+72| console.log('🔍 DB_PASSWORD:', process.env.DB_PASSWORD ? '******' : 'MISSING');
+73| 
+74| // Compression
+75| app.use(compression({
+76|     level: 6,
+77|     threshold: 1024,
+78|     filter: (req, res) => {
+79|         if (req.path === '/socket.io/') return false;
+80|         return compression.filter(req, res);
+81|     }
+82| }));
+83| 
+84| app.use(express.json());
+85| 
+86| app.use(session({
+87|     store: new pgSession({
+88|         pool: pool,
+89|         tableName: 'session',
+90|         createTableIfMissing: false,
+91|         pruneSessionInterval: 60
+92|     }),
+93|     secret: 'un-super-secret-change-moi',
+94|     resave: false,
+95|     saveUninitialized: false,
+96|     cookie: {
+97|         httpOnly: true,
+98|         secure: false,
+99|         maxAge: 30 * 24 * 60 * 60 * 1000 // 30 jours
+100|     }
+101| }));
+102| 
+103| app.use(maintenanceMiddleware(pool));
+104| contactRoutes(app);
+105| htmlRoutes(app, pool);
+106| messagesRoutes(app, pool);
+107| authRoutes(app, pool);
+108| 
+109| // Ajoute cette configuration AVANT tes routes
+110| app.use(express.static('/var/www/meetgay/public', {
+111|     setHeaders: function (res, path) {
+112|         if (path.endsWith('.css')) {
+113|             res.setHeader('Content-Type', 'text/css');
+114|         }
+115|     }
+116| }));
+117| 
+118| // ========== SOCKET.IO ==========
+119| const io = socketIo(server, {
+120|     cors: {
+121|         origin: "*",
+122|         methods: ["GET", "POST"],
+123|         credentials: true,
+124|         allowedHeaders: ["*"]
+125|     },
+126|     transports: ['websocket', 'polling'],
+127|     allowEIO3: true,
+128|     pingTimeout: 60000,
+129|     pingInterval: 25000
+130| });
+131| 
+132| adminRoutes(app, pool, io, users);
 133| 
-134| // ========== SOCKET.IO ==========
-135| const io = socketIo(server, {
-136|     cors: {
-137|         origin: "*",
-138|         methods: ["GET", "POST"],
-139|         credentials: true,
-140|         allowedHeaders: ["*"]
-141|     },
-142|     transports: ['websocket', 'polling'],
-143|     allowEIO3: true,
-144|     pingTimeout: 60000,
-145|     pingInterval: 25000
-146| });
+134| // Gestion d'erreur (port déjà utilisé)
+135| server.on('error', (err) => {
+136|     if (err.code === 'EADDRINUSE') {
+137|         console.error(`❌ Port déjà utilisé. Tue l'autre processus et redémarre.`);
+138|         process.exit(1);
+139|     }
+140| });
+141| 
+142| // Initialiser la surveillance d’inactivité (5 minutes sans activité)
+143| const { updateActivity } = startInactivityWatch(io, users, pool, INACTIVITY_MINUTES, 60 * 1000);
+144| 
+145| // ========== LANCEMENT DES HANDLERS SOCKET (APRÈS io, users, constants) ==========
+146| socketHandlers(io, pool, users, disconnectionTimers, updateActivity, REPORTS_THRESHOLD, REPORTS_WINDOW_MINUTES, TEMP_BAN_MINUTES);
 147| 
-148| adminRoutes(app, pool, io, users);
-149| 
-150| // Gestion d'erreur (port déjà utilisé)
-151| server.on('error', (err) => {
-152|     if (err.code === 'EADDRINUSE') {
-153|         console.error(`❌ Port déjà utilisé. Tue l'autre processus et redémarre.`);
-154|         process.exit(1);
-155|     }
-156| });
-157| 
-158| // Initialiser la surveillance d’inactivité (5 minutes sans activité)
-159| const { updateActivity } = startInactivityWatch(io, users, pool, INACTIVITY_MINUTES, 60 * 1000);
-160| 
-161| // ========== LANCEMENT DES HANDLERS SOCKET (APRÈS io, users, constants) ==========
-162| socketHandlers(io, pool, users, disconnectionTimers, updateActivity, REPORTS_THRESHOLD, REPORTS_WINDOW_MINUTES, TEMP_BAN_MINUTES);
-163| 
-164| // ========== NETTOYAGE AUTOMATIQUE ==========
-165| // Nettoyage des utilisateurs inactifs
-166| startCleanup(pool, () => Object.values(users).map(u => u.pseudo), CLEANUP_INTERVAL_MINUTES * 60 * 1000);
-167| 
-168| // Nettoyage auto du journal et signalements (toutes les 24h)
-169| if (AUTO_CLEANUP_ENABLED) {
-170|     setInterval(async () => {
-171|         await cleanOldData(pool, LOGS_RETENTION_DAYS, REPORTS_RETENTION_DAYS);
-172|     }, 24 * 60 * 60 * 1000); // 24 heures
-173|     console.log(`🧹 Nettoyage auto activé: journal ${LOGS_RETENTION_DAYS} jours, signalements ${REPORTS_RETENTION_DAYS} jours`);
-174| }
-175| 
-176| // ========== DÉMARRAGE ==========
-177| const PORT = process.env.PORT || 3005;
-178| server.listen(PORT, '0.0.0.0', () => {
-179|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
-180| });
+148| // ========== NETTOYAGE AUTOMATIQUE ==========
+149| // Nettoyage des utilisateurs inactifs
+150| startCleanup(pool, () => Object.values(users).map(u => u.pseudo), CLEANUP_INTERVAL_MINUTES * 60 * 1000);
+151| 
+152| // Nettoyage auto du journal et signalements (toutes les 24h)
+153| if (AUTO_CLEANUP_ENABLED) {
+154|     setInterval(async () => {
+155|         await cleanOldData(pool, LOGS_RETENTION_DAYS, REPORTS_RETENTION_DAYS);
+156|     }, 24 * 60 * 60 * 1000); // 24 heures
+157|     console.log(`🧹 Nettoyage auto activé: journal ${LOGS_RETENTION_DAYS} jours, signalements ${REPORTS_RETENTION_DAYS} jours`);
+158| }
+159| 
+160| // ========== DÉMARRAGE ==========
+161| const PORT = process.env.PORT || 3005;
+162| server.listen(PORT, '0.0.0.0', () => {
+163|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+164| });
 
 # FILE: /var/www/meetgay/ecosystem.config.js
 
@@ -6199,35 +6182,6 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 188|         }
 189|     });
 190| };
-
-# FILE: /var/www/meetgay/modules/middleware/csp.js
-
-1| ﻿// modules/middleware/csp.js
-2| const crypto = require('crypto');
-3| const fs = require('fs');
-4| 
-5| module.exports = function (app) {
-6|     app.get('/chat.html', (req, res, next) => {
-7|         const nonce = crypto.randomBytes(16).toString('base64');
-8|         const filePath = '/var/www/meetgay/public/chat.html';
-9| 
-10|         fs.readFile(filePath, 'utf8', (err, html) => {
-11|             if (err) {
-12|                 console.error('Erreur lecture chat.html:', err);
-13|                 return next(err);
-14|             }
-15| 
-16|             // Remplacer TOUS les placeholders par le nonce
-17|             const modifiedHtml = html.replace(/NONCE_PLACEHOLDER/g, nonce);
-18| 
-19|             res.setHeader('Content-Security-Policy',
-20|                 `script-src 'nonce-${nonce}' 'strict-dynamic' 'unsafe-inline' https: http:; object-src 'none'; base-uri 'self'`
-21|             );
-22| 
-23|             res.send(modifiedHtml);
-24|         });
-25|     });
-26| };
 
 # FILE: /var/www/meetgay/modules/middleware/maintenance.js
 
@@ -11862,164 +11816,170 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 8|     <meta charset="UTF-8">
 9|     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 10|     <title>MeetGay - Chat</title>
-11|     <link rel="stylesheet" href="/css/common/reset.css">
-12|     <link rel="stylesheet" href="/css/pages/chat.css">
-13|     <link rel="manifest" href="/manifest.json">
-14|     <script src="/js/fp-bundle.js" nonce="NONCE_PLACEHOLDER"></script>
-15| </head>
-16| 
-17| <body>
+11|     <!-- CSS communs -->
+12|     <link rel="stylesheet" href="/css/common/reset.css">
+13|     <!-- CSS spécifique chat (contient header ET footer) -->
+14|     <link rel="stylesheet" href="/css/pages/chat.css">
+15|     <link rel="manifest" href="/manifest.json">
+16|     <script src="/js/fp-bundle.js"></script>
+17| </head>
 18| 
-19|     <script nonce="NONCE_PLACEHOLDER">
-20|         (async function () {
-21|             let fingerprint = sessionStorage.getItem('fingerprint');
-22|             if (!fingerprint) {
-23|                 try {
-24|                     const fp = await FingerprintJS.load();
-25|                     const result = await fp.get();
-26|                     fingerprint = result.visitorId;
-27|                     sessionStorage.setItem('fingerprint', fingerprint);
-28|                     window.currentFingerprint = fingerprint;
-29|                 } catch (err) {
-30|                     console.error('❌ Fingerprint impossible à générer:', err);
-31|                     alert('❌ Impossible de vous identifier. Veuillez désactiver votre bloqueur de scripts et recharger la page.');
-32|                     window.location.href = '/login.html';
-33|                     return;
-34|                 }
-35|             }
-36|             window.currentFingerprint = fingerprint;
-37|         })();
-38|     </script>
-39|     <header class="site-header">
-40|         <div class="header-content">
-41|             <div class="logo">
-42|                 <h1>💬 MeetGay</h1>
-43|                 <p>Belgique - Rencontres et discussions</p>
-44|             </div>
-45|             <div class="user-badge" id="userBadge">👤 Chargement...</div>
-46|             <div class="header-buttons">
-47|                 <a href="https://www.paypal.me/tonpseudo" target="_blank" class="donate-btn">☕ Don</a>
-48|                 <button id="logoutBtn" class="logout-btn">🚪 Déconnexion</button>
-49|             </div>
-50|         </div>
-51|     </header>
-52| 
-53|     <div class="main-container">
-54|         <div class="container">
-55|             <div class="users-panel">
-56|                 <h3>👥 <span id="onlineCount" class="online-count">0</span> Connectés</h3>
-57|                 <div id="usersList">En attente...</div>
-58|             </div>
-59| 
-60|             <div class="chat-panel">
-61|                 <div id="contactInfo" class="contact-info">
-62|                     <div><span class="contact-name" id="contactName"></span>
-63|                         (<span id="contactAge"></span> ans, <span id="contactGender"></span>, <span
-64|                             id="contactOrientation"></span>)
-65|                     </div>
-66|                     <div id="contactPurpose" style="margin-top: 5px; font-size: 12px; color: #555;"></div>
-67|                     <div class="contact-bio" id="contactBio"></div>
-68|                 </div>
-69| 
-70|                 <div class="message-area" id="messageArea">
-71|                     <div class="empty-message">💬 En attente de message...</div>
-72|                 </div>
-73| 
-74|                 <div class="input-area">
-75|                     <input type="text" id="messageInput" placeholder="" disabled>
-76|                     <button id="sendBtn" disabled>✉️ Envoyer</button>
-77|                 </div>
-78| 
-79|                 <div id="envelope" class="envelope" style="display: none;">✉️</div>
-80|             </div>
-81| 
-82|             <div class="history-panel">
-83|                 <h4 id="historyTitle">📋 Historique</h4>
-84|                 <div id="historyList">
-85|                     <div class="empty-message" style="padding: 20px;">Aucune conversation</div>
-86|                 </div>
-87|             </div>
-88|         </div>
-89|     </div>
-90| 
-91|     <footer class="site-footer">
-92|         <div class="footer-content">
-93|             © 2026 MeetGay - Chat Belgique -
-94|             <a href="/mentions-legales.html">Mentions légales</a> -
-95|             <a href="/cgu.html">CGU</a>
-96|             <a href="/contact.html">📬 Contact</a>
-97|         </div>
-98|     </footer>
-99| 
-100|     <script src="/socket.io/socket.io.js" nonce="NONCE_PLACEHOLDER"></script>
+19| <body>
+20| 
+21|     <script>
+22|         (async function () {
+23|             let fingerprint = sessionStorage.getItem('fingerprint');
+24|             if (!fingerprint) {
+25|                 try {
+26|                     const fp = await FingerprintJS.load();
+27|                     const result = await fp.get();
+28|                     fingerprint = result.visitorId;
+29|                     sessionStorage.setItem('fingerprint', fingerprint);
+30|                     window.currentFingerprint = fingerprint;
+31|                 } catch (err) {
+32|                     console.error('❌ Fingerprint impossible à générer:', err);
+33|                     alert('❌ Impossible de vous identifier. Veuillez désactiver votre bloqueur de scripts et recharger la page.');
+34|                     window.location.href = '/login.html';
+35|                     return;
+36|                 }
+37|             }
+38|             window.currentFingerprint = fingerprint;
+39|         })();
+40|     </script>
+41|     <header class="site-header">
+42|         <div class="header-content">
+43|             <div class="logo">
+44|                 <h1>💬 MeetGay</h1>
+45|                 <p>Belgique - Rencontres et discussions</p>
+46|             </div>
+47|             <div class="user-badge" id="userBadge">👤 Chargement...</div>
+48|             <div class="header-buttons">
+49|                 <a href="https://www.paypal.me/tonpseudo" target="_blank" class="donate-btn">☕ Don</a>
+50|                 <button id="logoutBtn" class="logout-btn">🚪 Déconnexion</button>
+51|             </div>
+52|         </div>
+53|     </header>
+54| 
+55|     <div class="main-container">
+56|         <div class="container">
+57|             <div class="users-panel">
+58|                 <h3>👥 <span id="onlineCount" class="online-count">0</span> Connectés</h3>
+59|                 <div id="usersList">En attente...</div>
+60|             </div>
+61| 
+62|             <div class="chat-panel">
+63|                 <div id="contactInfo" class="contact-info">
+64|                     <div><span class="contact-name" id="contactName"></span>
+65|                         (<span id="contactAge"></span> ans, <span id="contactGender"></span>, <span
+66|                             id="contactOrientation"></span>)
+67|                     </div>
+68|                     <div id="contactPurpose" style="margin-top: 5px; font-size: 12px; color: #555;"></div>
+69|                     <div class="contact-bio" id="contactBio"></div>
+70|                 </div>
+71| 
+72|                 <div class="message-area" id="messageArea">
+73|                     <div class="empty-message">💬 En attente de message...</div>
+74|                 </div>
+75| 
+76|                 <div class="input-area">
+77|                     <input type="text" id="messageInput" placeholder="" disabled>
+78|                     <button id="sendBtn" disabled>✉️ Envoyer</button>
+79|                 </div>
+80| 
+81|                 <div id="envelope" class="envelope" style="display: none;">✉️</div>
+82|             </div>
+83| 
+84|             <div class="history-panel">
+85|                 <h4 id="historyTitle">📋 Historique</h4>
+86|                 <div id="historyList">
+87|                     <div class="empty-message" style="padding: 20px;">Aucune conversation</div>
+88|                 </div>
+89|             </div>
+90|         </div>
+91|     </div>
+92| 
+93|     <footer class="site-footer">
+94|         <div class="footer-content">
+95|             © 2026 MeetGay - Chat Belgique -
+96|             <a href="/mentions-legales.html">Mentions légales</a> -
+97|             <a href="/cgu.html">CGU</a>
+98|             <a href="/contact.html">📬 Contact</a>
+99|         </div>
+100|     </footer>
 101| 
-102|     <script nonce="NONCE_PLACEHOLDER">
-103|         // 1. Vérifier si l'utilisateur est en session (stocké dans localStorage)
-104|         {
-105|             let user = localStorage.getItem('meetgay_user');
-106|             if (!user) {
-107|                 window.location.href = '/login.html';
-108|             }
-109|         }
-110|         // ========== LECTURE DE LA LANGUE ==========
-111|         let chatLang = localStorage.getItem('MeetGay_lang') || 'fr';
-112| 
-113|         // ========== TRADUCTIONS ==========
-114|         const chatTranslations = {
-115|             fr: {
-116|                 emptyMessage: "💬 En attente de message...",
-117|                 placeholderInput: "Cliquez sur un pseudo d'abord...",
-118|                 sendBtn: "✉️ Envoyer",
-119|                 historyTitle: "📋 Historique",
-120|                 connectedTitle: "👥 Connectés"
-121|             },
-122|             nl: {
-123|                 emptyMessage: "💬 Wachten op bericht...",
-124|                 placeholderInput: "Klik eerst op een pseudoniem...",
-125|                 sendBtn: "✉️ Verstuur",
-126|                 historyTitle: "📋 Historisch",
-127|                 connectedTitle: "👥 Aangesloten"
-128|             }
-129|         };
-130| 
-131|         const t = chatTranslations[chatLang];
+102|     <script src="/socket.io/socket.io.js"></script>
+103| 
+104|     <script>
+105|         // 1. Vérifier si l'utilisateur est en session (stocké dans localStorage)
+106|         {
+107|             let user = localStorage.getItem('meetgay_user');
+108|             if (!user) {
+109|                 window.location.href = '/login.html';
+110|             }
+111|         }
+112|         // ========== LECTURE DE LA LANGUE ==========
+113|         let chatLang = localStorage.getItem('MeetGay_lang') || 'fr';
+114| 
+115|         // ========== TRADUCTIONS ==========
+116|         const chatTranslations = {
+117|             fr: {
+118|                 emptyMessage: "💬 En attente de message...",
+119|                 placeholderInput: "Cliquez sur un pseudo d'abord...",
+120|                 sendBtn: "✉️ Envoyer",
+121|                 historyTitle: "📋 Historique",
+122|                 connectedTitle: "👥 Connectés"
+123|             },
+124|             nl: {
+125|                 emptyMessage: "💬 Wachten op bericht...",
+126|                 placeholderInput: "Klik eerst op een pseudoniem...",
+127|                 sendBtn: "✉️ Verstuur",
+128|                 historyTitle: "📋 Historisch",
+129|                 connectedTitle: "👥 Aangesloten"
+130|             }
+131|         };
 132| 
-133|         window.chatLang = chatLang;
-134|         window.chatT = chatTranslations[chatLang];
-135| 
-136|         document.addEventListener('DOMContentLoaded', () => {
-137|             window.chatLang = chatLang;
-138|             window.chatT = chatTranslations[chatLang];
-139| 
-140|             const msgArea = document.getElementById('messageArea');
-141|             if (msgArea) msgArea.innerHTML = `<div class="empty-message">${t.emptyMessage}</div>`;
-142| 
-143|             const historyDiv = document.getElementById('historyList');
-144|             if (historyDiv) historyDiv.innerHTML = `<div class="empty-message" style="padding: 20px;">Aucune conversation</div>`;
-145| 
-146|             const sendBtn = document.getElementById('sendBtn');
-147|             if (sendBtn) sendBtn.innerHTML = t.sendBtn;
-148| 
-149|             const messageInput = document.getElementById('messageInput');
-150|             if (messageInput) messageInput.placeholder = t.placeholderInput;
-151| 
-152|             const historyTitle = document.getElementById('historyTitle');
-153|             if (historyTitle) historyTitle.innerHTML = t.historyTitle;
-154| 
-155|             const connectedTitle = document.getElementById('connectedTitle');
-156|             if (connectedTitle) connectedTitle.innerHTML = t.connectedTitle;
-157|         });
-158|     </script>
+133|         const t = chatTranslations[chatLang];
+134| 
+135|         // ← AJOUT : Exporter les globales pour ui.js et history.js
+136|         window.chatLang = chatLang;
+137|         window.chatT = chatTranslations[chatLang];
+138| 
+139|         // ========== APPLICATION DES TEXTES ==========
+140|         document.addEventListener('DOMContentLoaded', () => {
+141|             // ← AJOUT : Mettre à jour les globales au cas où
+142|             window.chatLang = chatLang;
+143|             window.chatT = chatTranslations[chatLang];
+144| 
+145|             const msgArea = document.getElementById('messageArea');
+146|             if (msgArea) msgArea.innerHTML = `<div class="empty-message">${t.emptyMessage}</div>`;
+147| 
+148|             const historyDiv = document.getElementById('historyList');
+149|             if (historyDiv) historyDiv.innerHTML = `<div class="empty-message" style="padding: 20px;">Aucune conversation</div>`;
+150| 
+151|             const sendBtn = document.getElementById('sendBtn');
+152|             if (sendBtn) sendBtn.innerHTML = t.sendBtn;
+153| 
+154|             const messageInput = document.getElementById('messageInput');
+155|             if (messageInput) messageInput.placeholder = t.placeholderInput;
+156| 
+157|             const historyTitle = document.getElementById('historyTitle');
+158|             if (historyTitle) historyTitle.innerHTML = t.historyTitle;
 159| 
-160|     <script src="/js/utils.js" nonce="NONCE_PLACEHOLDER"></script>
-161|     <script src="/js/ui.js" nonce="NONCE_PLACEHOLDER"></script>
-162|     <script src="/js/history.js" nonce="NONCE_PLACEHOLDER"></script>
-163|     <script src="/js/modal-handler-user.js" nonce="NONCE_PLACEHOLDER"></script>
-164|     <script src="/js/chat.js" nonce="NONCE_PLACEHOLDER"></script>
+160|             const connectedTitle = document.getElementById('connectedTitle');
+161|             if (connectedTitle) connectedTitle.innerHTML = t.connectedTitle;
+162|         });
+163|     </script>
+164| 
 165| 
-166| </body>
-167| 
-168| </html>
+166|     <script src="/js/utils.js"></script>
+167|     <script src="/js/ui.js"></script>
+168|     <script src="/js/history.js"></script>
+169|     <script src="/js/modal-handler-user.js" nonce="NONCE_PLACEHOLDER"></script>
+170|     <script src="/js/chat.js"></script>
+171| 
+172| </body>
+173| 
+174| </html>
 
 # ========== JSON ==========
 
