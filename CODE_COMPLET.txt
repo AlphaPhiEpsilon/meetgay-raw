@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-12 21:44:47
+# Généré le 2026-06-12 21:46:30
 
 ==============================================================================
 # SYSTEME DE CLONE DE FICHIER MIS A JOUR EN TEMPS REEL 
@@ -3076,137 +3076,147 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 149|             socket.emit('message sent confirmation', { message: message, to: toSocketId });
 150|         });
 151| 
-152|         // Gestion des signalements utilisateur
-153|         socket.on('report user', async (data) => {
-154|             const { targetPseudo } = data;
-155| 
-156|             // Récupérer le pseudo du signaleur depuis users[socket.id]
-157|             const reporterPseudo = users[socket.id]?.pseudo;
-158|             if (!reporterPseudo) {
-159|                 socket.emit('report_error', { error: 'Utilisateur non identifié' });
-160|                 return;
-161|             }
-162| 
-163|             if (!targetPseudo || targetPseudo === reporterPseudo) {
-164|                 socket.emit('report_error', { error: 'Signalement invalide' });
-165|                 return;
-166|             }
-167| 
-168|             try {
-169|                 // 1. Insérer le signalement
-170|                 await pool.query(
-171|                     'INSERT INTO reports (reporter_pseudo, target_pseudo) VALUES ($1, $2)',
-172|                     [reporterPseudo, targetPseudo]
-173|                 );
-174| 
-175|                 // 2. Utiliser les constantes de server.js
-176|                 const threshold = REPORTS_THRESHOLD;
+152|         socket.on('get users list', () => {
+153|             const usersList = Object.values(users).map(u => ({
+154|                 pseudo: u.pseudo,
+155|                 age: u.age,
+156|                 locationName: u.locationName,
+157|                 locationCode: u.locationCode
+158|             }));
+159|             socket.emit('update users', usersList);
+160|         });
+161| 
+162|         // Gestion des signalements utilisateur
+163|         socket.on('report user', async (data) => {
+164|             const { targetPseudo } = data;
+165| 
+166|             // Récupérer le pseudo du signaleur depuis users[socket.id]
+167|             const reporterPseudo = users[socket.id]?.pseudo;
+168|             if (!reporterPseudo) {
+169|                 socket.emit('report_error', { error: 'Utilisateur non identifié' });
+170|                 return;
+171|             }
+172| 
+173|             if (!targetPseudo || targetPseudo === reporterPseudo) {
+174|                 socket.emit('report_error', { error: 'Signalement invalide' });
+175|                 return;
+176|             }
 177| 
-178|                 // 3. Récupérer la date de fin du dernier ban (si existe)
-179|                 const lastBan = await pool.query(
-180|                     `SELECT expires_at FROM temp_bans 
-181|                     WHERE user_pseudo = $1 
-182|                     ORDER BY expires_at DESC LIMIT 1`,
-183|                     [targetPseudo]
-184|                 );
-185| 
-186|                 let sinceDate = `NOW() - INTERVAL '${REPORTS_WINDOW_MINUTES} minutes'`;
-187|                 if (lastBan.rows.length > 0) {
-188|                     const lastBanExpiry = lastBan.rows[0].expires_at;
-189|                     // Prendre la date la plus récente entre la fin du dernier ban et la fenêtre
-190|                     sinceDate = `GREATEST(NOW() - INTERVAL '${REPORTS_WINDOW_MINUTES} minutes', '${lastBanExpiry.toISOString()}')`;
-191|                 }
-192| 
-193|                 const countRes = await pool.query(
-194|                     `SELECT COUNT(DISTINCT reporter_pseudo) FROM reports 
-195|                     WHERE target_pseudo = $1 
-196|                     AND created_at > ${sinceDate}`,
-197|                     [targetPseudo]
-198|                 );
-199|                 const reportCount = parseInt(countRes.rows[0].count);
-200| 
-201|                 // 4. Confirmation au signaleur
-202|                 socket.emit('report_confirmation', {
-203|                     targetPseudo,
-204|                     reportCount,
-205|                     threshold,
-206|                     willTrigger: reportCount >= threshold
-207|                 });
-208| 
-209|                 // 5. Si seuil atteint, déclencher temp_ban (10 minutes)
-210|                 if (reportCount >= threshold) {
-211|                     const expiresAt = new Date(Date.now() + TEMP_BAN_MINUTES * 60 * 1000);
-212| 
-213|                     await pool.query(
-214|                         `INSERT INTO temp_bans (user_pseudo, expires_at, reason) 
-215|                          VALUES ($1, $2, $3)
-216|                          ON CONFLICT (user_pseudo) DO UPDATE 
-217|                          SET expires_at = EXCLUDED.expires_at, reason = EXCLUDED.reason`,
-218|                         [targetPseudo, expiresAt, `${reportCount} signalements reçus`]
-219|                     );
-220| 
-221|                     // Journaliser l'action
-222|                     await pool.query(
-223|                         `INSERT INTO moderation_actions (admin_pseudo, action_type, target_pseudo, duration_minutes, reason)
-224|                          VALUES ('SYSTEM', 'temp_ban', $1, 10, $2)`,
-225|                         [targetPseudo, `Ban auto après ${reportCount} signalements`]
-226|                     );
-227| 
-228|                     // Déconnecter l'utilisateur cible s'il est connecté
-229|                     const targetSocketEntry = Object.entries(users).find(([id, u]) => u.pseudo === targetPseudo);
-230|                     if (targetSocketEntry) {
-231|                         const targetSocketId = targetSocketEntry[0];
-232|                         io.to(targetSocketId).emit('force logout', {
-233|                             reason: `Vous avez été banni temporairement (10 minutes) pour comportement abusif.`
-234|                         });
-235|                     }
-236| 
-237|                     // Notifier tous les admins connectés (optionnel)
-238|                     io.emit('new_report_auto_ban', {
-239|                         targetPseudo,
-240|                         reportCount,
-241|                         duration: 10
-242|                     });
-243| 
-244|                     console.log(`🔨 Auto-ban: ${targetPseudo} banni 10 min (${reportCount} signalements)`);
-245|                 }
-246|             } catch (err) {
-247|                 console.error('Erreur lors du signalement:', err);
-248|                 socket.emit('report_error', { error: 'Erreur serveur' });
-249|             }
-250|         });
-251| 
-252|         socket.on('disconnect', () => {
-253|             console.log("🔥 DISCONNECT DÉCLENCHÉ pour socket:", socket.id);
-254|             console.log(`🔌 DISCONNECT: Suppression de ${users[socket.id]?.pseudo} (socket: ${socket.id})`);
-255|             const userInfo = users[socket.id];
-256|             if (userInfo && userInfo.pseudo) {
-257|                 const pseudo = userInfo.pseudo;
-258|                 console.log(`🔌 Déconnexion immédiate de ${pseudo}`);
-259| 
-260|                 delete users[socket.id];
-261|                 console.log(`🗑️ users après suppression:`, Object.keys(users).length, "connectés");
-262| 
-263| 
-264|                 const usersList = Object.values(users).map(u => ({
-265|                     pseudo: u.pseudo,
-266|                     age: u.age,
-267|                     tendencies: u.tendencies,
-268|                     gender: u.gender,
-269|                     purpose: u.purpose,
-270|                     bio: u.bio,
-271|                     locationCode: u.locationCode,
-272|                     locationName: u.locationName,
-273|                     socketId: u.socketId
-274|                 }));
-275|                 io.emit('update users', usersList);
-276|             }
-277| 
-278|         });
-279| 
-280|     });
-281| 
-282| };
+178|             try {
+179|                 // 1. Insérer le signalement
+180|                 await pool.query(
+181|                     'INSERT INTO reports (reporter_pseudo, target_pseudo) VALUES ($1, $2)',
+182|                     [reporterPseudo, targetPseudo]
+183|                 );
+184| 
+185|                 // 2. Utiliser les constantes de server.js
+186|                 const threshold = REPORTS_THRESHOLD;
+187| 
+188|                 // 3. Récupérer la date de fin du dernier ban (si existe)
+189|                 const lastBan = await pool.query(
+190|                     `SELECT expires_at FROM temp_bans 
+191|                     WHERE user_pseudo = $1 
+192|                     ORDER BY expires_at DESC LIMIT 1`,
+193|                     [targetPseudo]
+194|                 );
+195| 
+196|                 let sinceDate = `NOW() - INTERVAL '${REPORTS_WINDOW_MINUTES} minutes'`;
+197|                 if (lastBan.rows.length > 0) {
+198|                     const lastBanExpiry = lastBan.rows[0].expires_at;
+199|                     // Prendre la date la plus récente entre la fin du dernier ban et la fenêtre
+200|                     sinceDate = `GREATEST(NOW() - INTERVAL '${REPORTS_WINDOW_MINUTES} minutes', '${lastBanExpiry.toISOString()}')`;
+201|                 }
+202| 
+203|                 const countRes = await pool.query(
+204|                     `SELECT COUNT(DISTINCT reporter_pseudo) FROM reports 
+205|                     WHERE target_pseudo = $1 
+206|                     AND created_at > ${sinceDate}`,
+207|                     [targetPseudo]
+208|                 );
+209|                 const reportCount = parseInt(countRes.rows[0].count);
+210| 
+211|                 // 4. Confirmation au signaleur
+212|                 socket.emit('report_confirmation', {
+213|                     targetPseudo,
+214|                     reportCount,
+215|                     threshold,
+216|                     willTrigger: reportCount >= threshold
+217|                 });
+218| 
+219|                 // 5. Si seuil atteint, déclencher temp_ban (10 minutes)
+220|                 if (reportCount >= threshold) {
+221|                     const expiresAt = new Date(Date.now() + TEMP_BAN_MINUTES * 60 * 1000);
+222| 
+223|                     await pool.query(
+224|                         `INSERT INTO temp_bans (user_pseudo, expires_at, reason) 
+225|                          VALUES ($1, $2, $3)
+226|                          ON CONFLICT (user_pseudo) DO UPDATE 
+227|                          SET expires_at = EXCLUDED.expires_at, reason = EXCLUDED.reason`,
+228|                         [targetPseudo, expiresAt, `${reportCount} signalements reçus`]
+229|                     );
+230| 
+231|                     // Journaliser l'action
+232|                     await pool.query(
+233|                         `INSERT INTO moderation_actions (admin_pseudo, action_type, target_pseudo, duration_minutes, reason)
+234|                          VALUES ('SYSTEM', 'temp_ban', $1, 10, $2)`,
+235|                         [targetPseudo, `Ban auto après ${reportCount} signalements`]
+236|                     );
+237| 
+238|                     // Déconnecter l'utilisateur cible s'il est connecté
+239|                     const targetSocketEntry = Object.entries(users).find(([id, u]) => u.pseudo === targetPseudo);
+240|                     if (targetSocketEntry) {
+241|                         const targetSocketId = targetSocketEntry[0];
+242|                         io.to(targetSocketId).emit('force logout', {
+243|                             reason: `Vous avez été banni temporairement (10 minutes) pour comportement abusif.`
+244|                         });
+245|                     }
+246| 
+247|                     // Notifier tous les admins connectés (optionnel)
+248|                     io.emit('new_report_auto_ban', {
+249|                         targetPseudo,
+250|                         reportCount,
+251|                         duration: 10
+252|                     });
+253| 
+254|                     console.log(`🔨 Auto-ban: ${targetPseudo} banni 10 min (${reportCount} signalements)`);
+255|                 }
+256|             } catch (err) {
+257|                 console.error('Erreur lors du signalement:', err);
+258|                 socket.emit('report_error', { error: 'Erreur serveur' });
+259|             }
+260|         });
+261| 
+262|         socket.on('disconnect', () => {
+263|             console.log("🔥 DISCONNECT DÉCLENCHÉ pour socket:", socket.id);
+264|             console.log(`🔌 DISCONNECT: Suppression de ${users[socket.id]?.pseudo} (socket: ${socket.id})`);
+265|             const userInfo = users[socket.id];
+266|             if (userInfo && userInfo.pseudo) {
+267|                 const pseudo = userInfo.pseudo;
+268|                 console.log(`🔌 Déconnexion immédiate de ${pseudo}`);
+269| 
+270|                 delete users[socket.id];
+271|                 console.log(`🗑️ users après suppression:`, Object.keys(users).length, "connectés");
+272| 
+273| 
+274|                 const usersList = Object.values(users).map(u => ({
+275|                     pseudo: u.pseudo,
+276|                     age: u.age,
+277|                     tendencies: u.tendencies,
+278|                     gender: u.gender,
+279|                     purpose: u.purpose,
+280|                     bio: u.bio,
+281|                     locationCode: u.locationCode,
+282|                     locationName: u.locationName,
+283|                     socketId: u.socketId
+284|                 }));
+285|                 io.emit('update users', usersList);
+286|             }
+287| 
+288|         });
+289| 
+290|     });
+291| 
+292| };
 
 # FILE: /var/www/meetgay/modules/cleanup.js
 
@@ -7145,47 +7155,48 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 403|         })();
 404|     </script>
 405|     <script src="/socket.io/socket.io.js"></script>
-406|     <script>
-407|         let socket; // globale
-408| 
-409|         document.addEventListener('DOMContentLoaded', () => {
-410|             socket = io();
-411| 
-412|             socket.on('update users', (usersList) => {
-413|                 console.log('👥 Connectés reçus:', usersList);
-414|                 const container = document.getElementById('loginUsersList');
-415|                 const countSpan = document.getElementById('loginOnlineCount');
-416| 
-417|                 if (container) {
-418|                     countSpan.textContent = usersList.length;
-419| 
-420|                     if (usersList.length === 0) {
-421|                         container.innerHTML = '<em>Aucun connecté</em>';
-422|                     } else {
-423|                         container.innerHTML = usersList.map(user => `
-424|                         <div class="user-item">
-425|                             <strong>${escapeHtml(user.pseudo)}</strong><br>
-426|                             <small>${user.age} ans • ${user.locationName || user.locationCode || '?'}</small>
-427|                         </div>
-428|                     `).join('');
-429|                     }
-430|                 }
-431|             });
-432| 
-433|             function escapeHtml(str) {
-434|                 if (!str) return '';
-435|                 return str.replace(/[&<>]/g, (m) => {
-436|                     if (m === '&') return '&amp;';
-437|                     if (m === '<') return '&lt;';
-438|                     if (m === '>') return '&gt;';
-439|                     return m;
-440|                 });
-441|             }
-442|         });
-443|     </script>
-444| </body>
-445| 
-446| </html>
+406|     socket.emit('get users list');socket.emit('get users list');
+407|     <script>
+408|         let socket; // globale
+409| 
+410|         document.addEventListener('DOMContentLoaded', () => {
+411|             socket = io();
+412| 
+413|             socket.on('update users', (usersList) => {
+414|                 console.log('👥 Connectés reçus:', usersList);
+415|                 const container = document.getElementById('loginUsersList');
+416|                 const countSpan = document.getElementById('loginOnlineCount');
+417| 
+418|                 if (container) {
+419|                     countSpan.textContent = usersList.length;
+420| 
+421|                     if (usersList.length === 0) {
+422|                         container.innerHTML = '<em>Aucun connecté</em>';
+423|                     } else {
+424|                         container.innerHTML = usersList.map(user => `
+425|                         <div class="user-item">
+426|                             <strong>${escapeHtml(user.pseudo)}</strong><br>
+427|                             <small>${user.age} ans • ${user.locationName || user.locationCode || '?'}</small>
+428|                         </div>
+429|                     `).join('');
+430|                     }
+431|                 }
+432|             });
+433| 
+434|             function escapeHtml(str) {
+435|                 if (!str) return '';
+436|                 return str.replace(/[&<>]/g, (m) => {
+437|                     if (m === '&') return '&amp;';
+438|                     if (m === '<') return '&lt;';
+439|                     if (m === '>') return '&gt;';
+440|                     return m;
+441|                 });
+442|             }
+443|         });
+444|     </script>
+445| </body>
+446| 
+447| </html>
 
 # FILE: /var/www/meetgay/public/admin-login.html
 
