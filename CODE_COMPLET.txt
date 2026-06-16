@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-16 08:42:27
+# Généré le 2026-06-16 08:44:21
 
 ==============================================================================
 # SYSTEME DE CLONE DE FICHIER MIS A JOUR EN TEMPS REEL 
@@ -4893,7 +4893,75 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 328|             res.status(500).json({ error: 'Erreur serveur' });
 329|         }
 330|     });
-331| };
+331| 
+332|     // ========== KICK USER ==========
+333|     app.post('/api/admin/kick', async (req, res) => {
+334|         if (!req.session.isAdmin) {
+335|             return res.status(401).json({ error: 'Non autorisé' });
+336|         }
+337| 
+338|         const { pseudo } = req.body;
+339|         if (!pseudo) {
+340|             return res.status(400).json({ error: 'Pseudo requis' });
+341|         }
+342| 
+343|         try {
+344|             // 1. Vérifier que l'utilisateur existe
+345|             const userCheck = await pool.query(
+346|                 'SELECT pseudo FROM users WHERE pseudo = $1',
+347|                 [pseudo]
+348|             );
+349| 
+350|             if (userCheck.rows.length === 0) {
+351|                 return res.status(404).json({ error: 'Utilisateur non trouvé' });
+352|             }
+353| 
+354|             // 2. Trouver le socket de l'utilisateur
+355|             let targetSocketId = null;
+356|             for (const [socketId, user] of Object.entries(users)) {
+357|                 if (user.pseudo === pseudo) {
+358|                     targetSocketId = socketId;
+359|                     break;
+360|                 }
+361|             }
+362| 
+363|             // 3. Si connecté, lui envoyer un événement de kick
+364|             if (targetSocketId && io) {
+365|                 io.to(targetSocketId).emit('kicked', {
+366|                     message: '🦵 Vous avez été expulsé par un administrateur.'
+367|                 });
+368| 
+369|                 // Déconnecter le socket après un court délai
+370|                 setTimeout(() => {
+371|                     const socket = io.sockets.sockets.get(targetSocketId);
+372|                     if (socket) {
+373|                         socket.disconnect(true);
+374|                     }
+375|                 }, 500);
+376|             }
+377| 
+378|             // 4. Supprimer l'utilisateur de la base de données
+379|             await pool.query('DELETE FROM users WHERE pseudo = $1', [pseudo]);
+380| 
+381|             // 5. Logger l'action dans le journal de modération
+382|             await pool.query(
+383|                 `INSERT INTO moderation_actions (admin_pseudo, action_type, target_pseudo, reason)
+384|                  VALUES ($1, 'kick', $2, 'Expulsé par administrateur')`,
+385|                 [req.session.adminUsername, pseudo]
+386|             );
+387| 
+388|             // 6. Retourner le succès
+389|             res.json({
+390|                 success: true,
+391|                 message: `${pseudo} a été expulsé et supprimé de la base`
+392|             });
+393| 
+394|         } catch (err) {
+395|             console.error('Erreur kick:', err);
+396|             res.status(500).json({ error: 'Erreur serveur lors de l\'expulsion' });
+397|         }
+398|     });
+399| };
 
 # FILE: /var/www/meetgay/modules/routes/api-messages.js
 
