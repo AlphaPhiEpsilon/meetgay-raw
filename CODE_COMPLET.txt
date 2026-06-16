@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-16 08:38:50
+# Généré le 2026-06-16 08:40:40
 
 ==============================================================================
 # SYSTEME DE CLONE DE FICHIER MIS A JOUR EN TEMPS REEL 
@@ -622,903 +622,965 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 136|         if (!u.is_banned) {
 137|             html += `<button class="action-btn btn-warn" onclick="warnUser('${escapeHtml(u.pseudo)}')">⚠️ Warn</button>`;
 138|             html += `<button class="action-btn btn-ban" onclick="banUser('${escapeHtml(u.pseudo)}')">🚫 Ban</button>`;
-139|         } else {
-140|             html += `<button class="action-btn btn-unban" onclick="unbanUser('${escapeHtml(u.pseudo)}')">🔓 Unban</button>`;
-141|         }
-142| 
-143|         if (u.role !== 'admin' && u.role !== 'modo') {
-144|             html += `<button class="action-btn btn-modo" onclick="setModo('${escapeHtml(u.pseudo)}')">👮 Modo</button>`;
-145|         }
-146| 
-147|         if (u.role === 'modo') {
-148|             html += `<button class="action-btn btn-admin" onclick="setAdmin('${escapeHtml(u.pseudo)}')">👑 Admin</button>`;
-149|         }
-150| 
-151|         html += `</td></tr>`;
-152|     });
-153| 
-154|     html += `</tbody></table>`;
-155|     usersListDiv.innerHTML = html;
-156| }
-157| 
-158| // ========== 4. FILTRES ET RECHERCHE ==========
-159| function applyFilters() {
-160|     const searchTerm = searchInput.value.toLowerCase();
-161|     const role = roleFilter.value;
-162|     const status = statusFilter.value;
-163| 
-164|     filteredUsers = allUsers.filter(u => {
-165|         if (searchTerm && !u.pseudo.toLowerCase().includes(searchTerm)) return false;
-166| 
-167|         if (role !== 'all') {
-168|             if (role === 'admin' && u.role !== 'admin') return false;
-169|             if (role === 'modo' && u.role !== 'modo') return false;
-170|             if (role === 'user' && u.role !== 'user') return false;
-171|             if (role === 'guest' && (u.role && u.role !== 'guest')) return false;
-172|         }
-173| 
-174|         if (status !== 'all') {
-175|             if (status === 'banned' && !u.is_banned) return false;
-176|             if (status === 'warned' && (!u.warnings || u.warnings < 3)) return false;
-177|             if (status === 'active' && (u.is_banned || (u.warnings || 0) >= 3)) return false;
-178|         }
-179| 
-180|         return true;
-181|     });
-182| 
-183|     renderUsersTable();
-184| }
-185| 
-186| // ========== 5. ACTIONS ADMIN ==========
-187| async function warnUser(pseudo) {
-188|     if (typeof MGModal !== 'undefined') {
-189|         MGModal.show({
-190|             title: '⚠️ Confirmation',
-191|             message: `Envoyer un avertissement à ${pseudo} ?`,
-192|             onConfirm: async () => {
-193|                 try {
-194|                     const response = await fetch('/api/admin/warn', {
-195|                         method: 'POST',
-196|                         headers: { 'Content-Type': 'application/json' },
-197|                         body: JSON.stringify({ pseudo })
-198|                     });
-199| 
-200|                     if (response.ok) {
-201|                         // Mise à jour IMMÉDIATE de l'utilisateur dans allUsers et filteredUsers
-202|                         const userIndex = allUsers.findIndex(u => u.pseudo === pseudo);
-203|                         if (userIndex !== -1) {
-204|                             allUsers[userIndex].warnings = (allUsers[userIndex].warnings || 0) + 1;
-205|                             // Mettre à jour filteredUsers aussi
-206|                             const filteredIndex = filteredUsers.findIndex(u => u.pseudo === pseudo);
-207|                             if (filteredIndex !== -1) {
-208|                                 filteredUsers[filteredIndex].warnings = allUsers[userIndex].warnings;
-209|                             }
-210|                         }
-211| 
-212|                         // Recharger UNIQUEMENT la ligne du tableau modifiée (pas tout le tableau)
-213|                         updateUserRow(pseudo);
-214|                         updateStats();  // Met à jour les compteurs
-215| 
-216|                         MGPopup.show({
-217|                             title: '✅ Succès',
-218|                             message: `${pseudo} a reçu un avertissement.`,
-219|                             onConfirm: () => { }
-220|                         });
-221|                     }
-222|                 } catch (err) {
-223|                     console.error(err);
-224|                     MGModal.show({
-225|                         title: '❌ Erreur réseau',
-226|                         message: 'Impossible de contacter le serveur.',
-227|                         onConfirm: () => { }
-228|                     });
-229|                 }
-230|             },
-231|             onCancel: () => { }
-232|         });
-233|     } else {
-234|         // Fallback
-235|         if (!confirm(`⚠️ Envoyer un avertissement à ${pseudo} ?`)) return;
-236|         try {
-237|             const response = await fetch('/api/admin/warn', {
-238|                 method: 'POST',
-239|                 headers: { 'Content-Type': 'application/json' },
-240|                 body: JSON.stringify({ pseudo })
-241|             });
-242|             if (response.ok) {
-243|                 alert(`✅ ${pseudo} a reçu un avertissement`);
-244|                 await loadUsers();
-245|             } else {
-246|                 alert('❌ Erreur');
-247|             }
-248|         } catch (err) {
-249|             console.error(err);
-250|             alert('❌ Erreur réseau');
-251|         }
-252|     }
-253| }
-254| 
-255| async function banUser(pseudo) {
-256|     if (typeof MGModal !== 'undefined') {
-257|         // Demander la raison avec un popup personnalisé
-258|         // Pour l'instant, on utilise prompt car MGModal n'a pas d'input
-259|         // Optionnel : améliorer MGModal pour accepter du texte
-260|         const reason = prompt(`🚫 Raison du bannissement pour ${pseudo} :`);
-261|         if (!reason) return;
-262| 
-263|         MGModal.show({
-264|             title: '🚫 Confirmation de bannissement',
-265|             message: `Bannir définitivement ${pseudo} ?\nRaison : ${reason}`,
-266|             onConfirm: async () => {
-267|                 try {
-268|                     const response = await fetch('/api/admin/ban', {
-269|                         method: 'POST',
-270|                         headers: { 'Content-Type': 'application/json' },
-271|                         body: JSON.stringify({ pseudo, reason })
-272|                     });
-273| 
-274|                     if (response.ok) {
-275|                         MGModal.show({
-276|                             title: '✅ Banni',
-277|                             message: `${pseudo} a été banni.`,
-278|                             onConfirm: () => loadUsers()
-279|                         });
-280|                     } else {
-281|                         MGModal.show({
-282|                             title: '❌ Erreur',
-283|                             message: 'Erreur lors du bannissement.',
-284|                             onConfirm: () => { }
-285|                         });
-286|                     }
-287|                 } catch (err) {
-288|                     console.error(err);
-289|                     MGModal.show({
-290|                         title: '❌ Erreur réseau',
-291|                         message: 'Impossible de contacter le serveur.',
-292|                         onConfirm: () => { }
-293|                     });
-294|                 }
-295|             },
-296|             onCancel: () => { }
-297|         });
-298|     } else {
-299|         // Fallback
-300|         const reason = prompt(`🚫 Raison du bannissement pour ${pseudo} :`);
-301|         if (!reason) return;
-302|         try {
-303|             const response = await fetch('/api/admin/ban', {
-304|                 method: 'POST',
-305|                 headers: { 'Content-Type': 'application/json' },
-306|                 body: JSON.stringify({ pseudo, reason })
-307|             });
-308|             if (response.ok) {
-309|                 alert(`✅ ${pseudo} a été banni`);
-310|                 await loadUsers();
-311|             } else {
-312|                 alert('❌ Erreur');
-313|             }
-314|         } catch (err) {
-315|             console.error(err);
-316|             alert('❌ Erreur réseau');
-317|         }
-318|     }
-319| }
-320| 
-321| async function unbanUser(pseudo) {
-322|     if (typeof MGModal !== 'undefined') {
-323|         MGModal.show({
-324|             title: '🔓 Confirmation',
-325|             message: `Réactiver ${pseudo} ?`,
-326|             onConfirm: async () => {
-327|                 try {
-328|                     const response = await fetch('/api/admin/unban', {
-329|                         method: 'POST',
-330|                         headers: { 'Content-Type': 'application/json' },
-331|                         body: JSON.stringify({ pseudo })
-332|                     });
-333| 
-334|                     if (response.ok) {
-335|                         MGModal.show({
-336|                             title: '✅ Réactivé',
-337|                             message: `${pseudo} a été réactivé.`,
-338|                             onConfirm: () => loadUsers()
-339|                         });
-340|                     } else {
-341|                         MGModal.show({
-342|                             title: '❌ Erreur',
-343|                             message: 'Erreur lors de la réactivation.',
-344|                             onConfirm: () => { }
-345|                         });
-346|                     }
-347|                 } catch (err) {
-348|                     console.error(err);
-349|                     MGModal.show({
-350|                         title: '❌ Erreur réseau',
-351|                         message: 'Impossible de contacter le serveur.',
-352|                         onConfirm: () => { }
-353|                     });
-354|                 }
-355|             },
-356|             onCancel: () => { }
-357|         });
-358|     } else {
-359|         // Fallback
-360|         if (!confirm(`🔓 Réactiver ${pseudo} ?`)) return;
-361|         try {
-362|             const response = await fetch('/api/admin/unban', {
-363|                 method: 'POST',
-364|                 headers: { 'Content-Type': 'application/json' },
-365|                 body: JSON.stringify({ pseudo })
-366|             });
-367|             if (response.ok) {
-368|                 alert(`✅ ${pseudo} a été réactivé`);
-369|                 await loadUsers();
-370|             } else {
-371|                 alert('❌ Erreur');
-372|             }
-373|         } catch (err) {
-374|             console.error(err);
-375|             alert('❌ Erreur réseau');
-376|         }
-377|     }
-378| }
-379| 
-380| async function setModo(pseudo) {
-381|     if (typeof MGModal !== 'undefined') {
-382|         MGModal.show({
-383|             title: '👮 Confirmation',
-384|             message: `Donner le rôle modérateur à ${pseudo} ?`,
-385|             onConfirm: async () => {
-386|                 try {
-387|                     const response = await fetch('/api/admin/set-modo', {
-388|                         method: 'POST',
-389|                         headers: { 'Content-Type': 'application/json' },
-390|                         body: JSON.stringify({ pseudo })
-391|                     });
-392| 
-393|                     if (response.ok) {
-394|                         MGModal.show({
-395|                             title: '✅ Modérateur',
-396|                             message: `${pseudo} est maintenant modérateur.`,
-397|                             onConfirm: () => loadUsers()
-398|                         });
-399|                     } else {
-400|                         MGModal.show({
-401|                             title: '❌ Erreur',
-402|                             message: 'Erreur lors de la promotion.',
-403|                             onConfirm: () => { }
-404|                         });
-405|                     }
-406|                 } catch (err) {
-407|                     console.error(err);
-408|                     MGModal.show({
-409|                         title: '❌ Erreur réseau',
-410|                         message: 'Impossible de contacter le serveur.',
-411|                         onConfirm: () => { }
-412|                     });
-413|                 }
-414|             },
-415|             onCancel: () => { }
-416|         });
-417|     } else {
-418|         // Fallback
-419|         if (!confirm(`👮 Donner le rôle modérateur à ${pseudo} ?`)) return;
-420|         try {
-421|             const response = await fetch('/api/admin/set-modo', {
-422|                 method: 'POST',
-423|                 headers: { 'Content-Type': 'application/json' },
-424|                 body: JSON.stringify({ pseudo })
-425|             });
-426|             if (response.ok) {
-427|                 alert(`✅ ${pseudo} est maintenant modérateur`);
-428|                 await loadUsers();
-429|             } else {
-430|                 alert('❌ Erreur');
-431|             }
-432|         } catch (err) {
-433|             console.error(err);
-434|             alert('❌ Erreur réseau');
-435|         }
-436|     }
-437| }
-438| 
-439| async function setAdmin(pseudo) {
-440|     if (typeof MGModal !== 'undefined') {
-441|         MGModal.show({
-442|             title: '👑 Confirmation (IRRÉVERSIBLE)',
-443|             message: `⚠️⚠️ Donner le rôle ADMIN à ${pseudo} ?\n\nCette action est IRRÉVERSIBLE ! ⚠️⚠️`,
-444|             onConfirm: async () => {
-445|                 try {
-446|                     const response = await fetch('/api/admin/set-admin', {
-447|                         method: 'POST',
-448|                         headers: { 'Content-Type': 'application/json' },
-449|                         body: JSON.stringify({ pseudo })
-450|                     });
-451| 
-452|                     if (response.ok) {
-453|                         MGModal.show({
-454|                             title: '✅ Administrateur',
-455|                             message: `${pseudo} est maintenant administrateur.`,
-456|                             onConfirm: () => loadUsers()
-457|                         });
-458|                     } else {
-459|                         MGModal.show({
-460|                             title: '❌ Erreur',
-461|                             message: 'Erreur lors de la promotion.',
-462|                             onConfirm: () => { }
-463|                         });
-464|                     }
-465|                 } catch (err) {
-466|                     console.error(err);
-467|                     MGModal.show({
-468|                         title: '❌ Erreur réseau',
-469|                         message: 'Impossible de contacter le serveur.',
-470|                         onConfirm: () => { }
-471|                     });
-472|                 }
-473|             },
-474|             onCancel: () => { }
-475|         });
-476|     } else {
-477|         // Fallback
-478|         if (!confirm(`⚠️⚠️ Donner le rôle ADMIN à ${pseudo} ? (action irréversible) ⚠️⚠️`)) return;
-479|         try {
-480|             const response = await fetch('/api/admin/set-admin', {
-481|                 method: 'POST',
-482|                 headers: { 'Content-Type': 'application/json' },
-483|                 body: JSON.stringify({ pseudo })
-484|             });
-485|             if (response.ok) {
-486|                 alert(`✅ ${pseudo} est maintenant administrateur`);
-487|                 await loadUsers();
-488|             } else {
-489|                 alert('❌ Erreur');
-490|             }
-491|         } catch (err) {
-492|             console.error(err);
-493|             alert('❌ Erreur réseau');
-494|         }
-495|     }
-496| }
-497| 
-498| // ========== 6. ACTIONS RAPIDES ==========
-499| async function toggleMaintenance() {
-500|     try {
-501|         const getRes = await fetch('/api/admin/maintenance');
-502|         const { enabled } = await getRes.json();
-503|         const newState = !enabled;
-504| 
-505|         if (typeof MGModal !== 'undefined') {
-506|             MGModal.show({
-507|                 title: newState ? '🚧 Activer maintenance' : '✅ Désactiver maintenance',
-508|                 message: newState
-509|                     ? 'ACTIVER le mode maintenance ?\nLes utilisateurs non-admin verront une page de maintenance.'
-510|                     : 'DÉSACTIVER le mode maintenance ?',
-511|                 onConfirm: async () => {
-512|                     try {
-513|                         const res = await fetch('/api/admin/maintenance', {
-514|                             method: 'POST',
-515|                             headers: { 'Content-Type': 'application/json' },
-516|                             body: JSON.stringify({ enabled: newState })
-517|                         });
-518|                         if (res.ok) {
-519|                             MGModal.show({
-520|                                 title: newState ? '🚧 Maintenance activée' : '✅ Maintenance désactivée',
-521|                                 message: newState ? 'Le site est en maintenance.' : 'Le site est à nouveau accessible.',
-522|                                 onConfirm: () => { }
-523|                             });
-524|                         } else {
-525|                             MGModal.show({
-526|                                 title: '❌ Erreur',
-527|                                 message: 'Erreur lors du changement de mode.',
-528|                                 onConfirm: () => { }
-529|                             });
-530|                         }
-531|                     } catch (err) {
-532|                         console.error(err);
-533|                         MGModal.show({
-534|                             title: '❌ Erreur réseau',
-535|                             message: 'Impossible de contacter le serveur.',
-536|                             onConfirm: () => { }
-537|                         });
-538|                     }
-539|                 },
-540|                 onCancel: () => { }
-541|             });
-542|         } else {
-543|             // Fallback
-544|             const confirmMsg = newState
-545|                 ? '🚧 ACTIVER le mode maintenance ?\nLes utilisateurs non-admin verront une page de maintenance.'
-546|                 : '✅ DÉSACTIVER le mode maintenance ?';
-547|             if (!confirm(confirmMsg)) return;
-548|             const res = await fetch('/api/admin/maintenance', {
-549|                 method: 'POST',
-550|                 headers: { 'Content-Type': 'application/json' },
-551|                 body: JSON.stringify({ enabled: newState })
-552|             });
-553|             if (res.ok) {
-554|                 alert(newState ? '🚧 Mode MAINTENANCE activé' : '✅ Mode MAINTENANCE désactivé');
-555|             } else {
-556|                 alert('❌ Erreur lors du changement de mode');
-557|             }
-558|         }
-559|     } catch (err) {
-560|         console.error('Erreur toggleMaintenance:', err);
-561|         alert('❌ Erreur réseau');
-562|     }
-563| }
-564| 
-565| async function backupDatabase() {
-566|     if (typeof MGModal !== 'undefined') {
-567|         MGModal.show({
-568|             title: '🗄️ Sauvegarde',
-569|             message: 'Sauvegarder la base de données ?',
-570|             onConfirm: async () => {
-571|                 try {
-572|                     const response = await fetch('/api/backup', {
-573|                         method: 'POST',
-574|                         headers: { 'Content-Type': 'application/json' },
-575|                         body: JSON.stringify({ action: 'database' })
-576|                     });
-577|                     const data = await response.json();
-578|                     if (data.success) {
-579|                         MGModal.show({
-580|                             title: '✅ Succès',
-581|                             message: 'Sauvegarde BDD effectuée.',
-582|                             onConfirm: () => { }
-583|                         });
-584|                     } else {
-585|                         MGModal.show({
-586|                             title: '❌ Erreur',
-587|                             message: data.error || 'Erreur inconnue',
-588|                             onConfirm: () => { }
-589|                         });
-590|                     }
-591|                 } catch (err) {
-592|                     console.error(err);
-593|                     MGModal.show({
-594|                         title: '❌ Erreur réseau',
-595|                         message: 'Impossible de contacter le serveur.',
-596|                         onConfirm: () => { }
-597|                     });
-598|                 }
-599|             },
-600|             onCancel: () => { }
-601|         });
-602|     } else {
-603|         // Fallback
-604|         if (!confirm('🗄️ Sauvegarder la base de données ?')) return;
-605|         try {
-606|             const response = await fetch('/api/backup', {
-607|                 method: 'POST',
-608|                 headers: { 'Content-Type': 'application/json' },
-609|                 body: JSON.stringify({ action: 'database' })
-610|             });
-611|             const data = await response.json();
-612|             if (data.success) {
-613|                 alert('✅ Sauvegarde BDD effectuée');
-614|             } else {
-615|                 alert('❌ Erreur: ' + (data.error || 'Inconnue'));
-616|             }
-617|         } catch (err) {
-618|             console.error(err);
-619|             alert('❌ Erreur réseau');
+139|             html += `<button class="action-btn btn-kick" onclick="kickUser('${escapeHtml(u.pseudo)}')">🦵 Kick</button>`;
+140|         } else {
+141|             html += `<button class="action-btn btn-unban" onclick="unbanUser('${escapeHtml(u.pseudo)}')">🔓 Unban</button>`;
+142|         }
+143| 
+144|         if (u.role !== 'admin' && u.role !== 'modo') {
+145|             html += `<button class="action-btn btn-modo" onclick="setModo('${escapeHtml(u.pseudo)}')">👮 Modo</button>`;
+146|         }
+147| 
+148|         if (u.role === 'modo') {
+149|             html += `<button class="action-btn btn-admin" onclick="setAdmin('${escapeHtml(u.pseudo)}')">👑 Admin</button>`;
+150|         }
+151| 
+152|         html += `</td></tr>`;
+153|     });
+154| 
+155|     html += `</tbody></table>`;
+156|     usersListDiv.innerHTML = html;
+157| }
+158| 
+159| // ========== 4. FILTRES ET RECHERCHE ==========
+160| function applyFilters() {
+161|     const searchTerm = searchInput.value.toLowerCase();
+162|     const role = roleFilter.value;
+163|     const status = statusFilter.value;
+164| 
+165|     filteredUsers = allUsers.filter(u => {
+166|         if (searchTerm && !u.pseudo.toLowerCase().includes(searchTerm)) return false;
+167| 
+168|         if (role !== 'all') {
+169|             if (role === 'admin' && u.role !== 'admin') return false;
+170|             if (role === 'modo' && u.role !== 'modo') return false;
+171|             if (role === 'user' && u.role !== 'user') return false;
+172|             if (role === 'guest' && (u.role && u.role !== 'guest')) return false;
+173|         }
+174| 
+175|         if (status !== 'all') {
+176|             if (status === 'banned' && !u.is_banned) return false;
+177|             if (status === 'warned' && (!u.warnings || u.warnings < 3)) return false;
+178|             if (status === 'active' && (u.is_banned || (u.warnings || 0) >= 3)) return false;
+179|         }
+180| 
+181|         return true;
+182|     });
+183| 
+184|     renderUsersTable();
+185| }
+186| 
+187| // ========== 5. ACTIONS ADMIN ==========
+188| async function warnUser(pseudo) {
+189|     if (typeof MGModal !== 'undefined') {
+190|         MGModal.show({
+191|             title: '⚠️ Confirmation',
+192|             message: `Envoyer un avertissement à ${pseudo} ?`,
+193|             onConfirm: async () => {
+194|                 try {
+195|                     const response = await fetch('/api/admin/warn', {
+196|                         method: 'POST',
+197|                         headers: { 'Content-Type': 'application/json' },
+198|                         body: JSON.stringify({ pseudo })
+199|                     });
+200| 
+201|                     if (response.ok) {
+202|                         // Mise à jour IMMÉDIATE de l'utilisateur dans allUsers et filteredUsers
+203|                         const userIndex = allUsers.findIndex(u => u.pseudo === pseudo);
+204|                         if (userIndex !== -1) {
+205|                             allUsers[userIndex].warnings = (allUsers[userIndex].warnings || 0) + 1;
+206|                             // Mettre à jour filteredUsers aussi
+207|                             const filteredIndex = filteredUsers.findIndex(u => u.pseudo === pseudo);
+208|                             if (filteredIndex !== -1) {
+209|                                 filteredUsers[filteredIndex].warnings = allUsers[userIndex].warnings;
+210|                             }
+211|                         }
+212| 
+213|                         // Recharger UNIQUEMENT la ligne du tableau modifiée (pas tout le tableau)
+214|                         updateUserRow(pseudo);
+215|                         updateStats();  // Met à jour les compteurs
+216| 
+217|                         MGPopup.show({
+218|                             title: '✅ Succès',
+219|                             message: `${pseudo} a reçu un avertissement.`,
+220|                             onConfirm: () => { }
+221|                         });
+222|                     }
+223|                 } catch (err) {
+224|                     console.error(err);
+225|                     MGModal.show({
+226|                         title: '❌ Erreur réseau',
+227|                         message: 'Impossible de contacter le serveur.',
+228|                         onConfirm: () => { }
+229|                     });
+230|                 }
+231|             },
+232|             onCancel: () => { }
+233|         });
+234|     } else {
+235|         // Fallback
+236|         if (!confirm(`⚠️ Envoyer un avertissement à ${pseudo} ?`)) return;
+237|         try {
+238|             const response = await fetch('/api/admin/warn', {
+239|                 method: 'POST',
+240|                 headers: { 'Content-Type': 'application/json' },
+241|                 body: JSON.stringify({ pseudo })
+242|             });
+243|             if (response.ok) {
+244|                 alert(`✅ ${pseudo} a reçu un avertissement`);
+245|                 await loadUsers();
+246|             } else {
+247|                 alert('❌ Erreur');
+248|             }
+249|         } catch (err) {
+250|             console.error(err);
+251|             alert('❌ Erreur réseau');
+252|         }
+253|     }
+254| }
+255| 
+256| async function banUser(pseudo) {
+257|     if (typeof MGModal !== 'undefined') {
+258|         // Demander la raison avec un popup personnalisé
+259|         // Pour l'instant, on utilise prompt car MGModal n'a pas d'input
+260|         // Optionnel : améliorer MGModal pour accepter du texte
+261|         const reason = prompt(`🚫 Raison du bannissement pour ${pseudo} :`);
+262|         if (!reason) return;
+263| 
+264|         MGModal.show({
+265|             title: '🚫 Confirmation de bannissement',
+266|             message: `Bannir définitivement ${pseudo} ?\nRaison : ${reason}`,
+267|             onConfirm: async () => {
+268|                 try {
+269|                     const response = await fetch('/api/admin/ban', {
+270|                         method: 'POST',
+271|                         headers: { 'Content-Type': 'application/json' },
+272|                         body: JSON.stringify({ pseudo, reason })
+273|                     });
+274| 
+275|                     if (response.ok) {
+276|                         MGModal.show({
+277|                             title: '✅ Banni',
+278|                             message: `${pseudo} a été banni.`,
+279|                             onConfirm: () => loadUsers()
+280|                         });
+281|                     } else {
+282|                         MGModal.show({
+283|                             title: '❌ Erreur',
+284|                             message: 'Erreur lors du bannissement.',
+285|                             onConfirm: () => { }
+286|                         });
+287|                     }
+288|                 } catch (err) {
+289|                     console.error(err);
+290|                     MGModal.show({
+291|                         title: '❌ Erreur réseau',
+292|                         message: 'Impossible de contacter le serveur.',
+293|                         onConfirm: () => { }
+294|                     });
+295|                 }
+296|             },
+297|             onCancel: () => { }
+298|         });
+299|     } else {
+300|         // Fallback
+301|         const reason = prompt(`🚫 Raison du bannissement pour ${pseudo} :`);
+302|         if (!reason) return;
+303|         try {
+304|             const response = await fetch('/api/admin/ban', {
+305|                 method: 'POST',
+306|                 headers: { 'Content-Type': 'application/json' },
+307|                 body: JSON.stringify({ pseudo, reason })
+308|             });
+309|             if (response.ok) {
+310|                 alert(`✅ ${pseudo} a été banni`);
+311|                 await loadUsers();
+312|             } else {
+313|                 alert('❌ Erreur');
+314|             }
+315|         } catch (err) {
+316|             console.error(err);
+317|             alert('❌ Erreur réseau');
+318|         }
+319|     }
+320| }
+321| 
+322| async function kickUser(pseudo) {
+323|     if (typeof MGPopup !== 'undefined') {
+324|         MGPopup.show({
+325|             title: '🦵 Expulsion',
+326|             message: `Expulser ${pseudo} du site ?\n\n⚠️ L'utilisateur sera déconnecté et son compte temporaire supprimé.`,
+327|             onConfirm: async () => {
+328|                 try {
+329|                     const response = await fetch('/api/admin/kick', {
+330|                         method: 'POST',
+331|                         headers: { 'Content-Type': 'application/json' },
+332|                         body: JSON.stringify({ pseudo })
+333|                     });
+334| 
+335|                     if (response.ok) {
+336|                         MGPopup.show({
+337|                             title: '✅ Expulsé',
+338|                             message: `${pseudo} a été expulsé.`,
+339|                             onConfirm: () => loadUsers()
+340|                         });
+341|                     } else {
+342|                         const data = await response.json();
+343|                         MGPopup.show({
+344|                             title: '❌ Erreur',
+345|                             message: data.error || 'Erreur lors de l\'expulsion.',
+346|                             onConfirm: () => { }
+347|                         });
+348|                     }
+349|                 } catch (err) {
+350|                     console.error(err);
+351|                     MGPopup.show({
+352|                         title: '❌ Erreur réseau',
+353|                         message: 'Impossible de contacter le serveur.',
+354|                         onConfirm: () => { }
+355|                     });
+356|                 }
+357|             },
+358|             onCancel: () => { }
+359|         });
+360|     } else {
+361|         // Fallback
+362|         if (!confirm(`🦵 Expulser ${pseudo} ?\n\n⚠️ L'utilisateur sera déconnecté et son compte supprimé.`)) return;
+363|         try {
+364|             const response = await fetch('/api/admin/kick', {
+365|                 method: 'POST',
+366|                 headers: { 'Content-Type': 'application/json' },
+367|                 body: JSON.stringify({ pseudo })
+368|             });
+369|             if (response.ok) {
+370|                 alert(`✅ ${pseudo} a été expulsé`);
+371|                 await loadUsers();
+372|             } else {
+373|                 const data = await response.json();
+374|                 alert('❌ Erreur: ' + (data.error || 'Inconnue'));
+375|             }
+376|         } catch (err) {
+377|             console.error(err);
+378|             alert('❌ Erreur réseau');
+379|         }
+380|     }
+381| }
+382| 
+383| async function unbanUser(pseudo) {
+384|     if (typeof MGModal !== 'undefined') {
+385|         MGModal.show({
+386|             title: '🔓 Confirmation',
+387|             message: `Réactiver ${pseudo} ?`,
+388|             onConfirm: async () => {
+389|                 try {
+390|                     const response = await fetch('/api/admin/unban', {
+391|                         method: 'POST',
+392|                         headers: { 'Content-Type': 'application/json' },
+393|                         body: JSON.stringify({ pseudo })
+394|                     });
+395| 
+396|                     if (response.ok) {
+397|                         MGModal.show({
+398|                             title: '✅ Réactivé',
+399|                             message: `${pseudo} a été réactivé.`,
+400|                             onConfirm: () => loadUsers()
+401|                         });
+402|                     } else {
+403|                         MGModal.show({
+404|                             title: '❌ Erreur',
+405|                             message: 'Erreur lors de la réactivation.',
+406|                             onConfirm: () => { }
+407|                         });
+408|                     }
+409|                 } catch (err) {
+410|                     console.error(err);
+411|                     MGModal.show({
+412|                         title: '❌ Erreur réseau',
+413|                         message: 'Impossible de contacter le serveur.',
+414|                         onConfirm: () => { }
+415|                     });
+416|                 }
+417|             },
+418|             onCancel: () => { }
+419|         });
+420|     } else {
+421|         // Fallback
+422|         if (!confirm(`🔓 Réactiver ${pseudo} ?`)) return;
+423|         try {
+424|             const response = await fetch('/api/admin/unban', {
+425|                 method: 'POST',
+426|                 headers: { 'Content-Type': 'application/json' },
+427|                 body: JSON.stringify({ pseudo })
+428|             });
+429|             if (response.ok) {
+430|                 alert(`✅ ${pseudo} a été réactivé`);
+431|                 await loadUsers();
+432|             } else {
+433|                 alert('❌ Erreur');
+434|             }
+435|         } catch (err) {
+436|             console.error(err);
+437|             alert('❌ Erreur réseau');
+438|         }
+439|     }
+440| }
+441| 
+442| async function setModo(pseudo) {
+443|     if (typeof MGModal !== 'undefined') {
+444|         MGModal.show({
+445|             title: '👮 Confirmation',
+446|             message: `Donner le rôle modérateur à ${pseudo} ?`,
+447|             onConfirm: async () => {
+448|                 try {
+449|                     const response = await fetch('/api/admin/set-modo', {
+450|                         method: 'POST',
+451|                         headers: { 'Content-Type': 'application/json' },
+452|                         body: JSON.stringify({ pseudo })
+453|                     });
+454| 
+455|                     if (response.ok) {
+456|                         MGModal.show({
+457|                             title: '✅ Modérateur',
+458|                             message: `${pseudo} est maintenant modérateur.`,
+459|                             onConfirm: () => loadUsers()
+460|                         });
+461|                     } else {
+462|                         MGModal.show({
+463|                             title: '❌ Erreur',
+464|                             message: 'Erreur lors de la promotion.',
+465|                             onConfirm: () => { }
+466|                         });
+467|                     }
+468|                 } catch (err) {
+469|                     console.error(err);
+470|                     MGModal.show({
+471|                         title: '❌ Erreur réseau',
+472|                         message: 'Impossible de contacter le serveur.',
+473|                         onConfirm: () => { }
+474|                     });
+475|                 }
+476|             },
+477|             onCancel: () => { }
+478|         });
+479|     } else {
+480|         // Fallback
+481|         if (!confirm(`👮 Donner le rôle modérateur à ${pseudo} ?`)) return;
+482|         try {
+483|             const response = await fetch('/api/admin/set-modo', {
+484|                 method: 'POST',
+485|                 headers: { 'Content-Type': 'application/json' },
+486|                 body: JSON.stringify({ pseudo })
+487|             });
+488|             if (response.ok) {
+489|                 alert(`✅ ${pseudo} est maintenant modérateur`);
+490|                 await loadUsers();
+491|             } else {
+492|                 alert('❌ Erreur');
+493|             }
+494|         } catch (err) {
+495|             console.error(err);
+496|             alert('❌ Erreur réseau');
+497|         }
+498|     }
+499| }
+500| 
+501| async function setAdmin(pseudo) {
+502|     if (typeof MGModal !== 'undefined') {
+503|         MGModal.show({
+504|             title: '👑 Confirmation (IRRÉVERSIBLE)',
+505|             message: `⚠️⚠️ Donner le rôle ADMIN à ${pseudo} ?\n\nCette action est IRRÉVERSIBLE ! ⚠️⚠️`,
+506|             onConfirm: async () => {
+507|                 try {
+508|                     const response = await fetch('/api/admin/set-admin', {
+509|                         method: 'POST',
+510|                         headers: { 'Content-Type': 'application/json' },
+511|                         body: JSON.stringify({ pseudo })
+512|                     });
+513| 
+514|                     if (response.ok) {
+515|                         MGModal.show({
+516|                             title: '✅ Administrateur',
+517|                             message: `${pseudo} est maintenant administrateur.`,
+518|                             onConfirm: () => loadUsers()
+519|                         });
+520|                     } else {
+521|                         MGModal.show({
+522|                             title: '❌ Erreur',
+523|                             message: 'Erreur lors de la promotion.',
+524|                             onConfirm: () => { }
+525|                         });
+526|                     }
+527|                 } catch (err) {
+528|                     console.error(err);
+529|                     MGModal.show({
+530|                         title: '❌ Erreur réseau',
+531|                         message: 'Impossible de contacter le serveur.',
+532|                         onConfirm: () => { }
+533|                     });
+534|                 }
+535|             },
+536|             onCancel: () => { }
+537|         });
+538|     } else {
+539|         // Fallback
+540|         if (!confirm(`⚠️⚠️ Donner le rôle ADMIN à ${pseudo} ? (action irréversible) ⚠️⚠️`)) return;
+541|         try {
+542|             const response = await fetch('/api/admin/set-admin', {
+543|                 method: 'POST',
+544|                 headers: { 'Content-Type': 'application/json' },
+545|                 body: JSON.stringify({ pseudo })
+546|             });
+547|             if (response.ok) {
+548|                 alert(`✅ ${pseudo} est maintenant administrateur`);
+549|                 await loadUsers();
+550|             } else {
+551|                 alert('❌ Erreur');
+552|             }
+553|         } catch (err) {
+554|             console.error(err);
+555|             alert('❌ Erreur réseau');
+556|         }
+557|     }
+558| }
+559| 
+560| // ========== 6. ACTIONS RAPIDES ==========
+561| async function toggleMaintenance() {
+562|     try {
+563|         const getRes = await fetch('/api/admin/maintenance');
+564|         const { enabled } = await getRes.json();
+565|         const newState = !enabled;
+566| 
+567|         if (typeof MGModal !== 'undefined') {
+568|             MGModal.show({
+569|                 title: newState ? '🚧 Activer maintenance' : '✅ Désactiver maintenance',
+570|                 message: newState
+571|                     ? 'ACTIVER le mode maintenance ?\nLes utilisateurs non-admin verront une page de maintenance.'
+572|                     : 'DÉSACTIVER le mode maintenance ?',
+573|                 onConfirm: async () => {
+574|                     try {
+575|                         const res = await fetch('/api/admin/maintenance', {
+576|                             method: 'POST',
+577|                             headers: { 'Content-Type': 'application/json' },
+578|                             body: JSON.stringify({ enabled: newState })
+579|                         });
+580|                         if (res.ok) {
+581|                             MGModal.show({
+582|                                 title: newState ? '🚧 Maintenance activée' : '✅ Maintenance désactivée',
+583|                                 message: newState ? 'Le site est en maintenance.' : 'Le site est à nouveau accessible.',
+584|                                 onConfirm: () => { }
+585|                             });
+586|                         } else {
+587|                             MGModal.show({
+588|                                 title: '❌ Erreur',
+589|                                 message: 'Erreur lors du changement de mode.',
+590|                                 onConfirm: () => { }
+591|                             });
+592|                         }
+593|                     } catch (err) {
+594|                         console.error(err);
+595|                         MGModal.show({
+596|                             title: '❌ Erreur réseau',
+597|                             message: 'Impossible de contacter le serveur.',
+598|                             onConfirm: () => { }
+599|                         });
+600|                     }
+601|                 },
+602|                 onCancel: () => { }
+603|             });
+604|         } else {
+605|             // Fallback
+606|             const confirmMsg = newState
+607|                 ? '🚧 ACTIVER le mode maintenance ?\nLes utilisateurs non-admin verront une page de maintenance.'
+608|                 : '✅ DÉSACTIVER le mode maintenance ?';
+609|             if (!confirm(confirmMsg)) return;
+610|             const res = await fetch('/api/admin/maintenance', {
+611|                 method: 'POST',
+612|                 headers: { 'Content-Type': 'application/json' },
+613|                 body: JSON.stringify({ enabled: newState })
+614|             });
+615|             if (res.ok) {
+616|                 alert(newState ? '🚧 Mode MAINTENANCE activé' : '✅ Mode MAINTENANCE désactivé');
+617|             } else {
+618|                 alert('❌ Erreur lors du changement de mode');
+619|             }
 620|         }
-621|     }
-622| }
-623| 
-624| async function manualCleanup() {
-625|     if (typeof MGModal !== 'undefined') {
-626|         MGModal.show({
-627|             title: '🧹 Nettoyage',
-628|             message: 'Nettoyer les visiteurs inactifs ?\n\n⚠️ Fonction à implémenter côté serveur pour l\'instant.',
-629|             onConfirm: () => {
-630|                 MGModal.show({
-631|                     title: '⚠️ Information',
-632|                     message: 'Fonction à implémenter côté serveur prochainement.',
-633|                     onConfirm: () => { }
-634|                 });
-635|             },
-636|             onCancel: () => { }
-637|         });
-638|     } else {
-639|         if (!confirm('🧹 Nettoyer les visiteurs inactifs ?')) return;
-640|         alert('⚠️ Fonction à implémenter côté serveur');
-641|     }
-642| }
-643| 
-644| // ========== SECTION SIGNALEMENTS ==========
-645| async function loadReports() {
-646|     const reportsDiv = document.getElementById('reportsList');
-647|     if (!reportsDiv) return;
-648| 
-649|     try {
-650|         const response = await fetch('/api/admin/reports');
-651|         const reports = await response.json();
-652| 
-653|         if (reports.length === 0) {
-654|             reportsDiv.innerHTML = '<div class="loading">✅ Aucun signalement en attente</div>';
-655|             return;
-656|         }
-657| 
-658|         let html = '<table class="admin-table"><thead><tr><th>Date</th><th>Signalé par</th><th>Cible</th><th>Actions</th></tr></thead><tbody>';
-659| 
-660|         reports.forEach(r => {
-661|             html += `
-662|                 <tr>
-663|                     <td>${new Date(r.created_at).toLocaleString()}</td>
-664|                     <td>${escapeHtml(r.reporter_pseudo)}</td>
-665|                     <td><strong>${escapeHtml(r.target_pseudo)}</strong></td>
-666|                     <td class="action-buttons">
-667|                         <button class="action-btn btn-warn" onclick="warnUser('${escapeHtml(r.target_pseudo)}')">⚠️ Warn</button>
-668|                         <button class="action-btn btn-ban" onclick="banUser('${escapeHtml(r.target_pseudo)}')">🚫 Ban</button>
-669|                         <button class="action-btn btn-ignore" onclick="ignoreReport(${r.id})">✅ Ignorer</button>
-670|                     </td>
-671|                 </tr>
-672|             `;
-673|         });
-674| 
-675|         html += '</tbody></table>';
-676|         reportsDiv.innerHTML = html;
-677|     } catch (err) {
-678|         console.error(err);
-679|         reportsDiv.innerHTML = '<div class="loading">❌ Erreur chargement</div>';
-680|     }
-681| }
-682| 
-683| async function ignoreReport(reportId) {
-684|     if (typeof MGModal !== 'undefined') {
-685|         MGModal.show({
-686|             title: '✅ Ignorer',
-687|             message: 'Ignorer ce signalement ?',
-688|             onConfirm: async () => {
-689|                 try {
-690|                     const response = await fetch('/api/admin/ignore-report', {
-691|                         method: 'POST',
-692|                         headers: { 'Content-Type': 'application/json' },
-693|                         body: JSON.stringify({ reportId })
-694|                     });
-695| 
-696|                     if (response.ok) {
-697|                         MGModal.show({
-698|                             title: '✅ Ignoré',
-699|                             message: 'Signalement ignoré.',
-700|                             onConfirm: () => loadReports()
-701|                         });
-702|                     } else {
-703|                         MGModal.show({
-704|                             title: '❌ Erreur',
-705|                             message: 'Erreur lors de l\'ignorance.',
-706|                             onConfirm: () => { }
-707|                         });
-708|                     }
-709|                 } catch (err) {
-710|                     console.error(err);
-711|                     MGModal.show({
-712|                         title: '❌ Erreur réseau',
-713|                         message: 'Impossible de contacter le serveur.',
-714|                         onConfirm: () => { }
-715|                     });
-716|                 }
-717|             },
-718|             onCancel: () => { }
-719|         });
-720|     } else {
-721|         // Fallback
-722|         if (!confirm('Ignorer ce signalement ?')) return;
-723|         try {
-724|             const response = await fetch('/api/admin/ignore-report', {
-725|                 method: 'POST',
-726|                 headers: { 'Content-Type': 'application/json' },
-727|                 body: JSON.stringify({ reportId })
-728|             });
-729|             if (response.ok) {
-730|                 alert('✅ Signalement ignoré');
-731|                 loadReports();
-732|             } else {
-733|                 alert('❌ Erreur');
-734|             }
-735|         } catch (err) {
-736|             console.error(err);
-737|             alert('❌ Erreur réseau');
-738|         }
-739|     }
-740| }
-741| 
-742| // ========== SECTION JOURNAL ==========
-743| async function loadModerationLogs() {
-744|     const logsDiv = document.getElementById('logsList');
-745|     if (!logsDiv) return;
-746| 
-747|     try {
-748|         const response = await fetch('/api/admin/moderation-logs');
-749|         const logs = await response.json();
-750| 
-751|         if (logs.length === 0) {
-752|             logsDiv.innerHTML = '<div class="loading">📭 Aucune action enregistrée</div>';
-753|             return;
-754|         }
-755| 
-756|         let html = '<table class="admin-table"><thead><tr><th>Date</th><th>Admin</th><th>Action</th><th>Cible</th><th>Détails</th></tr></thead><tbody>';
+621|     } catch (err) {
+622|         console.error('Erreur toggleMaintenance:', err);
+623|         alert('❌ Erreur réseau');
+624|     }
+625| }
+626| 
+627| async function backupDatabase() {
+628|     if (typeof MGModal !== 'undefined') {
+629|         MGModal.show({
+630|             title: '🗄️ Sauvegarde',
+631|             message: 'Sauvegarder la base de données ?',
+632|             onConfirm: async () => {
+633|                 try {
+634|                     const response = await fetch('/api/backup', {
+635|                         method: 'POST',
+636|                         headers: { 'Content-Type': 'application/json' },
+637|                         body: JSON.stringify({ action: 'database' })
+638|                     });
+639|                     const data = await response.json();
+640|                     if (data.success) {
+641|                         MGModal.show({
+642|                             title: '✅ Succès',
+643|                             message: 'Sauvegarde BDD effectuée.',
+644|                             onConfirm: () => { }
+645|                         });
+646|                     } else {
+647|                         MGModal.show({
+648|                             title: '❌ Erreur',
+649|                             message: data.error || 'Erreur inconnue',
+650|                             onConfirm: () => { }
+651|                         });
+652|                     }
+653|                 } catch (err) {
+654|                     console.error(err);
+655|                     MGModal.show({
+656|                         title: '❌ Erreur réseau',
+657|                         message: 'Impossible de contacter le serveur.',
+658|                         onConfirm: () => { }
+659|                     });
+660|                 }
+661|             },
+662|             onCancel: () => { }
+663|         });
+664|     } else {
+665|         // Fallback
+666|         if (!confirm('🗄️ Sauvegarder la base de données ?')) return;
+667|         try {
+668|             const response = await fetch('/api/backup', {
+669|                 method: 'POST',
+670|                 headers: { 'Content-Type': 'application/json' },
+671|                 body: JSON.stringify({ action: 'database' })
+672|             });
+673|             const data = await response.json();
+674|             if (data.success) {
+675|                 alert('✅ Sauvegarde BDD effectuée');
+676|             } else {
+677|                 alert('❌ Erreur: ' + (data.error || 'Inconnue'));
+678|             }
+679|         } catch (err) {
+680|             console.error(err);
+681|             alert('❌ Erreur réseau');
+682|         }
+683|     }
+684| }
+685| 
+686| async function manualCleanup() {
+687|     if (typeof MGModal !== 'undefined') {
+688|         MGModal.show({
+689|             title: '🧹 Nettoyage',
+690|             message: 'Nettoyer les visiteurs inactifs ?\n\n⚠️ Fonction à implémenter côté serveur pour l\'instant.',
+691|             onConfirm: () => {
+692|                 MGModal.show({
+693|                     title: '⚠️ Information',
+694|                     message: 'Fonction à implémenter côté serveur prochainement.',
+695|                     onConfirm: () => { }
+696|                 });
+697|             },
+698|             onCancel: () => { }
+699|         });
+700|     } else {
+701|         if (!confirm('🧹 Nettoyer les visiteurs inactifs ?')) return;
+702|         alert('⚠️ Fonction à implémenter côté serveur');
+703|     }
+704| }
+705| 
+706| // ========== SECTION SIGNALEMENTS ==========
+707| async function loadReports() {
+708|     const reportsDiv = document.getElementById('reportsList');
+709|     if (!reportsDiv) return;
+710| 
+711|     try {
+712|         const response = await fetch('/api/admin/reports');
+713|         const reports = await response.json();
+714| 
+715|         if (reports.length === 0) {
+716|             reportsDiv.innerHTML = '<div class="loading">✅ Aucun signalement en attente</div>';
+717|             return;
+718|         }
+719| 
+720|         let html = '<table class="admin-table"><thead><tr><th>Date</th><th>Signalé par</th><th>Cible</th><th>Actions</th></tr></thead><tbody>';
+721| 
+722|         reports.forEach(r => {
+723|             html += `
+724|                 <tr>
+725|                     <td>${new Date(r.created_at).toLocaleString()}</td>
+726|                     <td>${escapeHtml(r.reporter_pseudo)}</td>
+727|                     <td><strong>${escapeHtml(r.target_pseudo)}</strong></td>
+728|                     <td class="action-buttons">
+729|                         <button class="action-btn btn-warn" onclick="warnUser('${escapeHtml(r.target_pseudo)}')">⚠️ Warn</button>
+730|                         <button class="action-btn btn-ban" onclick="banUser('${escapeHtml(r.target_pseudo)}')">🚫 Ban</button>
+731|                         <button class="action-btn btn-ignore" onclick="ignoreReport(${r.id})">✅ Ignorer</button>
+732|                     </td>
+733|                 </tr>
+734|             `;
+735|         });
+736| 
+737|         html += '</tbody></table>';
+738|         reportsDiv.innerHTML = html;
+739|     } catch (err) {
+740|         console.error(err);
+741|         reportsDiv.innerHTML = '<div class="loading">❌ Erreur chargement</div>';
+742|     }
+743| }
+744| 
+745| async function ignoreReport(reportId) {
+746|     if (typeof MGModal !== 'undefined') {
+747|         MGModal.show({
+748|             title: '✅ Ignorer',
+749|             message: 'Ignorer ce signalement ?',
+750|             onConfirm: async () => {
+751|                 try {
+752|                     const response = await fetch('/api/admin/ignore-report', {
+753|                         method: 'POST',
+754|                         headers: { 'Content-Type': 'application/json' },
+755|                         body: JSON.stringify({ reportId })
+756|                     });
 757| 
-758|         logs.forEach(log => {
-759|             let actionIcon = '';
-760|             if (log.action_type === 'warn') actionIcon = '⚠️';
-761|             else if (log.action_type === 'ban') actionIcon = '🚫';
-762|             else if (log.action_type === 'temp_ban') actionIcon = '⏱️';
-763|             else if (log.action_type === 'unban') actionIcon = '🔓';
-764|             else if (log.action_type === 'set_modo') actionIcon = '👮';
-765|             else if (log.action_type === 'set_admin') actionIcon = '👑';
-766|             else actionIcon = '📝';
-767| 
-768|             let details = log.reason || '';
-769|             if (log.duration_minutes) details += ` (${log.duration_minutes} min)`;
-770| 
-771|             html += `
-772|                 <tr>
-773|                     <td>${new Date(log.created_at).toLocaleString()}</td>
-774|                     <td>${escapeHtml(log.admin_pseudo)}</td>
-775|                     <td>${actionIcon} ${escapeHtml(log.action_type)}</td>
-776|                     <td><strong>${escapeHtml(log.target_pseudo)}</strong></td>
-777|                     <td>${escapeHtml(details)}</td>
-778|                 </tr>
-779|             `;
-780|         });
-781| 
-782|         html += '</tbody></table>';
-783|         logsDiv.innerHTML = html;
-784|     } catch (err) {
-785|         console.error(err);
-786|         logsDiv.innerHTML = '<div class="loading">❌ Erreur chargement</div>';
-787|     }
-788| 
-789| }
-790| 
-791| // ========== VIDAGE MANUEL ==========
-792| 
-793| async function clearLogsManually() {
-794|     if (typeof MGModal !== 'undefined') {
-795|         MGModal.show({
-796|             title: '🗑️ Vider le journal',
-797|             message: 'Vider TOUT le journal de modération ?\n\nAction irréversible.',
-798|             onConfirm: async () => {
-799|                 try {
-800|                     const response = await fetch('/api/admin/clear-logs', { method: 'POST' });
-801|                     const data = await response.json();
-802|                     if (data.success) {
-803|                         MGModal.show({
-804|                             title: '✅ Journal vidé',
-805|                             message: `${data.deleted} entrées supprimées.`,
-806|                             onConfirm: () => loadModerationLogs()
-807|                         });
-808|                     } else {
-809|                         MGModal.show({
-810|                             title: '❌ Erreur',
-811|                             message: 'Erreur lors du vidage.',
-812|                             onConfirm: () => { }
-813|                         });
-814|                     }
-815|                 } catch (err) {
-816|                     console.error(err);
-817|                     MGModal.show({
-818|                         title: '❌ Erreur réseau',
-819|                         message: 'Impossible de contacter le serveur.',
-820|                         onConfirm: () => { }
-821|                     });
-822|                 }
-823|             },
-824|             onCancel: () => { }
-825|         });
-826|     } else {
-827|         // Fallback
-828|         if (!confirm('🗑️ Vider TOUT le journal de modération ? Action irréversible.')) return;
-829|         try {
-830|             const response = await fetch('/api/admin/clear-logs', { method: 'POST' });
-831|             const data = await response.json();
-832|             if (data.success) {
-833|                 alert(`✅ Journal vidé (${data.deleted} entrées supprimées)`);
-834|                 loadModerationLogs();
-835|             } else {
-836|                 alert('❌ Erreur');
-837|             }
-838|         } catch (err) {
-839|             console.error(err);
-840|             alert('❌ Erreur réseau');
-841|         }
-842|     }
-843| }
-844| 
-845| async function cleanReportsManually() {
-846|     if (typeof MGModal !== 'undefined') {
-847|         // Pour la saisie du nombre de jours, on doit encore utiliser prompt
-848|         // Car MGModal n'a pas d'input pour l'instant
-849|         const days = prompt('📋 Supprimer les signalements plus vieux que combien de jours ? (défaut: 60)', '60');
-850|         if (!days) return;
-851| 
-852|         MGModal.show({
-853|             title: '📋 Nettoyer signalements',
-854|             message: `Supprimer les signalements plus vieux que ${days} jours ?`,
-855|             onConfirm: async () => {
-856|                 try {
-857|                     const response = await fetch('/api/admin/clean-reports', {
-858|                         method: 'POST',
-859|                         headers: { 'Content-Type': 'application/json' },
-860|                         body: JSON.stringify({ days: parseInt(days) })
-861|                     });
-862|                     const data = await response.json();
-863|                     if (data.success) {
-864|                         MGModal.show({
-865|                             title: '✅ Nettoyé',
-866|                             message: `${data.deleted} signalements supprimés.`,
-867|                             onConfirm: () => {
-868|                                 if (document.getElementById('tab-reports').classList.contains('active')) {
-869|                                     loadReports();
-870|                                 }
-871|                             }
-872|                         });
-873|                     } else {
-874|                         MGModal.show({
-875|                             title: '❌ Erreur',
-876|                             message: 'Erreur lors du nettoyage.',
-877|                             onConfirm: () => { }
-878|                         });
-879|                     }
-880|                 } catch (err) {
-881|                     console.error(err);
-882|                     MGModal.show({
-883|                         title: '❌ Erreur réseau',
-884|                         message: 'Impossible de contacter le serveur.',
-885|                         onConfirm: () => { }
-886|                     });
-887|                 }
-888|             },
-889|             onCancel: () => { }
-890|         });
-891|     } else {
-892|         // Fallback
-893|         const days = prompt('📋 Supprimer les signalements plus vieux que combien de jours ? (défaut: 60)', '60');
-894|         if (!days) return;
-895|         if (!confirm(`Supprimer les signalements plus vieux que ${days} jours ?`)) return;
-896|         try {
-897|             const response = await fetch('/api/admin/clean-reports', {
-898|                 method: 'POST',
-899|                 headers: { 'Content-Type': 'application/json' },
-900|                 body: JSON.stringify({ days: parseInt(days) })
-901|             });
-902|             const data = await response.json();
-903|             if (data.success) {
-904|                 alert(`✅ ${data.deleted} signalements supprimés`);
-905|                 if (document.getElementById('tab-reports').classList.contains('active')) {
-906|                     loadReports();
-907|                 }
-908|             } else {
-909|                 alert('❌ Erreur');
-910|             }
-911|         } catch (err) {
-912|             console.error(err);
-913|             alert('❌ Erreur réseau');
-914|         }
-915|     }
-916| }
-917| 
-918| // ========== HORLOGE EN TEMPS RÉEL ==========
-919| function updateClock() {
-920|     const now = new Date();
-921|     const options = {
-922|         weekday: 'long',
-923|         year: 'numeric',
-924|         month: 'long',
-925|         day: 'numeric',
-926|         hour: '2-digit',
-927|         minute: '2-digit',
-928|         second: '2-digit',
-929|         hour12: false
-930|     };
-931|     const formatted = now.toLocaleDateString('fr-FR', options);
-932|     const clockSpan = document.getElementById('currentDateTime');
-933|     if (clockSpan) clockSpan.textContent = formatted;
-934| }
-935| 
-936| // Mettre à jour l'horloge toutes les secondes
-937| setInterval(updateClock, 1000);
-938| updateClock(); // Appel immédiat
-939| 
-940| // Gestion des onglets
-941| function initTabs() {
-942|     const tabs = document.querySelectorAll('.tab-btn');
-943|     tabs.forEach(btn => {
-944|         btn.addEventListener('click', () => {
-945|             tabs.forEach(b => b.classList.remove('active'));
-946|             btn.classList.add('active');
-947| 
-948|             document.querySelectorAll('.tab-content').forEach(content => {
-949|                 content.classList.remove('active');
-950|             });
-951| 
-952|             const tabId = `tab-${btn.dataset.tab}`;
-953|             document.getElementById(tabId).classList.add('active');
-954| 
-955|             if (btn.dataset.tab === 'reports') loadReports();
-956|             if (btn.dataset.tab === 'logs') loadModerationLogs();
-957|         });
-958|     });
-959| }
-960| 
-961| // ========== 7. UTILITAIRES ==========
-962| function escapeHtml(str) {
-963|     if (!str) return '';
-964|     return str.replace(/[&<>]/g, function (m) {
-965|         if (m === '&') return '&amp;';
-966|         if (m === '<') return '&lt;';
-967|         if (m === '>') return '&gt;';
-968|         return m;
-969|     });
-970| }
-971| 
-972| // ========== 8. DÉCONNEXION ==========
-973| async function logout() {
-974|     if (typeof MGModal !== 'undefined') {
-975|         MGModal.show({
-976|             title: '🔓 Déconnexion',
-977|             message: 'Se déconnecter du panneau admin ?',
-978|             onConfirm: async () => {
-979|                 try {
-980|                     await fetch('/api/admin/logout', { method: 'POST' });
-981|                     window.location.href = '/admin-login.html';
-982|                 } catch (err) {
-983|                     console.error(err);
-984|                     MGModal.show({
-985|                         title: '❌ Erreur',
-986|                         message: 'Erreur lors de la déconnexion.',
-987|                         onConfirm: () => { }
-988|                     });
-989|                 }
-990|             },
-991|             onCancel: () => { }
-992|         });
-993|     } else {
-994|         if (!confirm('Se déconnecter ?')) return;
-995|         try {
-996|             await fetch('/api/admin/logout', { method: 'POST' });
-997|             window.location.href = '/admin-login.html';
-998|         } catch (err) {
-999|             console.error(err);
-1000|             alert('Erreur lors de la déconnexion');
-1001|         }
-1002|     }
-1003| }
-1004| 
-1005| // ========== 9. INITIALISATION ==========
-1006| (async function () {
-1007|     await loadUsers();
-1008| 
-1009|     if (searchBtn) searchBtn.addEventListener('click', applyFilters);
-1010|     if (searchInput) searchInput.addEventListener('keyup', (e) => {
-1011|         if (e.key === 'Enter') applyFilters();
-1012|     });
-1013|     if (roleFilter) roleFilter.addEventListener('change', applyFilters);
-1014|     if (statusFilter) statusFilter.addEventListener('change', applyFilters);
-1015| 
-1016|     if (maintenanceBtn) maintenanceBtn.addEventListener('click', toggleMaintenance);
-1017|     if (backupDbBtn) backupDbBtn.addEventListener('click', backupDatabase);
-1018|     if (cleanupBtn) cleanupBtn.addEventListener('click', manualCleanup);
-1019| 
-1020|     // Boutons de nettoyage manuel
-1021|     const clearLogsBtn = document.getElementById('clearLogsBtn');
-1022|     const cleanReportsBtn = document.getElementById('cleanReportsBtn');
-1023|     if (clearLogsBtn) clearLogsBtn.addEventListener('click', clearLogsManually);
-1024|     if (cleanReportsBtn) cleanReportsBtn.addEventListener('click', cleanReportsManually);
-1025| 
-1026|     // Initialiser les onglets
-1027|     initTabs();
-1028| 
-1029|     // Démarrer l'horloge
-1030|     updateClock();
-1031| 
-1032| })();
+758|                     if (response.ok) {
+759|                         MGModal.show({
+760|                             title: '✅ Ignoré',
+761|                             message: 'Signalement ignoré.',
+762|                             onConfirm: () => loadReports()
+763|                         });
+764|                     } else {
+765|                         MGModal.show({
+766|                             title: '❌ Erreur',
+767|                             message: 'Erreur lors de l\'ignorance.',
+768|                             onConfirm: () => { }
+769|                         });
+770|                     }
+771|                 } catch (err) {
+772|                     console.error(err);
+773|                     MGModal.show({
+774|                         title: '❌ Erreur réseau',
+775|                         message: 'Impossible de contacter le serveur.',
+776|                         onConfirm: () => { }
+777|                     });
+778|                 }
+779|             },
+780|             onCancel: () => { }
+781|         });
+782|     } else {
+783|         // Fallback
+784|         if (!confirm('Ignorer ce signalement ?')) return;
+785|         try {
+786|             const response = await fetch('/api/admin/ignore-report', {
+787|                 method: 'POST',
+788|                 headers: { 'Content-Type': 'application/json' },
+789|                 body: JSON.stringify({ reportId })
+790|             });
+791|             if (response.ok) {
+792|                 alert('✅ Signalement ignoré');
+793|                 loadReports();
+794|             } else {
+795|                 alert('❌ Erreur');
+796|             }
+797|         } catch (err) {
+798|             console.error(err);
+799|             alert('❌ Erreur réseau');
+800|         }
+801|     }
+802| }
+803| 
+804| // ========== SECTION JOURNAL ==========
+805| async function loadModerationLogs() {
+806|     const logsDiv = document.getElementById('logsList');
+807|     if (!logsDiv) return;
+808| 
+809|     try {
+810|         const response = await fetch('/api/admin/moderation-logs');
+811|         const logs = await response.json();
+812| 
+813|         if (logs.length === 0) {
+814|             logsDiv.innerHTML = '<div class="loading">📭 Aucune action enregistrée</div>';
+815|             return;
+816|         }
+817| 
+818|         let html = '<table class="admin-table"><thead><tr><th>Date</th><th>Admin</th><th>Action</th><th>Cible</th><th>Détails</th></tr></thead><tbody>';
+819| 
+820|         logs.forEach(log => {
+821|             let actionIcon = '';
+822|             if (log.action_type === 'warn') actionIcon = '⚠️';
+823|             else if (log.action_type === 'ban') actionIcon = '🚫';
+824|             else if (log.action_type === 'temp_ban') actionIcon = '⏱️';
+825|             else if (log.action_type === 'unban') actionIcon = '🔓';
+826|             else if (log.action_type === 'set_modo') actionIcon = '👮';
+827|             else if (log.action_type === 'set_admin') actionIcon = '👑';
+828|             else actionIcon = '📝';
+829| 
+830|             let details = log.reason || '';
+831|             if (log.duration_minutes) details += ` (${log.duration_minutes} min)`;
+832| 
+833|             html += `
+834|                 <tr>
+835|                     <td>${new Date(log.created_at).toLocaleString()}</td>
+836|                     <td>${escapeHtml(log.admin_pseudo)}</td>
+837|                     <td>${actionIcon} ${escapeHtml(log.action_type)}</td>
+838|                     <td><strong>${escapeHtml(log.target_pseudo)}</strong></td>
+839|                     <td>${escapeHtml(details)}</td>
+840|                 </tr>
+841|             `;
+842|         });
+843| 
+844|         html += '</tbody></table>';
+845|         logsDiv.innerHTML = html;
+846|     } catch (err) {
+847|         console.error(err);
+848|         logsDiv.innerHTML = '<div class="loading">❌ Erreur chargement</div>';
+849|     }
+850| 
+851| }
+852| 
+853| // ========== VIDAGE MANUEL ==========
+854| 
+855| async function clearLogsManually() {
+856|     if (typeof MGModal !== 'undefined') {
+857|         MGModal.show({
+858|             title: '🗑️ Vider le journal',
+859|             message: 'Vider TOUT le journal de modération ?\n\nAction irréversible.',
+860|             onConfirm: async () => {
+861|                 try {
+862|                     const response = await fetch('/api/admin/clear-logs', { method: 'POST' });
+863|                     const data = await response.json();
+864|                     if (data.success) {
+865|                         MGModal.show({
+866|                             title: '✅ Journal vidé',
+867|                             message: `${data.deleted} entrées supprimées.`,
+868|                             onConfirm: () => loadModerationLogs()
+869|                         });
+870|                     } else {
+871|                         MGModal.show({
+872|                             title: '❌ Erreur',
+873|                             message: 'Erreur lors du vidage.',
+874|                             onConfirm: () => { }
+875|                         });
+876|                     }
+877|                 } catch (err) {
+878|                     console.error(err);
+879|                     MGModal.show({
+880|                         title: '❌ Erreur réseau',
+881|                         message: 'Impossible de contacter le serveur.',
+882|                         onConfirm: () => { }
+883|                     });
+884|                 }
+885|             },
+886|             onCancel: () => { }
+887|         });
+888|     } else {
+889|         // Fallback
+890|         if (!confirm('🗑️ Vider TOUT le journal de modération ? Action irréversible.')) return;
+891|         try {
+892|             const response = await fetch('/api/admin/clear-logs', { method: 'POST' });
+893|             const data = await response.json();
+894|             if (data.success) {
+895|                 alert(`✅ Journal vidé (${data.deleted} entrées supprimées)`);
+896|                 loadModerationLogs();
+897|             } else {
+898|                 alert('❌ Erreur');
+899|             }
+900|         } catch (err) {
+901|             console.error(err);
+902|             alert('❌ Erreur réseau');
+903|         }
+904|     }
+905| }
+906| 
+907| async function cleanReportsManually() {
+908|     if (typeof MGModal !== 'undefined') {
+909|         // Pour la saisie du nombre de jours, on doit encore utiliser prompt
+910|         // Car MGModal n'a pas d'input pour l'instant
+911|         const days = prompt('📋 Supprimer les signalements plus vieux que combien de jours ? (défaut: 60)', '60');
+912|         if (!days) return;
+913| 
+914|         MGModal.show({
+915|             title: '📋 Nettoyer signalements',
+916|             message: `Supprimer les signalements plus vieux que ${days} jours ?`,
+917|             onConfirm: async () => {
+918|                 try {
+919|                     const response = await fetch('/api/admin/clean-reports', {
+920|                         method: 'POST',
+921|                         headers: { 'Content-Type': 'application/json' },
+922|                         body: JSON.stringify({ days: parseInt(days) })
+923|                     });
+924|                     const data = await response.json();
+925|                     if (data.success) {
+926|                         MGModal.show({
+927|                             title: '✅ Nettoyé',
+928|                             message: `${data.deleted} signalements supprimés.`,
+929|                             onConfirm: () => {
+930|                                 if (document.getElementById('tab-reports').classList.contains('active')) {
+931|                                     loadReports();
+932|                                 }
+933|                             }
+934|                         });
+935|                     } else {
+936|                         MGModal.show({
+937|                             title: '❌ Erreur',
+938|                             message: 'Erreur lors du nettoyage.',
+939|                             onConfirm: () => { }
+940|                         });
+941|                     }
+942|                 } catch (err) {
+943|                     console.error(err);
+944|                     MGModal.show({
+945|                         title: '❌ Erreur réseau',
+946|                         message: 'Impossible de contacter le serveur.',
+947|                         onConfirm: () => { }
+948|                     });
+949|                 }
+950|             },
+951|             onCancel: () => { }
+952|         });
+953|     } else {
+954|         // Fallback
+955|         const days = prompt('📋 Supprimer les signalements plus vieux que combien de jours ? (défaut: 60)', '60');
+956|         if (!days) return;
+957|         if (!confirm(`Supprimer les signalements plus vieux que ${days} jours ?`)) return;
+958|         try {
+959|             const response = await fetch('/api/admin/clean-reports', {
+960|                 method: 'POST',
+961|                 headers: { 'Content-Type': 'application/json' },
+962|                 body: JSON.stringify({ days: parseInt(days) })
+963|             });
+964|             const data = await response.json();
+965|             if (data.success) {
+966|                 alert(`✅ ${data.deleted} signalements supprimés`);
+967|                 if (document.getElementById('tab-reports').classList.contains('active')) {
+968|                     loadReports();
+969|                 }
+970|             } else {
+971|                 alert('❌ Erreur');
+972|             }
+973|         } catch (err) {
+974|             console.error(err);
+975|             alert('❌ Erreur réseau');
+976|         }
+977|     }
+978| }
+979| 
+980| // ========== HORLOGE EN TEMPS RÉEL ==========
+981| function updateClock() {
+982|     const now = new Date();
+983|     const options = {
+984|         weekday: 'long',
+985|         year: 'numeric',
+986|         month: 'long',
+987|         day: 'numeric',
+988|         hour: '2-digit',
+989|         minute: '2-digit',
+990|         second: '2-digit',
+991|         hour12: false
+992|     };
+993|     const formatted = now.toLocaleDateString('fr-FR', options);
+994|     const clockSpan = document.getElementById('currentDateTime');
+995|     if (clockSpan) clockSpan.textContent = formatted;
+996| }
+997| 
+998| // Mettre à jour l'horloge toutes les secondes
+999| setInterval(updateClock, 1000);
+1000| updateClock(); // Appel immédiat
+1001| 
+1002| // Gestion des onglets
+1003| function initTabs() {
+1004|     const tabs = document.querySelectorAll('.tab-btn');
+1005|     tabs.forEach(btn => {
+1006|         btn.addEventListener('click', () => {
+1007|             tabs.forEach(b => b.classList.remove('active'));
+1008|             btn.classList.add('active');
+1009| 
+1010|             document.querySelectorAll('.tab-content').forEach(content => {
+1011|                 content.classList.remove('active');
+1012|             });
+1013| 
+1014|             const tabId = `tab-${btn.dataset.tab}`;
+1015|             document.getElementById(tabId).classList.add('active');
+1016| 
+1017|             if (btn.dataset.tab === 'reports') loadReports();
+1018|             if (btn.dataset.tab === 'logs') loadModerationLogs();
+1019|         });
+1020|     });
+1021| }
+1022| 
+1023| // ========== 7. UTILITAIRES ==========
+1024| function escapeHtml(str) {
+1025|     if (!str) return '';
+1026|     return str.replace(/[&<>]/g, function (m) {
+1027|         if (m === '&') return '&amp;';
+1028|         if (m === '<') return '&lt;';
+1029|         if (m === '>') return '&gt;';
+1030|         return m;
+1031|     });
+1032| }
 1033| 
-1034| 
-1035| 
+1034| // ========== 8. DÉCONNEXION ==========
+1035| async function logout() {
+1036|     if (typeof MGModal !== 'undefined') {
+1037|         MGModal.show({
+1038|             title: '🔓 Déconnexion',
+1039|             message: 'Se déconnecter du panneau admin ?',
+1040|             onConfirm: async () => {
+1041|                 try {
+1042|                     await fetch('/api/admin/logout', { method: 'POST' });
+1043|                     window.location.href = '/admin-login.html';
+1044|                 } catch (err) {
+1045|                     console.error(err);
+1046|                     MGModal.show({
+1047|                         title: '❌ Erreur',
+1048|                         message: 'Erreur lors de la déconnexion.',
+1049|                         onConfirm: () => { }
+1050|                     });
+1051|                 }
+1052|             },
+1053|             onCancel: () => { }
+1054|         });
+1055|     } else {
+1056|         if (!confirm('Se déconnecter ?')) return;
+1057|         try {
+1058|             await fetch('/api/admin/logout', { method: 'POST' });
+1059|             window.location.href = '/admin-login.html';
+1060|         } catch (err) {
+1061|             console.error(err);
+1062|             alert('Erreur lors de la déconnexion');
+1063|         }
+1064|     }
+1065| }
+1066| 
+1067| // ========== 9. INITIALISATION ==========
+1068| (async function () {
+1069|     await loadUsers();
+1070| 
+1071|     if (searchBtn) searchBtn.addEventListener('click', applyFilters);
+1072|     if (searchInput) searchInput.addEventListener('keyup', (e) => {
+1073|         if (e.key === 'Enter') applyFilters();
+1074|     });
+1075|     if (roleFilter) roleFilter.addEventListener('change', applyFilters);
+1076|     if (statusFilter) statusFilter.addEventListener('change', applyFilters);
+1077| 
+1078|     if (maintenanceBtn) maintenanceBtn.addEventListener('click', toggleMaintenance);
+1079|     if (backupDbBtn) backupDbBtn.addEventListener('click', backupDatabase);
+1080|     if (cleanupBtn) cleanupBtn.addEventListener('click', manualCleanup);
+1081| 
+1082|     // Boutons de nettoyage manuel
+1083|     const clearLogsBtn = document.getElementById('clearLogsBtn');
+1084|     const cleanReportsBtn = document.getElementById('cleanReportsBtn');
+1085|     if (clearLogsBtn) clearLogsBtn.addEventListener('click', clearLogsManually);
+1086|     if (cleanReportsBtn) cleanReportsBtn.addEventListener('click', cleanReportsManually);
+1087| 
+1088|     // Initialiser les onglets
+1089|     initTabs();
+1090| 
+1091|     // Démarrer l'horloge
+1092|     updateClock();
+1093| 
+1094| })();
+1095| 
+1096| 
+1097| 
 
 # FILE: /var/www/meetgay/public/js/test-socket.js
 
@@ -5612,903 +5674,965 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 136|         if (!u.is_banned) {
 137|             html += `<button class="action-btn btn-warn" onclick="warnUser('${escapeHtml(u.pseudo)}')">⚠️ Warn</button>`;
 138|             html += `<button class="action-btn btn-ban" onclick="banUser('${escapeHtml(u.pseudo)}')">🚫 Ban</button>`;
-139|         } else {
-140|             html += `<button class="action-btn btn-unban" onclick="unbanUser('${escapeHtml(u.pseudo)}')">🔓 Unban</button>`;
-141|         }
-142| 
-143|         if (u.role !== 'admin' && u.role !== 'modo') {
-144|             html += `<button class="action-btn btn-modo" onclick="setModo('${escapeHtml(u.pseudo)}')">👮 Modo</button>`;
-145|         }
-146| 
-147|         if (u.role === 'modo') {
-148|             html += `<button class="action-btn btn-admin" onclick="setAdmin('${escapeHtml(u.pseudo)}')">👑 Admin</button>`;
-149|         }
-150| 
-151|         html += `</td></tr>`;
-152|     });
-153| 
-154|     html += `</tbody></table>`;
-155|     usersListDiv.innerHTML = html;
-156| }
-157| 
-158| // ========== 4. FILTRES ET RECHERCHE ==========
-159| function applyFilters() {
-160|     const searchTerm = searchInput.value.toLowerCase();
-161|     const role = roleFilter.value;
-162|     const status = statusFilter.value;
-163| 
-164|     filteredUsers = allUsers.filter(u => {
-165|         if (searchTerm && !u.pseudo.toLowerCase().includes(searchTerm)) return false;
-166| 
-167|         if (role !== 'all') {
-168|             if (role === 'admin' && u.role !== 'admin') return false;
-169|             if (role === 'modo' && u.role !== 'modo') return false;
-170|             if (role === 'user' && u.role !== 'user') return false;
-171|             if (role === 'guest' && (u.role && u.role !== 'guest')) return false;
-172|         }
-173| 
-174|         if (status !== 'all') {
-175|             if (status === 'banned' && !u.is_banned) return false;
-176|             if (status === 'warned' && (!u.warnings || u.warnings < 3)) return false;
-177|             if (status === 'active' && (u.is_banned || (u.warnings || 0) >= 3)) return false;
-178|         }
-179| 
-180|         return true;
-181|     });
-182| 
-183|     renderUsersTable();
-184| }
-185| 
-186| // ========== 5. ACTIONS ADMIN ==========
-187| async function warnUser(pseudo) {
-188|     if (typeof MGModal !== 'undefined') {
-189|         MGModal.show({
-190|             title: '⚠️ Confirmation',
-191|             message: `Envoyer un avertissement à ${pseudo} ?`,
-192|             onConfirm: async () => {
-193|                 try {
-194|                     const response = await fetch('/api/admin/warn', {
-195|                         method: 'POST',
-196|                         headers: { 'Content-Type': 'application/json' },
-197|                         body: JSON.stringify({ pseudo })
-198|                     });
-199| 
-200|                     if (response.ok) {
-201|                         // Mise à jour IMMÉDIATE de l'utilisateur dans allUsers et filteredUsers
-202|                         const userIndex = allUsers.findIndex(u => u.pseudo === pseudo);
-203|                         if (userIndex !== -1) {
-204|                             allUsers[userIndex].warnings = (allUsers[userIndex].warnings || 0) + 1;
-205|                             // Mettre à jour filteredUsers aussi
-206|                             const filteredIndex = filteredUsers.findIndex(u => u.pseudo === pseudo);
-207|                             if (filteredIndex !== -1) {
-208|                                 filteredUsers[filteredIndex].warnings = allUsers[userIndex].warnings;
-209|                             }
-210|                         }
-211| 
-212|                         // Recharger UNIQUEMENT la ligne du tableau modifiée (pas tout le tableau)
-213|                         updateUserRow(pseudo);
-214|                         updateStats();  // Met à jour les compteurs
-215| 
-216|                         MGPopup.show({
-217|                             title: '✅ Succès',
-218|                             message: `${pseudo} a reçu un avertissement.`,
-219|                             onConfirm: () => { }
-220|                         });
-221|                     }
-222|                 } catch (err) {
-223|                     console.error(err);
-224|                     MGModal.show({
-225|                         title: '❌ Erreur réseau',
-226|                         message: 'Impossible de contacter le serveur.',
-227|                         onConfirm: () => { }
-228|                     });
-229|                 }
-230|             },
-231|             onCancel: () => { }
-232|         });
-233|     } else {
-234|         // Fallback
-235|         if (!confirm(`⚠️ Envoyer un avertissement à ${pseudo} ?`)) return;
-236|         try {
-237|             const response = await fetch('/api/admin/warn', {
-238|                 method: 'POST',
-239|                 headers: { 'Content-Type': 'application/json' },
-240|                 body: JSON.stringify({ pseudo })
-241|             });
-242|             if (response.ok) {
-243|                 alert(`✅ ${pseudo} a reçu un avertissement`);
-244|                 await loadUsers();
-245|             } else {
-246|                 alert('❌ Erreur');
-247|             }
-248|         } catch (err) {
-249|             console.error(err);
-250|             alert('❌ Erreur réseau');
-251|         }
-252|     }
-253| }
-254| 
-255| async function banUser(pseudo) {
-256|     if (typeof MGModal !== 'undefined') {
-257|         // Demander la raison avec un popup personnalisé
-258|         // Pour l'instant, on utilise prompt car MGModal n'a pas d'input
-259|         // Optionnel : améliorer MGModal pour accepter du texte
-260|         const reason = prompt(`🚫 Raison du bannissement pour ${pseudo} :`);
-261|         if (!reason) return;
-262| 
-263|         MGModal.show({
-264|             title: '🚫 Confirmation de bannissement',
-265|             message: `Bannir définitivement ${pseudo} ?\nRaison : ${reason}`,
-266|             onConfirm: async () => {
-267|                 try {
-268|                     const response = await fetch('/api/admin/ban', {
-269|                         method: 'POST',
-270|                         headers: { 'Content-Type': 'application/json' },
-271|                         body: JSON.stringify({ pseudo, reason })
-272|                     });
-273| 
-274|                     if (response.ok) {
-275|                         MGModal.show({
-276|                             title: '✅ Banni',
-277|                             message: `${pseudo} a été banni.`,
-278|                             onConfirm: () => loadUsers()
-279|                         });
-280|                     } else {
-281|                         MGModal.show({
-282|                             title: '❌ Erreur',
-283|                             message: 'Erreur lors du bannissement.',
-284|                             onConfirm: () => { }
-285|                         });
-286|                     }
-287|                 } catch (err) {
-288|                     console.error(err);
-289|                     MGModal.show({
-290|                         title: '❌ Erreur réseau',
-291|                         message: 'Impossible de contacter le serveur.',
-292|                         onConfirm: () => { }
-293|                     });
-294|                 }
-295|             },
-296|             onCancel: () => { }
-297|         });
-298|     } else {
-299|         // Fallback
-300|         const reason = prompt(`🚫 Raison du bannissement pour ${pseudo} :`);
-301|         if (!reason) return;
-302|         try {
-303|             const response = await fetch('/api/admin/ban', {
-304|                 method: 'POST',
-305|                 headers: { 'Content-Type': 'application/json' },
-306|                 body: JSON.stringify({ pseudo, reason })
-307|             });
-308|             if (response.ok) {
-309|                 alert(`✅ ${pseudo} a été banni`);
-310|                 await loadUsers();
-311|             } else {
-312|                 alert('❌ Erreur');
-313|             }
-314|         } catch (err) {
-315|             console.error(err);
-316|             alert('❌ Erreur réseau');
-317|         }
-318|     }
-319| }
-320| 
-321| async function unbanUser(pseudo) {
-322|     if (typeof MGModal !== 'undefined') {
-323|         MGModal.show({
-324|             title: '🔓 Confirmation',
-325|             message: `Réactiver ${pseudo} ?`,
-326|             onConfirm: async () => {
-327|                 try {
-328|                     const response = await fetch('/api/admin/unban', {
-329|                         method: 'POST',
-330|                         headers: { 'Content-Type': 'application/json' },
-331|                         body: JSON.stringify({ pseudo })
-332|                     });
-333| 
-334|                     if (response.ok) {
-335|                         MGModal.show({
-336|                             title: '✅ Réactivé',
-337|                             message: `${pseudo} a été réactivé.`,
-338|                             onConfirm: () => loadUsers()
-339|                         });
-340|                     } else {
-341|                         MGModal.show({
-342|                             title: '❌ Erreur',
-343|                             message: 'Erreur lors de la réactivation.',
-344|                             onConfirm: () => { }
-345|                         });
-346|                     }
-347|                 } catch (err) {
-348|                     console.error(err);
-349|                     MGModal.show({
-350|                         title: '❌ Erreur réseau',
-351|                         message: 'Impossible de contacter le serveur.',
-352|                         onConfirm: () => { }
-353|                     });
-354|                 }
-355|             },
-356|             onCancel: () => { }
-357|         });
-358|     } else {
-359|         // Fallback
-360|         if (!confirm(`🔓 Réactiver ${pseudo} ?`)) return;
-361|         try {
-362|             const response = await fetch('/api/admin/unban', {
-363|                 method: 'POST',
-364|                 headers: { 'Content-Type': 'application/json' },
-365|                 body: JSON.stringify({ pseudo })
-366|             });
-367|             if (response.ok) {
-368|                 alert(`✅ ${pseudo} a été réactivé`);
-369|                 await loadUsers();
-370|             } else {
-371|                 alert('❌ Erreur');
-372|             }
-373|         } catch (err) {
-374|             console.error(err);
-375|             alert('❌ Erreur réseau');
-376|         }
-377|     }
-378| }
-379| 
-380| async function setModo(pseudo) {
-381|     if (typeof MGModal !== 'undefined') {
-382|         MGModal.show({
-383|             title: '👮 Confirmation',
-384|             message: `Donner le rôle modérateur à ${pseudo} ?`,
-385|             onConfirm: async () => {
-386|                 try {
-387|                     const response = await fetch('/api/admin/set-modo', {
-388|                         method: 'POST',
-389|                         headers: { 'Content-Type': 'application/json' },
-390|                         body: JSON.stringify({ pseudo })
-391|                     });
-392| 
-393|                     if (response.ok) {
-394|                         MGModal.show({
-395|                             title: '✅ Modérateur',
-396|                             message: `${pseudo} est maintenant modérateur.`,
-397|                             onConfirm: () => loadUsers()
-398|                         });
-399|                     } else {
-400|                         MGModal.show({
-401|                             title: '❌ Erreur',
-402|                             message: 'Erreur lors de la promotion.',
-403|                             onConfirm: () => { }
-404|                         });
-405|                     }
-406|                 } catch (err) {
-407|                     console.error(err);
-408|                     MGModal.show({
-409|                         title: '❌ Erreur réseau',
-410|                         message: 'Impossible de contacter le serveur.',
-411|                         onConfirm: () => { }
-412|                     });
-413|                 }
-414|             },
-415|             onCancel: () => { }
-416|         });
-417|     } else {
-418|         // Fallback
-419|         if (!confirm(`👮 Donner le rôle modérateur à ${pseudo} ?`)) return;
-420|         try {
-421|             const response = await fetch('/api/admin/set-modo', {
-422|                 method: 'POST',
-423|                 headers: { 'Content-Type': 'application/json' },
-424|                 body: JSON.stringify({ pseudo })
-425|             });
-426|             if (response.ok) {
-427|                 alert(`✅ ${pseudo} est maintenant modérateur`);
-428|                 await loadUsers();
-429|             } else {
-430|                 alert('❌ Erreur');
-431|             }
-432|         } catch (err) {
-433|             console.error(err);
-434|             alert('❌ Erreur réseau');
-435|         }
-436|     }
-437| }
-438| 
-439| async function setAdmin(pseudo) {
-440|     if (typeof MGModal !== 'undefined') {
-441|         MGModal.show({
-442|             title: '👑 Confirmation (IRRÉVERSIBLE)',
-443|             message: `⚠️⚠️ Donner le rôle ADMIN à ${pseudo} ?\n\nCette action est IRRÉVERSIBLE ! ⚠️⚠️`,
-444|             onConfirm: async () => {
-445|                 try {
-446|                     const response = await fetch('/api/admin/set-admin', {
-447|                         method: 'POST',
-448|                         headers: { 'Content-Type': 'application/json' },
-449|                         body: JSON.stringify({ pseudo })
-450|                     });
-451| 
-452|                     if (response.ok) {
-453|                         MGModal.show({
-454|                             title: '✅ Administrateur',
-455|                             message: `${pseudo} est maintenant administrateur.`,
-456|                             onConfirm: () => loadUsers()
-457|                         });
-458|                     } else {
-459|                         MGModal.show({
-460|                             title: '❌ Erreur',
-461|                             message: 'Erreur lors de la promotion.',
-462|                             onConfirm: () => { }
-463|                         });
-464|                     }
-465|                 } catch (err) {
-466|                     console.error(err);
-467|                     MGModal.show({
-468|                         title: '❌ Erreur réseau',
-469|                         message: 'Impossible de contacter le serveur.',
-470|                         onConfirm: () => { }
-471|                     });
-472|                 }
-473|             },
-474|             onCancel: () => { }
-475|         });
-476|     } else {
-477|         // Fallback
-478|         if (!confirm(`⚠️⚠️ Donner le rôle ADMIN à ${pseudo} ? (action irréversible) ⚠️⚠️`)) return;
-479|         try {
-480|             const response = await fetch('/api/admin/set-admin', {
-481|                 method: 'POST',
-482|                 headers: { 'Content-Type': 'application/json' },
-483|                 body: JSON.stringify({ pseudo })
-484|             });
-485|             if (response.ok) {
-486|                 alert(`✅ ${pseudo} est maintenant administrateur`);
-487|                 await loadUsers();
-488|             } else {
-489|                 alert('❌ Erreur');
-490|             }
-491|         } catch (err) {
-492|             console.error(err);
-493|             alert('❌ Erreur réseau');
-494|         }
-495|     }
-496| }
-497| 
-498| // ========== 6. ACTIONS RAPIDES ==========
-499| async function toggleMaintenance() {
-500|     try {
-501|         const getRes = await fetch('/api/admin/maintenance');
-502|         const { enabled } = await getRes.json();
-503|         const newState = !enabled;
-504| 
-505|         if (typeof MGModal !== 'undefined') {
-506|             MGModal.show({
-507|                 title: newState ? '🚧 Activer maintenance' : '✅ Désactiver maintenance',
-508|                 message: newState
-509|                     ? 'ACTIVER le mode maintenance ?\nLes utilisateurs non-admin verront une page de maintenance.'
-510|                     : 'DÉSACTIVER le mode maintenance ?',
-511|                 onConfirm: async () => {
-512|                     try {
-513|                         const res = await fetch('/api/admin/maintenance', {
-514|                             method: 'POST',
-515|                             headers: { 'Content-Type': 'application/json' },
-516|                             body: JSON.stringify({ enabled: newState })
-517|                         });
-518|                         if (res.ok) {
-519|                             MGModal.show({
-520|                                 title: newState ? '🚧 Maintenance activée' : '✅ Maintenance désactivée',
-521|                                 message: newState ? 'Le site est en maintenance.' : 'Le site est à nouveau accessible.',
-522|                                 onConfirm: () => { }
-523|                             });
-524|                         } else {
-525|                             MGModal.show({
-526|                                 title: '❌ Erreur',
-527|                                 message: 'Erreur lors du changement de mode.',
-528|                                 onConfirm: () => { }
-529|                             });
-530|                         }
-531|                     } catch (err) {
-532|                         console.error(err);
-533|                         MGModal.show({
-534|                             title: '❌ Erreur réseau',
-535|                             message: 'Impossible de contacter le serveur.',
-536|                             onConfirm: () => { }
-537|                         });
-538|                     }
-539|                 },
-540|                 onCancel: () => { }
-541|             });
-542|         } else {
-543|             // Fallback
-544|             const confirmMsg = newState
-545|                 ? '🚧 ACTIVER le mode maintenance ?\nLes utilisateurs non-admin verront une page de maintenance.'
-546|                 : '✅ DÉSACTIVER le mode maintenance ?';
-547|             if (!confirm(confirmMsg)) return;
-548|             const res = await fetch('/api/admin/maintenance', {
-549|                 method: 'POST',
-550|                 headers: { 'Content-Type': 'application/json' },
-551|                 body: JSON.stringify({ enabled: newState })
-552|             });
-553|             if (res.ok) {
-554|                 alert(newState ? '🚧 Mode MAINTENANCE activé' : '✅ Mode MAINTENANCE désactivé');
-555|             } else {
-556|                 alert('❌ Erreur lors du changement de mode');
-557|             }
-558|         }
-559|     } catch (err) {
-560|         console.error('Erreur toggleMaintenance:', err);
-561|         alert('❌ Erreur réseau');
-562|     }
-563| }
-564| 
-565| async function backupDatabase() {
-566|     if (typeof MGModal !== 'undefined') {
-567|         MGModal.show({
-568|             title: '🗄️ Sauvegarde',
-569|             message: 'Sauvegarder la base de données ?',
-570|             onConfirm: async () => {
-571|                 try {
-572|                     const response = await fetch('/api/backup', {
-573|                         method: 'POST',
-574|                         headers: { 'Content-Type': 'application/json' },
-575|                         body: JSON.stringify({ action: 'database' })
-576|                     });
-577|                     const data = await response.json();
-578|                     if (data.success) {
-579|                         MGModal.show({
-580|                             title: '✅ Succès',
-581|                             message: 'Sauvegarde BDD effectuée.',
-582|                             onConfirm: () => { }
-583|                         });
-584|                     } else {
-585|                         MGModal.show({
-586|                             title: '❌ Erreur',
-587|                             message: data.error || 'Erreur inconnue',
-588|                             onConfirm: () => { }
-589|                         });
-590|                     }
-591|                 } catch (err) {
-592|                     console.error(err);
-593|                     MGModal.show({
-594|                         title: '❌ Erreur réseau',
-595|                         message: 'Impossible de contacter le serveur.',
-596|                         onConfirm: () => { }
-597|                     });
-598|                 }
-599|             },
-600|             onCancel: () => { }
-601|         });
-602|     } else {
-603|         // Fallback
-604|         if (!confirm('🗄️ Sauvegarder la base de données ?')) return;
-605|         try {
-606|             const response = await fetch('/api/backup', {
-607|                 method: 'POST',
-608|                 headers: { 'Content-Type': 'application/json' },
-609|                 body: JSON.stringify({ action: 'database' })
-610|             });
-611|             const data = await response.json();
-612|             if (data.success) {
-613|                 alert('✅ Sauvegarde BDD effectuée');
-614|             } else {
-615|                 alert('❌ Erreur: ' + (data.error || 'Inconnue'));
-616|             }
-617|         } catch (err) {
-618|             console.error(err);
-619|             alert('❌ Erreur réseau');
+139|             html += `<button class="action-btn btn-kick" onclick="kickUser('${escapeHtml(u.pseudo)}')">🦵 Kick</button>`;
+140|         } else {
+141|             html += `<button class="action-btn btn-unban" onclick="unbanUser('${escapeHtml(u.pseudo)}')">🔓 Unban</button>`;
+142|         }
+143| 
+144|         if (u.role !== 'admin' && u.role !== 'modo') {
+145|             html += `<button class="action-btn btn-modo" onclick="setModo('${escapeHtml(u.pseudo)}')">👮 Modo</button>`;
+146|         }
+147| 
+148|         if (u.role === 'modo') {
+149|             html += `<button class="action-btn btn-admin" onclick="setAdmin('${escapeHtml(u.pseudo)}')">👑 Admin</button>`;
+150|         }
+151| 
+152|         html += `</td></tr>`;
+153|     });
+154| 
+155|     html += `</tbody></table>`;
+156|     usersListDiv.innerHTML = html;
+157| }
+158| 
+159| // ========== 4. FILTRES ET RECHERCHE ==========
+160| function applyFilters() {
+161|     const searchTerm = searchInput.value.toLowerCase();
+162|     const role = roleFilter.value;
+163|     const status = statusFilter.value;
+164| 
+165|     filteredUsers = allUsers.filter(u => {
+166|         if (searchTerm && !u.pseudo.toLowerCase().includes(searchTerm)) return false;
+167| 
+168|         if (role !== 'all') {
+169|             if (role === 'admin' && u.role !== 'admin') return false;
+170|             if (role === 'modo' && u.role !== 'modo') return false;
+171|             if (role === 'user' && u.role !== 'user') return false;
+172|             if (role === 'guest' && (u.role && u.role !== 'guest')) return false;
+173|         }
+174| 
+175|         if (status !== 'all') {
+176|             if (status === 'banned' && !u.is_banned) return false;
+177|             if (status === 'warned' && (!u.warnings || u.warnings < 3)) return false;
+178|             if (status === 'active' && (u.is_banned || (u.warnings || 0) >= 3)) return false;
+179|         }
+180| 
+181|         return true;
+182|     });
+183| 
+184|     renderUsersTable();
+185| }
+186| 
+187| // ========== 5. ACTIONS ADMIN ==========
+188| async function warnUser(pseudo) {
+189|     if (typeof MGModal !== 'undefined') {
+190|         MGModal.show({
+191|             title: '⚠️ Confirmation',
+192|             message: `Envoyer un avertissement à ${pseudo} ?`,
+193|             onConfirm: async () => {
+194|                 try {
+195|                     const response = await fetch('/api/admin/warn', {
+196|                         method: 'POST',
+197|                         headers: { 'Content-Type': 'application/json' },
+198|                         body: JSON.stringify({ pseudo })
+199|                     });
+200| 
+201|                     if (response.ok) {
+202|                         // Mise à jour IMMÉDIATE de l'utilisateur dans allUsers et filteredUsers
+203|                         const userIndex = allUsers.findIndex(u => u.pseudo === pseudo);
+204|                         if (userIndex !== -1) {
+205|                             allUsers[userIndex].warnings = (allUsers[userIndex].warnings || 0) + 1;
+206|                             // Mettre à jour filteredUsers aussi
+207|                             const filteredIndex = filteredUsers.findIndex(u => u.pseudo === pseudo);
+208|                             if (filteredIndex !== -1) {
+209|                                 filteredUsers[filteredIndex].warnings = allUsers[userIndex].warnings;
+210|                             }
+211|                         }
+212| 
+213|                         // Recharger UNIQUEMENT la ligne du tableau modifiée (pas tout le tableau)
+214|                         updateUserRow(pseudo);
+215|                         updateStats();  // Met à jour les compteurs
+216| 
+217|                         MGPopup.show({
+218|                             title: '✅ Succès',
+219|                             message: `${pseudo} a reçu un avertissement.`,
+220|                             onConfirm: () => { }
+221|                         });
+222|                     }
+223|                 } catch (err) {
+224|                     console.error(err);
+225|                     MGModal.show({
+226|                         title: '❌ Erreur réseau',
+227|                         message: 'Impossible de contacter le serveur.',
+228|                         onConfirm: () => { }
+229|                     });
+230|                 }
+231|             },
+232|             onCancel: () => { }
+233|         });
+234|     } else {
+235|         // Fallback
+236|         if (!confirm(`⚠️ Envoyer un avertissement à ${pseudo} ?`)) return;
+237|         try {
+238|             const response = await fetch('/api/admin/warn', {
+239|                 method: 'POST',
+240|                 headers: { 'Content-Type': 'application/json' },
+241|                 body: JSON.stringify({ pseudo })
+242|             });
+243|             if (response.ok) {
+244|                 alert(`✅ ${pseudo} a reçu un avertissement`);
+245|                 await loadUsers();
+246|             } else {
+247|                 alert('❌ Erreur');
+248|             }
+249|         } catch (err) {
+250|             console.error(err);
+251|             alert('❌ Erreur réseau');
+252|         }
+253|     }
+254| }
+255| 
+256| async function banUser(pseudo) {
+257|     if (typeof MGModal !== 'undefined') {
+258|         // Demander la raison avec un popup personnalisé
+259|         // Pour l'instant, on utilise prompt car MGModal n'a pas d'input
+260|         // Optionnel : améliorer MGModal pour accepter du texte
+261|         const reason = prompt(`🚫 Raison du bannissement pour ${pseudo} :`);
+262|         if (!reason) return;
+263| 
+264|         MGModal.show({
+265|             title: '🚫 Confirmation de bannissement',
+266|             message: `Bannir définitivement ${pseudo} ?\nRaison : ${reason}`,
+267|             onConfirm: async () => {
+268|                 try {
+269|                     const response = await fetch('/api/admin/ban', {
+270|                         method: 'POST',
+271|                         headers: { 'Content-Type': 'application/json' },
+272|                         body: JSON.stringify({ pseudo, reason })
+273|                     });
+274| 
+275|                     if (response.ok) {
+276|                         MGModal.show({
+277|                             title: '✅ Banni',
+278|                             message: `${pseudo} a été banni.`,
+279|                             onConfirm: () => loadUsers()
+280|                         });
+281|                     } else {
+282|                         MGModal.show({
+283|                             title: '❌ Erreur',
+284|                             message: 'Erreur lors du bannissement.',
+285|                             onConfirm: () => { }
+286|                         });
+287|                     }
+288|                 } catch (err) {
+289|                     console.error(err);
+290|                     MGModal.show({
+291|                         title: '❌ Erreur réseau',
+292|                         message: 'Impossible de contacter le serveur.',
+293|                         onConfirm: () => { }
+294|                     });
+295|                 }
+296|             },
+297|             onCancel: () => { }
+298|         });
+299|     } else {
+300|         // Fallback
+301|         const reason = prompt(`🚫 Raison du bannissement pour ${pseudo} :`);
+302|         if (!reason) return;
+303|         try {
+304|             const response = await fetch('/api/admin/ban', {
+305|                 method: 'POST',
+306|                 headers: { 'Content-Type': 'application/json' },
+307|                 body: JSON.stringify({ pseudo, reason })
+308|             });
+309|             if (response.ok) {
+310|                 alert(`✅ ${pseudo} a été banni`);
+311|                 await loadUsers();
+312|             } else {
+313|                 alert('❌ Erreur');
+314|             }
+315|         } catch (err) {
+316|             console.error(err);
+317|             alert('❌ Erreur réseau');
+318|         }
+319|     }
+320| }
+321| 
+322| async function kickUser(pseudo) {
+323|     if (typeof MGPopup !== 'undefined') {
+324|         MGPopup.show({
+325|             title: '🦵 Expulsion',
+326|             message: `Expulser ${pseudo} du site ?\n\n⚠️ L'utilisateur sera déconnecté et son compte temporaire supprimé.`,
+327|             onConfirm: async () => {
+328|                 try {
+329|                     const response = await fetch('/api/admin/kick', {
+330|                         method: 'POST',
+331|                         headers: { 'Content-Type': 'application/json' },
+332|                         body: JSON.stringify({ pseudo })
+333|                     });
+334| 
+335|                     if (response.ok) {
+336|                         MGPopup.show({
+337|                             title: '✅ Expulsé',
+338|                             message: `${pseudo} a été expulsé.`,
+339|                             onConfirm: () => loadUsers()
+340|                         });
+341|                     } else {
+342|                         const data = await response.json();
+343|                         MGPopup.show({
+344|                             title: '❌ Erreur',
+345|                             message: data.error || 'Erreur lors de l\'expulsion.',
+346|                             onConfirm: () => { }
+347|                         });
+348|                     }
+349|                 } catch (err) {
+350|                     console.error(err);
+351|                     MGPopup.show({
+352|                         title: '❌ Erreur réseau',
+353|                         message: 'Impossible de contacter le serveur.',
+354|                         onConfirm: () => { }
+355|                     });
+356|                 }
+357|             },
+358|             onCancel: () => { }
+359|         });
+360|     } else {
+361|         // Fallback
+362|         if (!confirm(`🦵 Expulser ${pseudo} ?\n\n⚠️ L'utilisateur sera déconnecté et son compte supprimé.`)) return;
+363|         try {
+364|             const response = await fetch('/api/admin/kick', {
+365|                 method: 'POST',
+366|                 headers: { 'Content-Type': 'application/json' },
+367|                 body: JSON.stringify({ pseudo })
+368|             });
+369|             if (response.ok) {
+370|                 alert(`✅ ${pseudo} a été expulsé`);
+371|                 await loadUsers();
+372|             } else {
+373|                 const data = await response.json();
+374|                 alert('❌ Erreur: ' + (data.error || 'Inconnue'));
+375|             }
+376|         } catch (err) {
+377|             console.error(err);
+378|             alert('❌ Erreur réseau');
+379|         }
+380|     }
+381| }
+382| 
+383| async function unbanUser(pseudo) {
+384|     if (typeof MGModal !== 'undefined') {
+385|         MGModal.show({
+386|             title: '🔓 Confirmation',
+387|             message: `Réactiver ${pseudo} ?`,
+388|             onConfirm: async () => {
+389|                 try {
+390|                     const response = await fetch('/api/admin/unban', {
+391|                         method: 'POST',
+392|                         headers: { 'Content-Type': 'application/json' },
+393|                         body: JSON.stringify({ pseudo })
+394|                     });
+395| 
+396|                     if (response.ok) {
+397|                         MGModal.show({
+398|                             title: '✅ Réactivé',
+399|                             message: `${pseudo} a été réactivé.`,
+400|                             onConfirm: () => loadUsers()
+401|                         });
+402|                     } else {
+403|                         MGModal.show({
+404|                             title: '❌ Erreur',
+405|                             message: 'Erreur lors de la réactivation.',
+406|                             onConfirm: () => { }
+407|                         });
+408|                     }
+409|                 } catch (err) {
+410|                     console.error(err);
+411|                     MGModal.show({
+412|                         title: '❌ Erreur réseau',
+413|                         message: 'Impossible de contacter le serveur.',
+414|                         onConfirm: () => { }
+415|                     });
+416|                 }
+417|             },
+418|             onCancel: () => { }
+419|         });
+420|     } else {
+421|         // Fallback
+422|         if (!confirm(`🔓 Réactiver ${pseudo} ?`)) return;
+423|         try {
+424|             const response = await fetch('/api/admin/unban', {
+425|                 method: 'POST',
+426|                 headers: { 'Content-Type': 'application/json' },
+427|                 body: JSON.stringify({ pseudo })
+428|             });
+429|             if (response.ok) {
+430|                 alert(`✅ ${pseudo} a été réactivé`);
+431|                 await loadUsers();
+432|             } else {
+433|                 alert('❌ Erreur');
+434|             }
+435|         } catch (err) {
+436|             console.error(err);
+437|             alert('❌ Erreur réseau');
+438|         }
+439|     }
+440| }
+441| 
+442| async function setModo(pseudo) {
+443|     if (typeof MGModal !== 'undefined') {
+444|         MGModal.show({
+445|             title: '👮 Confirmation',
+446|             message: `Donner le rôle modérateur à ${pseudo} ?`,
+447|             onConfirm: async () => {
+448|                 try {
+449|                     const response = await fetch('/api/admin/set-modo', {
+450|                         method: 'POST',
+451|                         headers: { 'Content-Type': 'application/json' },
+452|                         body: JSON.stringify({ pseudo })
+453|                     });
+454| 
+455|                     if (response.ok) {
+456|                         MGModal.show({
+457|                             title: '✅ Modérateur',
+458|                             message: `${pseudo} est maintenant modérateur.`,
+459|                             onConfirm: () => loadUsers()
+460|                         });
+461|                     } else {
+462|                         MGModal.show({
+463|                             title: '❌ Erreur',
+464|                             message: 'Erreur lors de la promotion.',
+465|                             onConfirm: () => { }
+466|                         });
+467|                     }
+468|                 } catch (err) {
+469|                     console.error(err);
+470|                     MGModal.show({
+471|                         title: '❌ Erreur réseau',
+472|                         message: 'Impossible de contacter le serveur.',
+473|                         onConfirm: () => { }
+474|                     });
+475|                 }
+476|             },
+477|             onCancel: () => { }
+478|         });
+479|     } else {
+480|         // Fallback
+481|         if (!confirm(`👮 Donner le rôle modérateur à ${pseudo} ?`)) return;
+482|         try {
+483|             const response = await fetch('/api/admin/set-modo', {
+484|                 method: 'POST',
+485|                 headers: { 'Content-Type': 'application/json' },
+486|                 body: JSON.stringify({ pseudo })
+487|             });
+488|             if (response.ok) {
+489|                 alert(`✅ ${pseudo} est maintenant modérateur`);
+490|                 await loadUsers();
+491|             } else {
+492|                 alert('❌ Erreur');
+493|             }
+494|         } catch (err) {
+495|             console.error(err);
+496|             alert('❌ Erreur réseau');
+497|         }
+498|     }
+499| }
+500| 
+501| async function setAdmin(pseudo) {
+502|     if (typeof MGModal !== 'undefined') {
+503|         MGModal.show({
+504|             title: '👑 Confirmation (IRRÉVERSIBLE)',
+505|             message: `⚠️⚠️ Donner le rôle ADMIN à ${pseudo} ?\n\nCette action est IRRÉVERSIBLE ! ⚠️⚠️`,
+506|             onConfirm: async () => {
+507|                 try {
+508|                     const response = await fetch('/api/admin/set-admin', {
+509|                         method: 'POST',
+510|                         headers: { 'Content-Type': 'application/json' },
+511|                         body: JSON.stringify({ pseudo })
+512|                     });
+513| 
+514|                     if (response.ok) {
+515|                         MGModal.show({
+516|                             title: '✅ Administrateur',
+517|                             message: `${pseudo} est maintenant administrateur.`,
+518|                             onConfirm: () => loadUsers()
+519|                         });
+520|                     } else {
+521|                         MGModal.show({
+522|                             title: '❌ Erreur',
+523|                             message: 'Erreur lors de la promotion.',
+524|                             onConfirm: () => { }
+525|                         });
+526|                     }
+527|                 } catch (err) {
+528|                     console.error(err);
+529|                     MGModal.show({
+530|                         title: '❌ Erreur réseau',
+531|                         message: 'Impossible de contacter le serveur.',
+532|                         onConfirm: () => { }
+533|                     });
+534|                 }
+535|             },
+536|             onCancel: () => { }
+537|         });
+538|     } else {
+539|         // Fallback
+540|         if (!confirm(`⚠️⚠️ Donner le rôle ADMIN à ${pseudo} ? (action irréversible) ⚠️⚠️`)) return;
+541|         try {
+542|             const response = await fetch('/api/admin/set-admin', {
+543|                 method: 'POST',
+544|                 headers: { 'Content-Type': 'application/json' },
+545|                 body: JSON.stringify({ pseudo })
+546|             });
+547|             if (response.ok) {
+548|                 alert(`✅ ${pseudo} est maintenant administrateur`);
+549|                 await loadUsers();
+550|             } else {
+551|                 alert('❌ Erreur');
+552|             }
+553|         } catch (err) {
+554|             console.error(err);
+555|             alert('❌ Erreur réseau');
+556|         }
+557|     }
+558| }
+559| 
+560| // ========== 6. ACTIONS RAPIDES ==========
+561| async function toggleMaintenance() {
+562|     try {
+563|         const getRes = await fetch('/api/admin/maintenance');
+564|         const { enabled } = await getRes.json();
+565|         const newState = !enabled;
+566| 
+567|         if (typeof MGModal !== 'undefined') {
+568|             MGModal.show({
+569|                 title: newState ? '🚧 Activer maintenance' : '✅ Désactiver maintenance',
+570|                 message: newState
+571|                     ? 'ACTIVER le mode maintenance ?\nLes utilisateurs non-admin verront une page de maintenance.'
+572|                     : 'DÉSACTIVER le mode maintenance ?',
+573|                 onConfirm: async () => {
+574|                     try {
+575|                         const res = await fetch('/api/admin/maintenance', {
+576|                             method: 'POST',
+577|                             headers: { 'Content-Type': 'application/json' },
+578|                             body: JSON.stringify({ enabled: newState })
+579|                         });
+580|                         if (res.ok) {
+581|                             MGModal.show({
+582|                                 title: newState ? '🚧 Maintenance activée' : '✅ Maintenance désactivée',
+583|                                 message: newState ? 'Le site est en maintenance.' : 'Le site est à nouveau accessible.',
+584|                                 onConfirm: () => { }
+585|                             });
+586|                         } else {
+587|                             MGModal.show({
+588|                                 title: '❌ Erreur',
+589|                                 message: 'Erreur lors du changement de mode.',
+590|                                 onConfirm: () => { }
+591|                             });
+592|                         }
+593|                     } catch (err) {
+594|                         console.error(err);
+595|                         MGModal.show({
+596|                             title: '❌ Erreur réseau',
+597|                             message: 'Impossible de contacter le serveur.',
+598|                             onConfirm: () => { }
+599|                         });
+600|                     }
+601|                 },
+602|                 onCancel: () => { }
+603|             });
+604|         } else {
+605|             // Fallback
+606|             const confirmMsg = newState
+607|                 ? '🚧 ACTIVER le mode maintenance ?\nLes utilisateurs non-admin verront une page de maintenance.'
+608|                 : '✅ DÉSACTIVER le mode maintenance ?';
+609|             if (!confirm(confirmMsg)) return;
+610|             const res = await fetch('/api/admin/maintenance', {
+611|                 method: 'POST',
+612|                 headers: { 'Content-Type': 'application/json' },
+613|                 body: JSON.stringify({ enabled: newState })
+614|             });
+615|             if (res.ok) {
+616|                 alert(newState ? '🚧 Mode MAINTENANCE activé' : '✅ Mode MAINTENANCE désactivé');
+617|             } else {
+618|                 alert('❌ Erreur lors du changement de mode');
+619|             }
 620|         }
-621|     }
-622| }
-623| 
-624| async function manualCleanup() {
-625|     if (typeof MGModal !== 'undefined') {
-626|         MGModal.show({
-627|             title: '🧹 Nettoyage',
-628|             message: 'Nettoyer les visiteurs inactifs ?\n\n⚠️ Fonction à implémenter côté serveur pour l\'instant.',
-629|             onConfirm: () => {
-630|                 MGModal.show({
-631|                     title: '⚠️ Information',
-632|                     message: 'Fonction à implémenter côté serveur prochainement.',
-633|                     onConfirm: () => { }
-634|                 });
-635|             },
-636|             onCancel: () => { }
-637|         });
-638|     } else {
-639|         if (!confirm('🧹 Nettoyer les visiteurs inactifs ?')) return;
-640|         alert('⚠️ Fonction à implémenter côté serveur');
-641|     }
-642| }
-643| 
-644| // ========== SECTION SIGNALEMENTS ==========
-645| async function loadReports() {
-646|     const reportsDiv = document.getElementById('reportsList');
-647|     if (!reportsDiv) return;
-648| 
-649|     try {
-650|         const response = await fetch('/api/admin/reports');
-651|         const reports = await response.json();
-652| 
-653|         if (reports.length === 0) {
-654|             reportsDiv.innerHTML = '<div class="loading">✅ Aucun signalement en attente</div>';
-655|             return;
-656|         }
-657| 
-658|         let html = '<table class="admin-table"><thead><tr><th>Date</th><th>Signalé par</th><th>Cible</th><th>Actions</th></tr></thead><tbody>';
-659| 
-660|         reports.forEach(r => {
-661|             html += `
-662|                 <tr>
-663|                     <td>${new Date(r.created_at).toLocaleString()}</td>
-664|                     <td>${escapeHtml(r.reporter_pseudo)}</td>
-665|                     <td><strong>${escapeHtml(r.target_pseudo)}</strong></td>
-666|                     <td class="action-buttons">
-667|                         <button class="action-btn btn-warn" onclick="warnUser('${escapeHtml(r.target_pseudo)}')">⚠️ Warn</button>
-668|                         <button class="action-btn btn-ban" onclick="banUser('${escapeHtml(r.target_pseudo)}')">🚫 Ban</button>
-669|                         <button class="action-btn btn-ignore" onclick="ignoreReport(${r.id})">✅ Ignorer</button>
-670|                     </td>
-671|                 </tr>
-672|             `;
-673|         });
-674| 
-675|         html += '</tbody></table>';
-676|         reportsDiv.innerHTML = html;
-677|     } catch (err) {
-678|         console.error(err);
-679|         reportsDiv.innerHTML = '<div class="loading">❌ Erreur chargement</div>';
-680|     }
-681| }
-682| 
-683| async function ignoreReport(reportId) {
-684|     if (typeof MGModal !== 'undefined') {
-685|         MGModal.show({
-686|             title: '✅ Ignorer',
-687|             message: 'Ignorer ce signalement ?',
-688|             onConfirm: async () => {
-689|                 try {
-690|                     const response = await fetch('/api/admin/ignore-report', {
-691|                         method: 'POST',
-692|                         headers: { 'Content-Type': 'application/json' },
-693|                         body: JSON.stringify({ reportId })
-694|                     });
-695| 
-696|                     if (response.ok) {
-697|                         MGModal.show({
-698|                             title: '✅ Ignoré',
-699|                             message: 'Signalement ignoré.',
-700|                             onConfirm: () => loadReports()
-701|                         });
-702|                     } else {
-703|                         MGModal.show({
-704|                             title: '❌ Erreur',
-705|                             message: 'Erreur lors de l\'ignorance.',
-706|                             onConfirm: () => { }
-707|                         });
-708|                     }
-709|                 } catch (err) {
-710|                     console.error(err);
-711|                     MGModal.show({
-712|                         title: '❌ Erreur réseau',
-713|                         message: 'Impossible de contacter le serveur.',
-714|                         onConfirm: () => { }
-715|                     });
-716|                 }
-717|             },
-718|             onCancel: () => { }
-719|         });
-720|     } else {
-721|         // Fallback
-722|         if (!confirm('Ignorer ce signalement ?')) return;
-723|         try {
-724|             const response = await fetch('/api/admin/ignore-report', {
-725|                 method: 'POST',
-726|                 headers: { 'Content-Type': 'application/json' },
-727|                 body: JSON.stringify({ reportId })
-728|             });
-729|             if (response.ok) {
-730|                 alert('✅ Signalement ignoré');
-731|                 loadReports();
-732|             } else {
-733|                 alert('❌ Erreur');
-734|             }
-735|         } catch (err) {
-736|             console.error(err);
-737|             alert('❌ Erreur réseau');
-738|         }
-739|     }
-740| }
-741| 
-742| // ========== SECTION JOURNAL ==========
-743| async function loadModerationLogs() {
-744|     const logsDiv = document.getElementById('logsList');
-745|     if (!logsDiv) return;
-746| 
-747|     try {
-748|         const response = await fetch('/api/admin/moderation-logs');
-749|         const logs = await response.json();
-750| 
-751|         if (logs.length === 0) {
-752|             logsDiv.innerHTML = '<div class="loading">📭 Aucune action enregistrée</div>';
-753|             return;
-754|         }
-755| 
-756|         let html = '<table class="admin-table"><thead><tr><th>Date</th><th>Admin</th><th>Action</th><th>Cible</th><th>Détails</th></tr></thead><tbody>';
+621|     } catch (err) {
+622|         console.error('Erreur toggleMaintenance:', err);
+623|         alert('❌ Erreur réseau');
+624|     }
+625| }
+626| 
+627| async function backupDatabase() {
+628|     if (typeof MGModal !== 'undefined') {
+629|         MGModal.show({
+630|             title: '🗄️ Sauvegarde',
+631|             message: 'Sauvegarder la base de données ?',
+632|             onConfirm: async () => {
+633|                 try {
+634|                     const response = await fetch('/api/backup', {
+635|                         method: 'POST',
+636|                         headers: { 'Content-Type': 'application/json' },
+637|                         body: JSON.stringify({ action: 'database' })
+638|                     });
+639|                     const data = await response.json();
+640|                     if (data.success) {
+641|                         MGModal.show({
+642|                             title: '✅ Succès',
+643|                             message: 'Sauvegarde BDD effectuée.',
+644|                             onConfirm: () => { }
+645|                         });
+646|                     } else {
+647|                         MGModal.show({
+648|                             title: '❌ Erreur',
+649|                             message: data.error || 'Erreur inconnue',
+650|                             onConfirm: () => { }
+651|                         });
+652|                     }
+653|                 } catch (err) {
+654|                     console.error(err);
+655|                     MGModal.show({
+656|                         title: '❌ Erreur réseau',
+657|                         message: 'Impossible de contacter le serveur.',
+658|                         onConfirm: () => { }
+659|                     });
+660|                 }
+661|             },
+662|             onCancel: () => { }
+663|         });
+664|     } else {
+665|         // Fallback
+666|         if (!confirm('🗄️ Sauvegarder la base de données ?')) return;
+667|         try {
+668|             const response = await fetch('/api/backup', {
+669|                 method: 'POST',
+670|                 headers: { 'Content-Type': 'application/json' },
+671|                 body: JSON.stringify({ action: 'database' })
+672|             });
+673|             const data = await response.json();
+674|             if (data.success) {
+675|                 alert('✅ Sauvegarde BDD effectuée');
+676|             } else {
+677|                 alert('❌ Erreur: ' + (data.error || 'Inconnue'));
+678|             }
+679|         } catch (err) {
+680|             console.error(err);
+681|             alert('❌ Erreur réseau');
+682|         }
+683|     }
+684| }
+685| 
+686| async function manualCleanup() {
+687|     if (typeof MGModal !== 'undefined') {
+688|         MGModal.show({
+689|             title: '🧹 Nettoyage',
+690|             message: 'Nettoyer les visiteurs inactifs ?\n\n⚠️ Fonction à implémenter côté serveur pour l\'instant.',
+691|             onConfirm: () => {
+692|                 MGModal.show({
+693|                     title: '⚠️ Information',
+694|                     message: 'Fonction à implémenter côté serveur prochainement.',
+695|                     onConfirm: () => { }
+696|                 });
+697|             },
+698|             onCancel: () => { }
+699|         });
+700|     } else {
+701|         if (!confirm('🧹 Nettoyer les visiteurs inactifs ?')) return;
+702|         alert('⚠️ Fonction à implémenter côté serveur');
+703|     }
+704| }
+705| 
+706| // ========== SECTION SIGNALEMENTS ==========
+707| async function loadReports() {
+708|     const reportsDiv = document.getElementById('reportsList');
+709|     if (!reportsDiv) return;
+710| 
+711|     try {
+712|         const response = await fetch('/api/admin/reports');
+713|         const reports = await response.json();
+714| 
+715|         if (reports.length === 0) {
+716|             reportsDiv.innerHTML = '<div class="loading">✅ Aucun signalement en attente</div>';
+717|             return;
+718|         }
+719| 
+720|         let html = '<table class="admin-table"><thead><tr><th>Date</th><th>Signalé par</th><th>Cible</th><th>Actions</th></tr></thead><tbody>';
+721| 
+722|         reports.forEach(r => {
+723|             html += `
+724|                 <tr>
+725|                     <td>${new Date(r.created_at).toLocaleString()}</td>
+726|                     <td>${escapeHtml(r.reporter_pseudo)}</td>
+727|                     <td><strong>${escapeHtml(r.target_pseudo)}</strong></td>
+728|                     <td class="action-buttons">
+729|                         <button class="action-btn btn-warn" onclick="warnUser('${escapeHtml(r.target_pseudo)}')">⚠️ Warn</button>
+730|                         <button class="action-btn btn-ban" onclick="banUser('${escapeHtml(r.target_pseudo)}')">🚫 Ban</button>
+731|                         <button class="action-btn btn-ignore" onclick="ignoreReport(${r.id})">✅ Ignorer</button>
+732|                     </td>
+733|                 </tr>
+734|             `;
+735|         });
+736| 
+737|         html += '</tbody></table>';
+738|         reportsDiv.innerHTML = html;
+739|     } catch (err) {
+740|         console.error(err);
+741|         reportsDiv.innerHTML = '<div class="loading">❌ Erreur chargement</div>';
+742|     }
+743| }
+744| 
+745| async function ignoreReport(reportId) {
+746|     if (typeof MGModal !== 'undefined') {
+747|         MGModal.show({
+748|             title: '✅ Ignorer',
+749|             message: 'Ignorer ce signalement ?',
+750|             onConfirm: async () => {
+751|                 try {
+752|                     const response = await fetch('/api/admin/ignore-report', {
+753|                         method: 'POST',
+754|                         headers: { 'Content-Type': 'application/json' },
+755|                         body: JSON.stringify({ reportId })
+756|                     });
 757| 
-758|         logs.forEach(log => {
-759|             let actionIcon = '';
-760|             if (log.action_type === 'warn') actionIcon = '⚠️';
-761|             else if (log.action_type === 'ban') actionIcon = '🚫';
-762|             else if (log.action_type === 'temp_ban') actionIcon = '⏱️';
-763|             else if (log.action_type === 'unban') actionIcon = '🔓';
-764|             else if (log.action_type === 'set_modo') actionIcon = '👮';
-765|             else if (log.action_type === 'set_admin') actionIcon = '👑';
-766|             else actionIcon = '📝';
-767| 
-768|             let details = log.reason || '';
-769|             if (log.duration_minutes) details += ` (${log.duration_minutes} min)`;
-770| 
-771|             html += `
-772|                 <tr>
-773|                     <td>${new Date(log.created_at).toLocaleString()}</td>
-774|                     <td>${escapeHtml(log.admin_pseudo)}</td>
-775|                     <td>${actionIcon} ${escapeHtml(log.action_type)}</td>
-776|                     <td><strong>${escapeHtml(log.target_pseudo)}</strong></td>
-777|                     <td>${escapeHtml(details)}</td>
-778|                 </tr>
-779|             `;
-780|         });
-781| 
-782|         html += '</tbody></table>';
-783|         logsDiv.innerHTML = html;
-784|     } catch (err) {
-785|         console.error(err);
-786|         logsDiv.innerHTML = '<div class="loading">❌ Erreur chargement</div>';
-787|     }
-788| 
-789| }
-790| 
-791| // ========== VIDAGE MANUEL ==========
-792| 
-793| async function clearLogsManually() {
-794|     if (typeof MGModal !== 'undefined') {
-795|         MGModal.show({
-796|             title: '🗑️ Vider le journal',
-797|             message: 'Vider TOUT le journal de modération ?\n\nAction irréversible.',
-798|             onConfirm: async () => {
-799|                 try {
-800|                     const response = await fetch('/api/admin/clear-logs', { method: 'POST' });
-801|                     const data = await response.json();
-802|                     if (data.success) {
-803|                         MGModal.show({
-804|                             title: '✅ Journal vidé',
-805|                             message: `${data.deleted} entrées supprimées.`,
-806|                             onConfirm: () => loadModerationLogs()
-807|                         });
-808|                     } else {
-809|                         MGModal.show({
-810|                             title: '❌ Erreur',
-811|                             message: 'Erreur lors du vidage.',
-812|                             onConfirm: () => { }
-813|                         });
-814|                     }
-815|                 } catch (err) {
-816|                     console.error(err);
-817|                     MGModal.show({
-818|                         title: '❌ Erreur réseau',
-819|                         message: 'Impossible de contacter le serveur.',
-820|                         onConfirm: () => { }
-821|                     });
-822|                 }
-823|             },
-824|             onCancel: () => { }
-825|         });
-826|     } else {
-827|         // Fallback
-828|         if (!confirm('🗑️ Vider TOUT le journal de modération ? Action irréversible.')) return;
-829|         try {
-830|             const response = await fetch('/api/admin/clear-logs', { method: 'POST' });
-831|             const data = await response.json();
-832|             if (data.success) {
-833|                 alert(`✅ Journal vidé (${data.deleted} entrées supprimées)`);
-834|                 loadModerationLogs();
-835|             } else {
-836|                 alert('❌ Erreur');
-837|             }
-838|         } catch (err) {
-839|             console.error(err);
-840|             alert('❌ Erreur réseau');
-841|         }
-842|     }
-843| }
-844| 
-845| async function cleanReportsManually() {
-846|     if (typeof MGModal !== 'undefined') {
-847|         // Pour la saisie du nombre de jours, on doit encore utiliser prompt
-848|         // Car MGModal n'a pas d'input pour l'instant
-849|         const days = prompt('📋 Supprimer les signalements plus vieux que combien de jours ? (défaut: 60)', '60');
-850|         if (!days) return;
-851| 
-852|         MGModal.show({
-853|             title: '📋 Nettoyer signalements',
-854|             message: `Supprimer les signalements plus vieux que ${days} jours ?`,
-855|             onConfirm: async () => {
-856|                 try {
-857|                     const response = await fetch('/api/admin/clean-reports', {
-858|                         method: 'POST',
-859|                         headers: { 'Content-Type': 'application/json' },
-860|                         body: JSON.stringify({ days: parseInt(days) })
-861|                     });
-862|                     const data = await response.json();
-863|                     if (data.success) {
-864|                         MGModal.show({
-865|                             title: '✅ Nettoyé',
-866|                             message: `${data.deleted} signalements supprimés.`,
-867|                             onConfirm: () => {
-868|                                 if (document.getElementById('tab-reports').classList.contains('active')) {
-869|                                     loadReports();
-870|                                 }
-871|                             }
-872|                         });
-873|                     } else {
-874|                         MGModal.show({
-875|                             title: '❌ Erreur',
-876|                             message: 'Erreur lors du nettoyage.',
-877|                             onConfirm: () => { }
-878|                         });
-879|                     }
-880|                 } catch (err) {
-881|                     console.error(err);
-882|                     MGModal.show({
-883|                         title: '❌ Erreur réseau',
-884|                         message: 'Impossible de contacter le serveur.',
-885|                         onConfirm: () => { }
-886|                     });
-887|                 }
-888|             },
-889|             onCancel: () => { }
-890|         });
-891|     } else {
-892|         // Fallback
-893|         const days = prompt('📋 Supprimer les signalements plus vieux que combien de jours ? (défaut: 60)', '60');
-894|         if (!days) return;
-895|         if (!confirm(`Supprimer les signalements plus vieux que ${days} jours ?`)) return;
-896|         try {
-897|             const response = await fetch('/api/admin/clean-reports', {
-898|                 method: 'POST',
-899|                 headers: { 'Content-Type': 'application/json' },
-900|                 body: JSON.stringify({ days: parseInt(days) })
-901|             });
-902|             const data = await response.json();
-903|             if (data.success) {
-904|                 alert(`✅ ${data.deleted} signalements supprimés`);
-905|                 if (document.getElementById('tab-reports').classList.contains('active')) {
-906|                     loadReports();
-907|                 }
-908|             } else {
-909|                 alert('❌ Erreur');
-910|             }
-911|         } catch (err) {
-912|             console.error(err);
-913|             alert('❌ Erreur réseau');
-914|         }
-915|     }
-916| }
-917| 
-918| // ========== HORLOGE EN TEMPS RÉEL ==========
-919| function updateClock() {
-920|     const now = new Date();
-921|     const options = {
-922|         weekday: 'long',
-923|         year: 'numeric',
-924|         month: 'long',
-925|         day: 'numeric',
-926|         hour: '2-digit',
-927|         minute: '2-digit',
-928|         second: '2-digit',
-929|         hour12: false
-930|     };
-931|     const formatted = now.toLocaleDateString('fr-FR', options);
-932|     const clockSpan = document.getElementById('currentDateTime');
-933|     if (clockSpan) clockSpan.textContent = formatted;
-934| }
-935| 
-936| // Mettre à jour l'horloge toutes les secondes
-937| setInterval(updateClock, 1000);
-938| updateClock(); // Appel immédiat
-939| 
-940| // Gestion des onglets
-941| function initTabs() {
-942|     const tabs = document.querySelectorAll('.tab-btn');
-943|     tabs.forEach(btn => {
-944|         btn.addEventListener('click', () => {
-945|             tabs.forEach(b => b.classList.remove('active'));
-946|             btn.classList.add('active');
-947| 
-948|             document.querySelectorAll('.tab-content').forEach(content => {
-949|                 content.classList.remove('active');
-950|             });
-951| 
-952|             const tabId = `tab-${btn.dataset.tab}`;
-953|             document.getElementById(tabId).classList.add('active');
-954| 
-955|             if (btn.dataset.tab === 'reports') loadReports();
-956|             if (btn.dataset.tab === 'logs') loadModerationLogs();
-957|         });
-958|     });
-959| }
-960| 
-961| // ========== 7. UTILITAIRES ==========
-962| function escapeHtml(str) {
-963|     if (!str) return '';
-964|     return str.replace(/[&<>]/g, function (m) {
-965|         if (m === '&') return '&amp;';
-966|         if (m === '<') return '&lt;';
-967|         if (m === '>') return '&gt;';
-968|         return m;
-969|     });
-970| }
-971| 
-972| // ========== 8. DÉCONNEXION ==========
-973| async function logout() {
-974|     if (typeof MGModal !== 'undefined') {
-975|         MGModal.show({
-976|             title: '🔓 Déconnexion',
-977|             message: 'Se déconnecter du panneau admin ?',
-978|             onConfirm: async () => {
-979|                 try {
-980|                     await fetch('/api/admin/logout', { method: 'POST' });
-981|                     window.location.href = '/admin-login.html';
-982|                 } catch (err) {
-983|                     console.error(err);
-984|                     MGModal.show({
-985|                         title: '❌ Erreur',
-986|                         message: 'Erreur lors de la déconnexion.',
-987|                         onConfirm: () => { }
-988|                     });
-989|                 }
-990|             },
-991|             onCancel: () => { }
-992|         });
-993|     } else {
-994|         if (!confirm('Se déconnecter ?')) return;
-995|         try {
-996|             await fetch('/api/admin/logout', { method: 'POST' });
-997|             window.location.href = '/admin-login.html';
-998|         } catch (err) {
-999|             console.error(err);
-1000|             alert('Erreur lors de la déconnexion');
-1001|         }
-1002|     }
-1003| }
-1004| 
-1005| // ========== 9. INITIALISATION ==========
-1006| (async function () {
-1007|     await loadUsers();
-1008| 
-1009|     if (searchBtn) searchBtn.addEventListener('click', applyFilters);
-1010|     if (searchInput) searchInput.addEventListener('keyup', (e) => {
-1011|         if (e.key === 'Enter') applyFilters();
-1012|     });
-1013|     if (roleFilter) roleFilter.addEventListener('change', applyFilters);
-1014|     if (statusFilter) statusFilter.addEventListener('change', applyFilters);
-1015| 
-1016|     if (maintenanceBtn) maintenanceBtn.addEventListener('click', toggleMaintenance);
-1017|     if (backupDbBtn) backupDbBtn.addEventListener('click', backupDatabase);
-1018|     if (cleanupBtn) cleanupBtn.addEventListener('click', manualCleanup);
-1019| 
-1020|     // Boutons de nettoyage manuel
-1021|     const clearLogsBtn = document.getElementById('clearLogsBtn');
-1022|     const cleanReportsBtn = document.getElementById('cleanReportsBtn');
-1023|     if (clearLogsBtn) clearLogsBtn.addEventListener('click', clearLogsManually);
-1024|     if (cleanReportsBtn) cleanReportsBtn.addEventListener('click', cleanReportsManually);
-1025| 
-1026|     // Initialiser les onglets
-1027|     initTabs();
-1028| 
-1029|     // Démarrer l'horloge
-1030|     updateClock();
-1031| 
-1032| })();
+758|                     if (response.ok) {
+759|                         MGModal.show({
+760|                             title: '✅ Ignoré',
+761|                             message: 'Signalement ignoré.',
+762|                             onConfirm: () => loadReports()
+763|                         });
+764|                     } else {
+765|                         MGModal.show({
+766|                             title: '❌ Erreur',
+767|                             message: 'Erreur lors de l\'ignorance.',
+768|                             onConfirm: () => { }
+769|                         });
+770|                     }
+771|                 } catch (err) {
+772|                     console.error(err);
+773|                     MGModal.show({
+774|                         title: '❌ Erreur réseau',
+775|                         message: 'Impossible de contacter le serveur.',
+776|                         onConfirm: () => { }
+777|                     });
+778|                 }
+779|             },
+780|             onCancel: () => { }
+781|         });
+782|     } else {
+783|         // Fallback
+784|         if (!confirm('Ignorer ce signalement ?')) return;
+785|         try {
+786|             const response = await fetch('/api/admin/ignore-report', {
+787|                 method: 'POST',
+788|                 headers: { 'Content-Type': 'application/json' },
+789|                 body: JSON.stringify({ reportId })
+790|             });
+791|             if (response.ok) {
+792|                 alert('✅ Signalement ignoré');
+793|                 loadReports();
+794|             } else {
+795|                 alert('❌ Erreur');
+796|             }
+797|         } catch (err) {
+798|             console.error(err);
+799|             alert('❌ Erreur réseau');
+800|         }
+801|     }
+802| }
+803| 
+804| // ========== SECTION JOURNAL ==========
+805| async function loadModerationLogs() {
+806|     const logsDiv = document.getElementById('logsList');
+807|     if (!logsDiv) return;
+808| 
+809|     try {
+810|         const response = await fetch('/api/admin/moderation-logs');
+811|         const logs = await response.json();
+812| 
+813|         if (logs.length === 0) {
+814|             logsDiv.innerHTML = '<div class="loading">📭 Aucune action enregistrée</div>';
+815|             return;
+816|         }
+817| 
+818|         let html = '<table class="admin-table"><thead><tr><th>Date</th><th>Admin</th><th>Action</th><th>Cible</th><th>Détails</th></tr></thead><tbody>';
+819| 
+820|         logs.forEach(log => {
+821|             let actionIcon = '';
+822|             if (log.action_type === 'warn') actionIcon = '⚠️';
+823|             else if (log.action_type === 'ban') actionIcon = '🚫';
+824|             else if (log.action_type === 'temp_ban') actionIcon = '⏱️';
+825|             else if (log.action_type === 'unban') actionIcon = '🔓';
+826|             else if (log.action_type === 'set_modo') actionIcon = '👮';
+827|             else if (log.action_type === 'set_admin') actionIcon = '👑';
+828|             else actionIcon = '📝';
+829| 
+830|             let details = log.reason || '';
+831|             if (log.duration_minutes) details += ` (${log.duration_minutes} min)`;
+832| 
+833|             html += `
+834|                 <tr>
+835|                     <td>${new Date(log.created_at).toLocaleString()}</td>
+836|                     <td>${escapeHtml(log.admin_pseudo)}</td>
+837|                     <td>${actionIcon} ${escapeHtml(log.action_type)}</td>
+838|                     <td><strong>${escapeHtml(log.target_pseudo)}</strong></td>
+839|                     <td>${escapeHtml(details)}</td>
+840|                 </tr>
+841|             `;
+842|         });
+843| 
+844|         html += '</tbody></table>';
+845|         logsDiv.innerHTML = html;
+846|     } catch (err) {
+847|         console.error(err);
+848|         logsDiv.innerHTML = '<div class="loading">❌ Erreur chargement</div>';
+849|     }
+850| 
+851| }
+852| 
+853| // ========== VIDAGE MANUEL ==========
+854| 
+855| async function clearLogsManually() {
+856|     if (typeof MGModal !== 'undefined') {
+857|         MGModal.show({
+858|             title: '🗑️ Vider le journal',
+859|             message: 'Vider TOUT le journal de modération ?\n\nAction irréversible.',
+860|             onConfirm: async () => {
+861|                 try {
+862|                     const response = await fetch('/api/admin/clear-logs', { method: 'POST' });
+863|                     const data = await response.json();
+864|                     if (data.success) {
+865|                         MGModal.show({
+866|                             title: '✅ Journal vidé',
+867|                             message: `${data.deleted} entrées supprimées.`,
+868|                             onConfirm: () => loadModerationLogs()
+869|                         });
+870|                     } else {
+871|                         MGModal.show({
+872|                             title: '❌ Erreur',
+873|                             message: 'Erreur lors du vidage.',
+874|                             onConfirm: () => { }
+875|                         });
+876|                     }
+877|                 } catch (err) {
+878|                     console.error(err);
+879|                     MGModal.show({
+880|                         title: '❌ Erreur réseau',
+881|                         message: 'Impossible de contacter le serveur.',
+882|                         onConfirm: () => { }
+883|                     });
+884|                 }
+885|             },
+886|             onCancel: () => { }
+887|         });
+888|     } else {
+889|         // Fallback
+890|         if (!confirm('🗑️ Vider TOUT le journal de modération ? Action irréversible.')) return;
+891|         try {
+892|             const response = await fetch('/api/admin/clear-logs', { method: 'POST' });
+893|             const data = await response.json();
+894|             if (data.success) {
+895|                 alert(`✅ Journal vidé (${data.deleted} entrées supprimées)`);
+896|                 loadModerationLogs();
+897|             } else {
+898|                 alert('❌ Erreur');
+899|             }
+900|         } catch (err) {
+901|             console.error(err);
+902|             alert('❌ Erreur réseau');
+903|         }
+904|     }
+905| }
+906| 
+907| async function cleanReportsManually() {
+908|     if (typeof MGModal !== 'undefined') {
+909|         // Pour la saisie du nombre de jours, on doit encore utiliser prompt
+910|         // Car MGModal n'a pas d'input pour l'instant
+911|         const days = prompt('📋 Supprimer les signalements plus vieux que combien de jours ? (défaut: 60)', '60');
+912|         if (!days) return;
+913| 
+914|         MGModal.show({
+915|             title: '📋 Nettoyer signalements',
+916|             message: `Supprimer les signalements plus vieux que ${days} jours ?`,
+917|             onConfirm: async () => {
+918|                 try {
+919|                     const response = await fetch('/api/admin/clean-reports', {
+920|                         method: 'POST',
+921|                         headers: { 'Content-Type': 'application/json' },
+922|                         body: JSON.stringify({ days: parseInt(days) })
+923|                     });
+924|                     const data = await response.json();
+925|                     if (data.success) {
+926|                         MGModal.show({
+927|                             title: '✅ Nettoyé',
+928|                             message: `${data.deleted} signalements supprimés.`,
+929|                             onConfirm: () => {
+930|                                 if (document.getElementById('tab-reports').classList.contains('active')) {
+931|                                     loadReports();
+932|                                 }
+933|                             }
+934|                         });
+935|                     } else {
+936|                         MGModal.show({
+937|                             title: '❌ Erreur',
+938|                             message: 'Erreur lors du nettoyage.',
+939|                             onConfirm: () => { }
+940|                         });
+941|                     }
+942|                 } catch (err) {
+943|                     console.error(err);
+944|                     MGModal.show({
+945|                         title: '❌ Erreur réseau',
+946|                         message: 'Impossible de contacter le serveur.',
+947|                         onConfirm: () => { }
+948|                     });
+949|                 }
+950|             },
+951|             onCancel: () => { }
+952|         });
+953|     } else {
+954|         // Fallback
+955|         const days = prompt('📋 Supprimer les signalements plus vieux que combien de jours ? (défaut: 60)', '60');
+956|         if (!days) return;
+957|         if (!confirm(`Supprimer les signalements plus vieux que ${days} jours ?`)) return;
+958|         try {
+959|             const response = await fetch('/api/admin/clean-reports', {
+960|                 method: 'POST',
+961|                 headers: { 'Content-Type': 'application/json' },
+962|                 body: JSON.stringify({ days: parseInt(days) })
+963|             });
+964|             const data = await response.json();
+965|             if (data.success) {
+966|                 alert(`✅ ${data.deleted} signalements supprimés`);
+967|                 if (document.getElementById('tab-reports').classList.contains('active')) {
+968|                     loadReports();
+969|                 }
+970|             } else {
+971|                 alert('❌ Erreur');
+972|             }
+973|         } catch (err) {
+974|             console.error(err);
+975|             alert('❌ Erreur réseau');
+976|         }
+977|     }
+978| }
+979| 
+980| // ========== HORLOGE EN TEMPS RÉEL ==========
+981| function updateClock() {
+982|     const now = new Date();
+983|     const options = {
+984|         weekday: 'long',
+985|         year: 'numeric',
+986|         month: 'long',
+987|         day: 'numeric',
+988|         hour: '2-digit',
+989|         minute: '2-digit',
+990|         second: '2-digit',
+991|         hour12: false
+992|     };
+993|     const formatted = now.toLocaleDateString('fr-FR', options);
+994|     const clockSpan = document.getElementById('currentDateTime');
+995|     if (clockSpan) clockSpan.textContent = formatted;
+996| }
+997| 
+998| // Mettre à jour l'horloge toutes les secondes
+999| setInterval(updateClock, 1000);
+1000| updateClock(); // Appel immédiat
+1001| 
+1002| // Gestion des onglets
+1003| function initTabs() {
+1004|     const tabs = document.querySelectorAll('.tab-btn');
+1005|     tabs.forEach(btn => {
+1006|         btn.addEventListener('click', () => {
+1007|             tabs.forEach(b => b.classList.remove('active'));
+1008|             btn.classList.add('active');
+1009| 
+1010|             document.querySelectorAll('.tab-content').forEach(content => {
+1011|                 content.classList.remove('active');
+1012|             });
+1013| 
+1014|             const tabId = `tab-${btn.dataset.tab}`;
+1015|             document.getElementById(tabId).classList.add('active');
+1016| 
+1017|             if (btn.dataset.tab === 'reports') loadReports();
+1018|             if (btn.dataset.tab === 'logs') loadModerationLogs();
+1019|         });
+1020|     });
+1021| }
+1022| 
+1023| // ========== 7. UTILITAIRES ==========
+1024| function escapeHtml(str) {
+1025|     if (!str) return '';
+1026|     return str.replace(/[&<>]/g, function (m) {
+1027|         if (m === '&') return '&amp;';
+1028|         if (m === '<') return '&lt;';
+1029|         if (m === '>') return '&gt;';
+1030|         return m;
+1031|     });
+1032| }
 1033| 
-1034| 
-1035| 
+1034| // ========== 8. DÉCONNEXION ==========
+1035| async function logout() {
+1036|     if (typeof MGModal !== 'undefined') {
+1037|         MGModal.show({
+1038|             title: '🔓 Déconnexion',
+1039|             message: 'Se déconnecter du panneau admin ?',
+1040|             onConfirm: async () => {
+1041|                 try {
+1042|                     await fetch('/api/admin/logout', { method: 'POST' });
+1043|                     window.location.href = '/admin-login.html';
+1044|                 } catch (err) {
+1045|                     console.error(err);
+1046|                     MGModal.show({
+1047|                         title: '❌ Erreur',
+1048|                         message: 'Erreur lors de la déconnexion.',
+1049|                         onConfirm: () => { }
+1050|                     });
+1051|                 }
+1052|             },
+1053|             onCancel: () => { }
+1054|         });
+1055|     } else {
+1056|         if (!confirm('Se déconnecter ?')) return;
+1057|         try {
+1058|             await fetch('/api/admin/logout', { method: 'POST' });
+1059|             window.location.href = '/admin-login.html';
+1060|         } catch (err) {
+1061|             console.error(err);
+1062|             alert('Erreur lors de la déconnexion');
+1063|         }
+1064|     }
+1065| }
+1066| 
+1067| // ========== 9. INITIALISATION ==========
+1068| (async function () {
+1069|     await loadUsers();
+1070| 
+1071|     if (searchBtn) searchBtn.addEventListener('click', applyFilters);
+1072|     if (searchInput) searchInput.addEventListener('keyup', (e) => {
+1073|         if (e.key === 'Enter') applyFilters();
+1074|     });
+1075|     if (roleFilter) roleFilter.addEventListener('change', applyFilters);
+1076|     if (statusFilter) statusFilter.addEventListener('change', applyFilters);
+1077| 
+1078|     if (maintenanceBtn) maintenanceBtn.addEventListener('click', toggleMaintenance);
+1079|     if (backupDbBtn) backupDbBtn.addEventListener('click', backupDatabase);
+1080|     if (cleanupBtn) cleanupBtn.addEventListener('click', manualCleanup);
+1081| 
+1082|     // Boutons de nettoyage manuel
+1083|     const clearLogsBtn = document.getElementById('clearLogsBtn');
+1084|     const cleanReportsBtn = document.getElementById('cleanReportsBtn');
+1085|     if (clearLogsBtn) clearLogsBtn.addEventListener('click', clearLogsManually);
+1086|     if (cleanReportsBtn) cleanReportsBtn.addEventListener('click', cleanReportsManually);
+1087| 
+1088|     // Initialiser les onglets
+1089|     initTabs();
+1090| 
+1091|     // Démarrer l'horloge
+1092|     updateClock();
+1093| 
+1094| })();
+1095| 
+1096| 
+1097| 
 
 # FILE: /var/www/meetgay/public/js/test-socket.js
 
