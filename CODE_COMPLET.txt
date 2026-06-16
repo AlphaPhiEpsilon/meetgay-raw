@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-16 13:08:31
+# Généré le 2026-06-16 13:10:35
 
 ==============================================================================
 # SYSTEME DE CLONE DE FICHIER MIS A JOUR EN TEMPS REEL 
@@ -4888,254 +4888,277 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 203| 
 204|             const userIp = userCheck.rows[0].last_ip;
 205| 
-206|             // 2. 🔥 INCRÉMENTER LE COMPTEUR DE KICK (AVANT TOUTE ACTION)
+206|             // 2. 🔥 ENREGISTRER L'IP DANS L'HISTORIQUE (AVANT TOUTE ACTION)
 207|             if (userIp) {
-208|                 await incrementIpCounter(userIp, 'kick');
-209|             }
-210| 
-211|             // 3. Trouver le socket de l'utilisateur
-212|             let targetSocketId = null;
-213|             for (const [socketId, user] of Object.entries(users)) {
-214|                 if (user.pseudo === pseudo) {
-215|                     targetSocketId = socketId;
-216|                     break;
+208|                 try {
+209|                     await pool.query(
+210|                         `INSERT INTO ip_history (ip_address, action_type, target_pseudo, admin_pseudo)
+211|                          VALUES ($1, 'kick', $2, $3)`,
+212|                         [userIp, pseudo, req.session.adminUsername]
+213|                     );
+214|                     console.log(`✅ IP ${userIp} enregistrée pour kick de ${pseudo}`);
+215|                 } catch (err) {
+216|                     console.error('❌ Erreur enregistrement IP history (kick):', err);
 217|                 }
-218|             }
-219| 
-220|             // 4. Si connecté, lui envoyer un événement de kick
-221|             if (targetSocketId && io) {
-222|                 io.to(targetSocketId).emit('kicked', {
-223|                     message: '🦵 Vous avez été expulsé par un administrateur.'
-224|                 });
-225| 
-226|                 setTimeout(() => {
-227|                     const socket = io.sockets.sockets.get(targetSocketId);
-228|                     if (socket) {
-229|                         socket.disconnect(true);
-230|                     }
-231|                 }, 500);
-232|             }
-233| 
-234|             // 5. Supprimer l'utilisateur de la base de données
-235|             await pool.query('DELETE FROM users WHERE pseudo = $1', [pseudo]);
+218|             } else {
+219|                 console.warn(`⚠️ Pas d'IP pour ${pseudo}, impossible d'enregistrer l'historique`);
+220|             }
+221| 
+222|             // 3. Trouver le socket de l'utilisateur
+223|             let targetSocketId = null;
+224|             for (const [socketId, user] of Object.entries(users)) {
+225|                 if (user.pseudo === pseudo) {
+226|                     targetSocketId = socketId;
+227|                     break;
+228|                 }
+229|             }
+230| 
+231|             // 4. Si connecté, lui envoyer un événement de kick
+232|             if (targetSocketId && io) {
+233|                 io.to(targetSocketId).emit('kicked', {
+234|                     message: '🦵 Vous avez été expulsé par un administrateur.'
+235|                 });
 236| 
-237|             // 6. Logger l'action dans le journal de modération
-238|             await pool.query(
-239|                 `INSERT INTO moderation_actions (admin_pseudo, action_type, target_pseudo, reason)
-240|                  VALUES ($1, 'kick', $2, 'Expulsé par administrateur')`,
-241|                 [req.session.adminUsername, pseudo]
-242|             );
-243| 
-244|             // 7. Notifier le panel admin
-245|             io.emit('new_moderation_action', {
-246|                 type: 'kick',
-247|                 target: pseudo,
-248|                 admin: req.session.adminUsername,
-249|                 timestamp: new Date()
-250|             });
-251| 
-252|             res.json({
-253|                 success: true,
-254|                 message: `${pseudo} a été expulsé et supprimé de la base`
-255|             });
-256| 
-257|         } catch (err) {
-258|             console.error('Erreur kick:', err);
-259|             res.status(500).json({ error: 'Erreur serveur lors de l\'expulsion' });
-260|         }
-261|     });
+237|                 setTimeout(() => {
+238|                     const socket = io.sockets.sockets.get(targetSocketId);
+239|                     if (socket) {
+240|                         socket.disconnect(true);
+241|                     }
+242|                 }, 500);
+243|             }
+244| 
+245|             // 5. Supprimer l'utilisateur de la base de données
+246|             await pool.query('DELETE FROM users WHERE pseudo = $1', [pseudo]);
+247| 
+248|             // 6. Logger l'action dans le journal de modération
+249|             await pool.query(
+250|                 `INSERT INTO moderation_actions (admin_pseudo, action_type, target_pseudo, reason)
+251|                  VALUES ($1, 'kick', $2, 'Expulsé par administrateur')`,
+252|                 [req.session.adminUsername, pseudo]
+253|             );
+254| 
+255|             // 7. Notifier le panel admin
+256|             io.emit('new_moderation_action', {
+257|                 type: 'kick',
+258|                 target: pseudo,
+259|                 admin: req.session.adminUsername,
+260|                 timestamp: new Date()
+261|             });
 262| 
-263| 
-264|     // ========== BAN USER ==========
-265|     app.post('/api/admin/ban', async (req, res) => {
-266|         const { pseudo, reason } = req.body;
+263|             res.json({
+264|                 success: true,
+265|                 message: `${pseudo} a été expulsé et supprimé de la base`
+266|             });
 267| 
-268|         try {
-269|             // 1. Récupérer l'IP de l'utilisateur AVANT de le bannir
-270|             const userCheck = await pool.query(
-271|                 'SELECT last_ip FROM users WHERE pseudo = $1',
-272|                 [pseudo]
-273|             );
+268|         } catch (err) {
+269|             console.error('Erreur kick:', err);
+270|             res.status(500).json({ error: 'Erreur serveur lors de l\'expulsion' });
+271|         }
+272|     });
+273| 
 274| 
-275|             const userIp = userCheck.rows[0]?.last_ip;
-276| 
-277|             // 2. 🔥 INCRÉMENTER LE COMPTEUR DE BAN (AVANT TOUTE ACTION)
-278|             if (userIp) {
-279|                 await incrementIpCounter(userIp, 'ban');
-280|             }
-281| 
-282|             // 3. Bannir l'utilisateur
-283|             await pool.query('UPDATE users SET is_banned = true, ban_reason = $1 WHERE pseudo = $2', [reason, pseudo]);
-284| 
-285|             // 4. Déconnecter l'utilisateur
-286|             disconnectBannedUser(io, users, pseudo, reason);
+275|     // ========== BAN USER ==========
+276|     app.post('/api/admin/ban', async (req, res) => {
+277|         const { pseudo, reason } = req.body;
+278| 
+279|         try {
+280|             // 1. Récupérer l'IP de l'utilisateur AVANT de le bannir
+281|             const userCheck = await pool.query(
+282|                 'SELECT last_ip FROM users WHERE pseudo = $1',
+283|                 [pseudo]
+284|             );
+285| 
+286|             const userIp = userCheck.rows[0]?.last_ip;
 287| 
-288|             // 5. Notifier le panel admin
-289|             io.emit('new_moderation_action', {
-290|                 type: 'ban',
-291|                 target: pseudo,
-292|                 admin: req.session.adminUsername,
-293|                 timestamp: new Date()
-294|             });
-295| 
-296|             res.json({ success: true });
-297| 
-298|         } catch (err) {
-299|             console.error('Erreur ban:', err);
-300|             res.status(500).json({ error: 'Erreur lors du bannissement' });
-301|         }
-302|     });;
+288|             // 2. 🔥 ENREGISTRER L'IP DANS L'HISTORIQUE (AVANT LE BAN)
+289|             if (userIp) {
+290|                 try {
+291|                     await pool.query(
+292|                         `INSERT INTO ip_history (ip_address, action_type, target_pseudo, admin_pseudo)
+293|                          VALUES ($1, 'ban', $2, $3)`,
+294|                         [userIp, pseudo, req.session.adminUsername]
+295|                     );
+296|                     console.log(`✅ IP ${userIp} enregistrée pour ban de ${pseudo}`);
+297|                 } catch (err) {
+298|                     console.error('❌ Erreur enregistrement IP history (ban):', err);
+299|                 }
+300|             } else {
+301|                 console.warn(`⚠️ Pas d'IP pour ${pseudo}, impossible d'enregistrer l'historique de ban`);
+302|             }
 303| 
-304| 
-305|     // GET /api/admin/reports - Liste des signalements
-306|     app.get('/api/admin/reports', async (req, res) => {
-307|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
-308| 
-309|         try {
-310|             const result = await pool.query(`
-311|             SELECT r.*, 
-312|                    u1.pseudo as reporter_exists,
-313|                    u2.pseudo as target_exists
-314|             FROM reports r
-315|             LEFT JOIN users u1 ON u1.pseudo = r.reporter_pseudo
-316|             LEFT JOIN users u2 ON u2.pseudo = r.target_pseudo
-317|             ORDER BY r.created_at DESC
-318|             LIMIT 100
-319|         `);
-320|             res.json(result.rows);
-321|         } catch (err) {
-322|             console.error('Erreur reports:', err);
-323|             res.status(500).json({ error: 'Erreur serveur' });
-324|         }
-325|     });
+304|             // 3. Bannir l'utilisateur
+305|             await pool.query('UPDATE users SET is_banned = true, ban_reason = $1 WHERE pseudo = $2', [reason, pseudo]);
+306| 
+307|             // 4. Déconnecter l'utilisateur
+308|             disconnectBannedUser(io, users, pseudo, reason);
+309| 
+310|             // 5. Notifier le panel admin
+311|             io.emit('new_moderation_action', {
+312|                 type: 'ban',
+313|                 target: pseudo,
+314|                 admin: req.session.adminUsername,
+315|                 timestamp: new Date()
+316|             });
+317| 
+318|             res.json({ success: true });
+319| 
+320|         } catch (err) {
+321|             console.error('Erreur ban:', err);
+322|             res.status(500).json({ error: 'Erreur lors du bannissement' });
+323|         }
+324|     });
+325| 
 326| 
 327| 
-328| 
-329|     // GET /api/admin/moderation-logs - Journal des actions
-330|     app.get('/api/admin/moderation-logs', async (req, res) => {
-331|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
-332| 
-333|         try {
-334|             const result = await pool.query(`
-335|             SELECT * FROM moderation_actions 
-336|             ORDER BY created_at DESC 
-337|             LIMIT 100
-338|         `);
-339|             res.json(result.rows);
-340|         } catch (err) {
-341|             console.error('Erreur logs:', err);
-342|             res.status(500).json({ error: 'Erreur serveur' });
-343|         }
-344|     });
-345| 
-346|     // POST /api/admin/ignore-report - Ignorer un signalement
-347|     app.post('/api/admin/ignore-report', async (req, res) => {
-348|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
+328|     // GET /api/admin/reports - Liste des signalements
+329|     app.get('/api/admin/reports', async (req, res) => {
+330|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
+331| 
+332|         try {
+333|             const result = await pool.query(`
+334|             SELECT r.*, 
+335|                    u1.pseudo as reporter_exists,
+336|                    u2.pseudo as target_exists
+337|             FROM reports r
+338|             LEFT JOIN users u1 ON u1.pseudo = r.reporter_pseudo
+339|             LEFT JOIN users u2 ON u2.pseudo = r.target_pseudo
+340|             ORDER BY r.created_at DESC
+341|             LIMIT 100
+342|         `);
+343|             res.json(result.rows);
+344|         } catch (err) {
+345|             console.error('Erreur reports:', err);
+346|             res.status(500).json({ error: 'Erreur serveur' });
+347|         }
+348|     });
 349| 
-350|         const { reportId } = req.body;
-351|         if (!reportId) return res.status(400).json({ error: 'ID requis' });
-352| 
-353|         try {
-354|             await pool.query('DELETE FROM reports WHERE id = $1', [reportId]);
-355|             res.json({ success: true });
-356|         } catch (err) {
-357|             console.error('Erreur ignore report:', err);
-358|             res.status(500).json({ error: 'Erreur serveur' });
-359|         }
-360|     });
-361| 
-362| 
-363| 
-364|     // ========== MAINTENANCE MODE ==========
-365|     app.get('/api/admin/maintenance', async (req, res) => {
-366|         try {
-367|             const result = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
-368|             res.json({ enabled: result.rows[0]?.value === 'true' });
-369|         } catch (err) {
-370|             res.status(500).json({ error: 'Erreur' });
-371|         }
-372|     });
-373| 
-374|     app.post('/api/admin/maintenance', async (req, res) => {
-375|         const { enabled } = req.body;
-376|         if (typeof enabled !== 'boolean') {
-377|             return res.status(400).json({ error: 'enabled doit être true/false' });
-378|         }
-379|         try {
-380|             await pool.query("UPDATE settings SET value = $1 WHERE key = 'maintenance_mode'", [enabled ? 'true' : 'false']);
-381|             res.json({ success: true, enabled });
-382|         } catch (err) {
-383|             res.status(500).json({ error: 'Erreur' });
-384|         }
-385|     });
+350| 
+351| 
+352|     // GET /api/admin/moderation-logs - Journal des actions
+353|     app.get('/api/admin/moderation-logs', async (req, res) => {
+354|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
+355| 
+356|         try {
+357|             const result = await pool.query(`
+358|             SELECT * FROM moderation_actions 
+359|             ORDER BY created_at DESC 
+360|             LIMIT 100
+361|         `);
+362|             res.json(result.rows);
+363|         } catch (err) {
+364|             console.error('Erreur logs:', err);
+365|             res.status(500).json({ error: 'Erreur serveur' });
+366|         }
+367|     });
+368| 
+369|     // POST /api/admin/ignore-report - Ignorer un signalement
+370|     app.post('/api/admin/ignore-report', async (req, res) => {
+371|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
+372| 
+373|         const { reportId } = req.body;
+374|         if (!reportId) return res.status(400).json({ error: 'ID requis' });
+375| 
+376|         try {
+377|             await pool.query('DELETE FROM reports WHERE id = $1', [reportId]);
+378|             res.json({ success: true });
+379|         } catch (err) {
+380|             console.error('Erreur ignore report:', err);
+381|             res.status(500).json({ error: 'Erreur serveur' });
+382|         }
+383|     });
+384| 
+385| 
 386| 
-387|     // ========== VIDAGE MANUEL (API) ==========
-388| 
-389|     // POST /api/admin/clear-logs - Vider TOUT le journal
-390|     app.post('/api/admin/clear-logs', async (req, res) => {
-391|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
-392| 
-393|         try {
-394|             const result = await pool.query('DELETE FROM moderation_actions');
-395|             res.json({ success: true, deleted: result.rowCount });
-396|         } catch (err) {
-397|             console.error('Erreur clear logs:', err);
-398|             res.status(500).json({ error: 'Erreur serveur' });
-399|         }
-400|     });
-401| 
-402|     // POST /api/admin/clean-reports - Nettoyer les anciens signalements
-403|     app.post('/api/admin/clean-reports', async (req, res) => {
-404|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
-405| 
-406|         const { days = 60 } = req.body;
-407|         try {
-408|             const result = await pool.query(
-409|                 `DELETE FROM reports WHERE created_at < NOW() - INTERVAL '${days} days'`
-410|             );
-411|             res.json({ success: true, deleted: result.rowCount });
-412|         } catch (err) {
-413|             console.error('Erreur clean reports:', err);
-414|             res.status(500).json({ error: 'Erreur serveur' });
-415|         }
-416|     });
-417| 
-418|     // ========== RÉCUPÉRER L'HISTORIQUE IP ==========
-419|     app.post('/api/admin/ip-history', async (req, res) => {
-420|         if (!req.session.isAdmin) {
-421|             return res.status(401).json({ error: 'Non autorisé' });
+387|     // ========== MAINTENANCE MODE ==========
+388|     app.get('/api/admin/maintenance', async (req, res) => {
+389|         try {
+390|             const result = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
+391|             res.json({ enabled: result.rows[0]?.value === 'true' });
+392|         } catch (err) {
+393|             res.status(500).json({ error: 'Erreur' });
+394|         }
+395|     });
+396| 
+397|     app.post('/api/admin/maintenance', async (req, res) => {
+398|         const { enabled } = req.body;
+399|         if (typeof enabled !== 'boolean') {
+400|             return res.status(400).json({ error: 'enabled doit être true/false' });
+401|         }
+402|         try {
+403|             await pool.query("UPDATE settings SET value = $1 WHERE key = 'maintenance_mode'", [enabled ? 'true' : 'false']);
+404|             res.json({ success: true, enabled });
+405|         } catch (err) {
+406|             res.status(500).json({ error: 'Erreur' });
+407|         }
+408|     });
+409| 
+410|     // ========== VIDAGE MANUEL (API) ==========
+411| 
+412|     // POST /api/admin/clear-logs - Vider TOUT le journal
+413|     app.post('/api/admin/clear-logs', async (req, res) => {
+414|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
+415| 
+416|         try {
+417|             const result = await pool.query('DELETE FROM moderation_actions');
+418|             res.json({ success: true, deleted: result.rowCount });
+419|         } catch (err) {
+420|             console.error('Erreur clear logs:', err);
+421|             res.status(500).json({ error: 'Erreur serveur' });
 422|         }
-423| 
-424|         const { ip } = req.body;
-425|         if (!ip) {
-426|             return res.status(400).json({ error: 'IP requise' });
-427|         }
+423|     });
+424| 
+425|     // POST /api/admin/clean-reports - Nettoyer les anciens signalements
+426|     app.post('/api/admin/clean-reports', async (req, res) => {
+427|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
 428| 
-429|         try {
-430|             // Compter les kicks et bans sur les dernières 24h
+429|         const { days = 60 } = req.body;
+430|         try {
 431|             const result = await pool.query(
-432|                 `SELECT 
-433|                     COUNT(CASE WHEN action_type = 'kick' THEN 1 END) as kick_count,
-434|                     COUNT(CASE WHEN action_type = 'ban' THEN 1 END) as ban_count
-435|                  FROM ip_history 
-436|                  WHERE ip_address = $1 
-437|                  AND created_at > NOW() - INTERVAL '24 hours'`,
-438|                 [ip]
-439|             );
+432|                 `DELETE FROM reports WHERE created_at < NOW() - INTERVAL '${days} days'`
+433|             );
+434|             res.json({ success: true, deleted: result.rowCount });
+435|         } catch (err) {
+436|             console.error('Erreur clean reports:', err);
+437|             res.status(500).json({ error: 'Erreur serveur' });
+438|         }
+439|     });
 440| 
-441|             res.json({
-442|                 success: true,
-443|                 ip: ip,
-444|                 kick_count: parseInt(result.rows[0].kick_count) || 0,
-445|                 ban_count: parseInt(result.rows[0].ban_count) || 0
-446|             });
-447|         } catch (err) {
-448|             console.error('Erreur ip-history:', err);
-449|             res.status(500).json({ error: 'Erreur serveur' });
+441|     // ========== RÉCUPÉRER L'HISTORIQUE IP ==========
+442|     app.post('/api/admin/ip-history', async (req, res) => {
+443|         if (!req.session.isAdmin) {
+444|             return res.status(401).json({ error: 'Non autorisé' });
+445|         }
+446| 
+447|         const { ip } = req.body;
+448|         if (!ip) {
+449|             return res.status(400).json({ error: 'IP requise' });
 450|         }
-451|     });
-452| 
-453| };
+451| 
+452|         try {
+453|             // Compter les kicks et bans sur les dernières 24h
+454|             const result = await pool.query(
+455|                 `SELECT 
+456|                     COUNT(CASE WHEN action_type = 'kick' THEN 1 END) as kick_count,
+457|                     COUNT(CASE WHEN action_type = 'ban' THEN 1 END) as ban_count
+458|                  FROM ip_history 
+459|                  WHERE ip_address = $1 
+460|                  AND created_at > NOW() - INTERVAL '24 hours'`,
+461|                 [ip]
+462|             );
+463| 
+464|             res.json({
+465|                 success: true,
+466|                 ip: ip,
+467|                 kick_count: parseInt(result.rows[0].kick_count) || 0,
+468|                 ban_count: parseInt(result.rows[0].ban_count) || 0
+469|             });
+470|         } catch (err) {
+471|             console.error('Erreur ip-history:', err);
+472|             res.status(500).json({ error: 'Erreur serveur' });
+473|         }
+474|     });
+475| 
+476| };
 
 # FILE: /var/www/meetgay/modules/routes/api-messages.js
 
