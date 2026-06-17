@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-17 15:13:04
+# Généré le 2026-06-17 15:14:37
 
 ==============================================================================
 # SYSTEME DE CLONE DE FICHIER MIS A JOUR EN TEMPS REEL 
@@ -3895,7 +3895,302 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 1078| 
 1079| 
 1080|     });
-1081| })();
+1081| 
+1082|     // ============================================================
+1083|     // 🔥 NOUVELLES FONCTIONS POUR LA RECHERCHE PAR CODE POSTAL
+1084|     // ============================================================
+1085| 
+1086|     /**
+1087|      * Recherche les localités associées à un code postal belge
+1088|      * Utilise l'API Geocoding (plus fiable que Places Autocomplete)
+1089|      */
+1090|     function rechercherParCodePostal(postalCode) {
+1091|         console.log('📍 Recherche du code postal:', postalCode);
+1092| 
+1093|         const url = `/api/geocode?address=${encodeURIComponent(postalCode + ', Belgique')}&language=fr`;
+1094| 
+1095|         manualResults.innerHTML = '<div class="result-loading">🔍 Recherche du code postal...</div>';
+1096|         manualResults.style.display = 'block';
+1097| 
+1098|         fetch(url)
+1099|             .then(response => response.json())
+1100|             .then(data => {
+1101|                 console.log('📡 Réponse complète:', data);
+1102| 
+1103|                 if (data.status !== 'OK' || !data.results || data.results.length === 0) {
+1104|                     afficherErreurCodePostal(postalCode, 'Code postal non trouvé.');
+1105|                     return;
+1106|                 }
+1107| 
+1108|                 // 🔥 ÉTAPE 1 : Chercher le résultat de type "postal_code"
+1109|                 let postalResult = data.results.find(r =>
+1110|                     r.types && r.types.includes('postal_code')
+1111|                 );
+1112| 
+1113|                 let localites = [];
+1114| 
+1115|                 // 🔥 ÉTAPE 2 : Extraire les localités
+1116|                 if (postalResult) {
+1117|                     // Cas 1 : postcode_localities existe (plusieurs communes)
+1118|                     if (postalResult.postcode_localities && postalResult.postcode_localities.length > 0) {
+1119|                         localites = postalResult.postcode_localities.map(nom => ({ nom: nom }));
+1120|                         console.log('📋 postcode_localities trouvées:', localites);
+1121|                     }
+1122|                     // Cas 2 : pas de postcode_localities, on cherche la locality
+1123|                     else {
+1124|                         const locality = postalResult.address_components.find(c =>
+1125|                             c.types.includes('locality') || c.types.includes('postal_town')
+1126|                         )?.long_name;
+1127| 
+1128|                         if (locality) {
+1129|                             localites = [{ nom: locality }];
+1130|                             console.log('📍 locality trouvée:', locality);
+1131|                         }
+1132|                     }
+1133|                 }
+1134| 
+1135|                 // 🔥 ÉTAPE 3 : Si pas de localités trouvées, chercher un résultat de type "locality"
+1136|                 if (localites.length === 0) {
+1137|                     const localityResult = data.results.find(r =>
+1138|                         r.types && r.types.includes('locality') && r.types.includes('political')
+1139|                     );
+1140| 
+1141|                     if (localityResult) {
+1142|                         const locality = localityResult.address_components.find(c =>
+1143|                             c.types.includes('locality') || c.types.includes('postal_town')
+1144|                         )?.long_name;
+1145| 
+1146|                         if (locality) {
+1147|                             localites = [{ nom: locality }];
+1148|                             console.log('📍 locality trouvée (fallback):', locality);
+1149|                         }
+1150|                     }
+1151|                 }
+1152| 
+1153|                 // 🔥 ÉTAPE 4 : Si toujours rien, afficher une erreur
+1154|                 if (localites.length === 0) {
+1155|                     afficherErreurCodePostal(postalCode, 'Aucune localité trouvée pour ce code postal.');
+1156|                     return;
+1157|                 }
+1158| 
+1159|                 // 🔥 ÉTAPE 5 : Nettoyer les noms (enlever Belgique, Flandre, etc.)
+1160|                 const localitesNettoyees = localites
+1161|                     .map(loc => ({
+1162|                         nom: nettoyerPourAffichage(loc.nom)
+1163|                     }))
+1164|                     .filter(loc => loc.nom.length > 0);
+1165| 
+1166|                 if (localitesNettoyees.length === 0) {
+1167|                     afficherErreurCodePostal(postalCode, 'Aucune localité valide trouvée.');
+1168|                     return;
+1169|                 }
+1170| 
+1171|                 // 🔥 ÉTAPE 6 : Afficher les localités
+1172|                 afficherListeLocalites(localitesNettoyees, postalCode);
+1173|             })
+1174|             .catch(error => {
+1175|                 console.error('❌ Erreur:', error);
+1176|                 manualResults.innerHTML = `
+1177|                         <div style="background: #f8d7da; padding: 15px; border-radius: 8px; border: 2px solid #f44336;">
+1178|                             ❌ Erreur lors de la recherche. Réessayez.
+1179|                         </div>
+1180|                     `;
+1181|             });
+1182|     }
+1183| 
+1184|     /**
+1185|      * Nettoie un nom de localité en supprimant les mots indésirables
+1186|      * (Belgique, Flandre, Brabant, etc.)
+1187|      */
+1188|     function nettoyerPourAffichage(nom) {
+1189|         if (!nom) return '';
+1190| 
+1191|         const motsExclus = [
+1192|             'belgique', 'belgium', 'belgië',
+1193|             'flandre', 'vlaanderen', 'vlaams',
+1194|             'hainaut', 'henegouwen',
+1195|             'brabant', 'brabant flamand',
+1196|             'région flamande', 'vlaams gewest',
+1197|             'région wallonne', 'wallonie',
+1198|             'commune', 'gemeente',
+1199|             'arrondissement', 'bruxelles', 'brussel'
+1200|         ];
+1201| 
+1202|         let nettoyee = nom.toLowerCase().trim();
+1203| 
+1204|         motsExclus.forEach(mot => {
+1205|             const regex = new RegExp(`\\b${mot}\\b`, 'gi');
+1206|             nettoyee = nettoyee.replace(regex, '');
+1207|         });
+1208| 
+1209|         nettoyee = nettoyee.replace(/\s{2,}/g, ' ');
+1210|         nettoyee = nettoyee.replace(/,\s*,/g, ',');
+1211|         nettoyee = nettoyee.replace(/^\s*,\s*/, '');
+1212|         nettoyee = nettoyee.replace(/,\s*$/, '');
+1213|         nettoyee = nettoyee.trim();
+1214| 
+1215|         if (nettoyee.length > 1) {
+1216|             nettoyee = nettoyee.charAt(0).toUpperCase() + nettoyee.slice(1);
+1217|         }
+1218| 
+1219|         return nettoyee;
+1220|     }
+1221| 
+1222|     /**
+1223|      * Affiche la liste des localités pour un code postal
+1224|      * avec des boutons radio pour choisir
+1225|      */
+1226|     function afficherListeLocalites(localites, postalCode) {
+1227|         // Supprimer les doublons
+1228|         const uniques = [];
+1229|         const vues = new Set();
+1230|         localites.forEach(loc => {
+1231|             if (!vues.has(loc.nom)) {
+1232|                 vues.add(loc.nom);
+1233|                 uniques.push(loc);
+1234|             }
+1235|         });
+1236| 
+1237|         let html = `
+1238|                 <div style="background: #f0f8f0; padding: 15px; border-radius: 8px; border: 2px solid #4CAF50;">
+1239|                     <p style="font-weight: bold; color: #2e7d32;">📍 Code postal ${postalCode}</p>
+1240|                     <p>Choisissez votre localité :</p>
+1241|                     <div style="margin: 10px 0; display: flex; flex-direction: column; gap: 8px;">
+1242|             `;
+1243| 
+1244|         uniques.forEach((loc, index) => {
+1245|             html += `
+1246|                     <label style="display: flex; align-items: center; gap: 10px; font-size: 0.95em; cursor: pointer; padding: 8px 12px; border-radius: 8px; border: 1px solid #e0e0e0; transition: background 0.2s;" 
+1247|                            onmouseover="this.style.background='#e8f5e9'" 
+1248|                            onmouseout="this.style.background='white'">
+1249|                         <input type="radio" name="manualLocationChoice" value="${index}">
+1250|                         <span>${loc.nom}</span>
+1251|                     </label>
+1252|                 `;
+1253|         });
+1254| 
+1255|         html += `
+1256|                     </div>
+1257|                     <div style="margin-top: 10px;">
+1258|                         <label style="display: flex; align-items: center; gap: 8px; font-size: 0.9em;">
+1259|                             <input type="checkbox" id="manualGpsConsent">
+1260|                             J'accepte que ma localité soit utilisée dans mon profil
+1261|                         </label>
+1262|                     </div>
+1263|                     <div style="margin-top: 10px; display: flex; gap: 10px;">
+1264|                         <button type="button" id="manualConfirm" disabled style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 50px; cursor: pointer;">✅ Confirmer</button>
+1265|                         <button type="button" id="manualCancel" style="padding: 10px 20px; background: #f44336; color: white; border: none; border-radius: 50px; cursor: pointer;">🔄 Annuler</button>
+1266|                     </div>
+1267|                 </div>
+1268|             `;
+1269| 
+1270|         manualResults.innerHTML = html;
+1271|         manualResults.style.display = 'block';
+1272| 
+1273|         // Gestion des événements
+1274|         const manualConsent = document.getElementById('manualGpsConsent');
+1275|         const manualConfirm = document.getElementById('manualConfirm');
+1276|         const manualCancel = document.getElementById('manualCancel');
+1277|         const manualRadios = document.querySelectorAll('input[name="manualLocationChoice"]');
+1278| 
+1279|         function updateConfirmButton() {
+1280|             const consentChecked = manualConsent?.checked || false;
+1281|             const radioSelected = document.querySelector('input[name="manualLocationChoice"]:checked') !== null;
+1282|             if (manualConfirm) {
+1283|                 manualConfirm.disabled = !(consentChecked && radioSelected);
+1284|             }
+1285|         }
+1286| 
+1287|         if (manualConsent) {
+1288|             manualConsent.addEventListener('change', updateConfirmButton);
+1289|         }
+1290| 
+1291|         manualRadios.forEach(radio => {
+1292|             radio.addEventListener('change', updateConfirmButton);
+1293|         });
+1294| 
+1295|         if (manualConfirm) {
+1296|             manualConfirm.addEventListener('click', function () {
+1297|                 const selectedChoice = document.querySelector('input[name="manualLocationChoice"]:checked');
+1298|                 if (!selectedChoice) {
+1299|                     alert('Veuillez choisir une localité.');
+1300|                     return;
+1301|                 }
+1302| 
+1303|                 const index = parseInt(selectedChoice.value);
+1304|                 const selected = uniques[index];
+1305| 
+1306|                 // Sauvegarder dans le formulaire
+1307|                 let hiddenInput = document.getElementById('location_precise_hidden');
+1308|                 if (!hiddenInput) {
+1309|                     hiddenInput = document.createElement('input');
+1310|                     hiddenInput.type = 'hidden';
+1311|                     hiddenInput.id = 'location_precise_hidden';
+1312|                     hiddenInput.name = 'location_precise';
+1313|                     document.getElementById('loginForm').appendChild(hiddenInput);
+1314|                 }
+1315|                 hiddenInput.value = '';
+1316| 
+1317|                 // Mettre à jour le select
+1318|                 const locationSelect = document.getElementById('location');
+1319|                 let optionExists = false;
+1320|                 for (let opt of locationSelect.options) {
+1321|                     if (opt.value === selected.nom) {
+1322|                         optionExists = true;
+1323|                         break;
+1324|                     }
+1325|                 }
+1326|                 if (!optionExists) {
+1327|                     const newOption = document.createElement('option');
+1328|                     newOption.value = selected.nom;
+1329|                     newOption.textContent = selected.nom;
+1330|                     locationSelect.appendChild(newOption);
+1331|                 }
+1332|                 locationSelect.value = selected.nom;
+1333| 
+1334|                 // Afficher la confirmation
+1335|                 document.getElementById('gpsZone').innerHTML = `
+1336|                         <div style="padding: 10px; background: #e8f5e9; border-radius: 5px; color: #2e7d32;">
+1337|                             ✅ Localisation confirmée : <strong>${selected.nom}</strong>
+1338|                             <br><small>Votre profil affichera : ${selected.nom}</small>
+1339|                         </div>
+1340|                     `;
+1341| 
+1342|                 // Cacher les résultats
+1343|                 manualResults.style.display = 'none';
+1344|                 manualSearchZone.style.display = 'none';
+1345|                 document.getElementById('switchToManualBtn').style.display = 'inline-block';
+1346|             });
+1347|         }
+1348| 
+1349|         if (manualCancel) {
+1350|             manualCancel.addEventListener('click', function () {
+1351|                 manualResults.style.display = 'none';
+1352|                 manualSearchZone.style.display = 'none';
+1353|                 document.getElementById('switchToManualBtn').style.display = 'inline-block';
+1354|                 document.getElementById('gpsResult').style.display = 'block';
+1355|             });
+1356|         }
+1357|     }
+1358| 
+1359|     /**
+1360|      * Affiche un message d'erreur pour un code postal
+1361|      */
+1362|     function afficherErreurCodePostal(postalCode, message) {
+1363|         manualResults.innerHTML = `
+1364|                 <div style="background: #fff3cd; padding: 15px; border-radius: 8px; border: 2px solid #ffc107;">
+1365|                     <p>⚠️ <strong>Code postal ${postalCode}</strong></p>
+1366|                     <p>${message}</p>
+1367|                     <p style="font-size: 0.9em; color: #555; margin-top: 10px;">
+1368|                         💡 Essayez de taper le nom de la ville directement dans la barre de recherche.
+1369|                     </p>
+1370|                 </div>
+1371|             `;
+1372|         manualResults.style.display = 'block';
+1373|     }
+1374| 
+1375| 
+1376| })();
 
 # FILE: /var/www/meetgay/public/js/fingerprint-source.js
 
@@ -9944,7 +10239,302 @@ mais#       🔴 RÈGLE ABSOLUE : JAMAIS de 1| ou LIGNE 1 à l'intérieur du blo
 1078| 
 1079| 
 1080|     });
-1081| })();
+1081| 
+1082|     // ============================================================
+1083|     // 🔥 NOUVELLES FONCTIONS POUR LA RECHERCHE PAR CODE POSTAL
+1084|     // ============================================================
+1085| 
+1086|     /**
+1087|      * Recherche les localités associées à un code postal belge
+1088|      * Utilise l'API Geocoding (plus fiable que Places Autocomplete)
+1089|      */
+1090|     function rechercherParCodePostal(postalCode) {
+1091|         console.log('📍 Recherche du code postal:', postalCode);
+1092| 
+1093|         const url = `/api/geocode?address=${encodeURIComponent(postalCode + ', Belgique')}&language=fr`;
+1094| 
+1095|         manualResults.innerHTML = '<div class="result-loading">🔍 Recherche du code postal...</div>';
+1096|         manualResults.style.display = 'block';
+1097| 
+1098|         fetch(url)
+1099|             .then(response => response.json())
+1100|             .then(data => {
+1101|                 console.log('📡 Réponse complète:', data);
+1102| 
+1103|                 if (data.status !== 'OK' || !data.results || data.results.length === 0) {
+1104|                     afficherErreurCodePostal(postalCode, 'Code postal non trouvé.');
+1105|                     return;
+1106|                 }
+1107| 
+1108|                 // 🔥 ÉTAPE 1 : Chercher le résultat de type "postal_code"
+1109|                 let postalResult = data.results.find(r =>
+1110|                     r.types && r.types.includes('postal_code')
+1111|                 );
+1112| 
+1113|                 let localites = [];
+1114| 
+1115|                 // 🔥 ÉTAPE 2 : Extraire les localités
+1116|                 if (postalResult) {
+1117|                     // Cas 1 : postcode_localities existe (plusieurs communes)
+1118|                     if (postalResult.postcode_localities && postalResult.postcode_localities.length > 0) {
+1119|                         localites = postalResult.postcode_localities.map(nom => ({ nom: nom }));
+1120|                         console.log('📋 postcode_localities trouvées:', localites);
+1121|                     }
+1122|                     // Cas 2 : pas de postcode_localities, on cherche la locality
+1123|                     else {
+1124|                         const locality = postalResult.address_components.find(c =>
+1125|                             c.types.includes('locality') || c.types.includes('postal_town')
+1126|                         )?.long_name;
+1127| 
+1128|                         if (locality) {
+1129|                             localites = [{ nom: locality }];
+1130|                             console.log('📍 locality trouvée:', locality);
+1131|                         }
+1132|                     }
+1133|                 }
+1134| 
+1135|                 // 🔥 ÉTAPE 3 : Si pas de localités trouvées, chercher un résultat de type "locality"
+1136|                 if (localites.length === 0) {
+1137|                     const localityResult = data.results.find(r =>
+1138|                         r.types && r.types.includes('locality') && r.types.includes('political')
+1139|                     );
+1140| 
+1141|                     if (localityResult) {
+1142|                         const locality = localityResult.address_components.find(c =>
+1143|                             c.types.includes('locality') || c.types.includes('postal_town')
+1144|                         )?.long_name;
+1145| 
+1146|                         if (locality) {
+1147|                             localites = [{ nom: locality }];
+1148|                             console.log('📍 locality trouvée (fallback):', locality);
+1149|                         }
+1150|                     }
+1151|                 }
+1152| 
+1153|                 // 🔥 ÉTAPE 4 : Si toujours rien, afficher une erreur
+1154|                 if (localites.length === 0) {
+1155|                     afficherErreurCodePostal(postalCode, 'Aucune localité trouvée pour ce code postal.');
+1156|                     return;
+1157|                 }
+1158| 
+1159|                 // 🔥 ÉTAPE 5 : Nettoyer les noms (enlever Belgique, Flandre, etc.)
+1160|                 const localitesNettoyees = localites
+1161|                     .map(loc => ({
+1162|                         nom: nettoyerPourAffichage(loc.nom)
+1163|                     }))
+1164|                     .filter(loc => loc.nom.length > 0);
+1165| 
+1166|                 if (localitesNettoyees.length === 0) {
+1167|                     afficherErreurCodePostal(postalCode, 'Aucune localité valide trouvée.');
+1168|                     return;
+1169|                 }
+1170| 
+1171|                 // 🔥 ÉTAPE 6 : Afficher les localités
+1172|                 afficherListeLocalites(localitesNettoyees, postalCode);
+1173|             })
+1174|             .catch(error => {
+1175|                 console.error('❌ Erreur:', error);
+1176|                 manualResults.innerHTML = `
+1177|                         <div style="background: #f8d7da; padding: 15px; border-radius: 8px; border: 2px solid #f44336;">
+1178|                             ❌ Erreur lors de la recherche. Réessayez.
+1179|                         </div>
+1180|                     `;
+1181|             });
+1182|     }
+1183| 
+1184|     /**
+1185|      * Nettoie un nom de localité en supprimant les mots indésirables
+1186|      * (Belgique, Flandre, Brabant, etc.)
+1187|      */
+1188|     function nettoyerPourAffichage(nom) {
+1189|         if (!nom) return '';
+1190| 
+1191|         const motsExclus = [
+1192|             'belgique', 'belgium', 'belgië',
+1193|             'flandre', 'vlaanderen', 'vlaams',
+1194|             'hainaut', 'henegouwen',
+1195|             'brabant', 'brabant flamand',
+1196|             'région flamande', 'vlaams gewest',
+1197|             'région wallonne', 'wallonie',
+1198|             'commune', 'gemeente',
+1199|             'arrondissement', 'bruxelles', 'brussel'
+1200|         ];
+1201| 
+1202|         let nettoyee = nom.toLowerCase().trim();
+1203| 
+1204|         motsExclus.forEach(mot => {
+1205|             const regex = new RegExp(`\\b${mot}\\b`, 'gi');
+1206|             nettoyee = nettoyee.replace(regex, '');
+1207|         });
+1208| 
+1209|         nettoyee = nettoyee.replace(/\s{2,}/g, ' ');
+1210|         nettoyee = nettoyee.replace(/,\s*,/g, ',');
+1211|         nettoyee = nettoyee.replace(/^\s*,\s*/, '');
+1212|         nettoyee = nettoyee.replace(/,\s*$/, '');
+1213|         nettoyee = nettoyee.trim();
+1214| 
+1215|         if (nettoyee.length > 1) {
+1216|             nettoyee = nettoyee.charAt(0).toUpperCase() + nettoyee.slice(1);
+1217|         }
+1218| 
+1219|         return nettoyee;
+1220|     }
+1221| 
+1222|     /**
+1223|      * Affiche la liste des localités pour un code postal
+1224|      * avec des boutons radio pour choisir
+1225|      */
+1226|     function afficherListeLocalites(localites, postalCode) {
+1227|         // Supprimer les doublons
+1228|         const uniques = [];
+1229|         const vues = new Set();
+1230|         localites.forEach(loc => {
+1231|             if (!vues.has(loc.nom)) {
+1232|                 vues.add(loc.nom);
+1233|                 uniques.push(loc);
+1234|             }
+1235|         });
+1236| 
+1237|         let html = `
+1238|                 <div style="background: #f0f8f0; padding: 15px; border-radius: 8px; border: 2px solid #4CAF50;">
+1239|                     <p style="font-weight: bold; color: #2e7d32;">📍 Code postal ${postalCode}</p>
+1240|                     <p>Choisissez votre localité :</p>
+1241|                     <div style="margin: 10px 0; display: flex; flex-direction: column; gap: 8px;">
+1242|             `;
+1243| 
+1244|         uniques.forEach((loc, index) => {
+1245|             html += `
+1246|                     <label style="display: flex; align-items: center; gap: 10px; font-size: 0.95em; cursor: pointer; padding: 8px 12px; border-radius: 8px; border: 1px solid #e0e0e0; transition: background 0.2s;" 
+1247|                            onmouseover="this.style.background='#e8f5e9'" 
+1248|                            onmouseout="this.style.background='white'">
+1249|                         <input type="radio" name="manualLocationChoice" value="${index}">
+1250|                         <span>${loc.nom}</span>
+1251|                     </label>
+1252|                 `;
+1253|         });
+1254| 
+1255|         html += `
+1256|                     </div>
+1257|                     <div style="margin-top: 10px;">
+1258|                         <label style="display: flex; align-items: center; gap: 8px; font-size: 0.9em;">
+1259|                             <input type="checkbox" id="manualGpsConsent">
+1260|                             J'accepte que ma localité soit utilisée dans mon profil
+1261|                         </label>
+1262|                     </div>
+1263|                     <div style="margin-top: 10px; display: flex; gap: 10px;">
+1264|                         <button type="button" id="manualConfirm" disabled style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 50px; cursor: pointer;">✅ Confirmer</button>
+1265|                         <button type="button" id="manualCancel" style="padding: 10px 20px; background: #f44336; color: white; border: none; border-radius: 50px; cursor: pointer;">🔄 Annuler</button>
+1266|                     </div>
+1267|                 </div>
+1268|             `;
+1269| 
+1270|         manualResults.innerHTML = html;
+1271|         manualResults.style.display = 'block';
+1272| 
+1273|         // Gestion des événements
+1274|         const manualConsent = document.getElementById('manualGpsConsent');
+1275|         const manualConfirm = document.getElementById('manualConfirm');
+1276|         const manualCancel = document.getElementById('manualCancel');
+1277|         const manualRadios = document.querySelectorAll('input[name="manualLocationChoice"]');
+1278| 
+1279|         function updateConfirmButton() {
+1280|             const consentChecked = manualConsent?.checked || false;
+1281|             const radioSelected = document.querySelector('input[name="manualLocationChoice"]:checked') !== null;
+1282|             if (manualConfirm) {
+1283|                 manualConfirm.disabled = !(consentChecked && radioSelected);
+1284|             }
+1285|         }
+1286| 
+1287|         if (manualConsent) {
+1288|             manualConsent.addEventListener('change', updateConfirmButton);
+1289|         }
+1290| 
+1291|         manualRadios.forEach(radio => {
+1292|             radio.addEventListener('change', updateConfirmButton);
+1293|         });
+1294| 
+1295|         if (manualConfirm) {
+1296|             manualConfirm.addEventListener('click', function () {
+1297|                 const selectedChoice = document.querySelector('input[name="manualLocationChoice"]:checked');
+1298|                 if (!selectedChoice) {
+1299|                     alert('Veuillez choisir une localité.');
+1300|                     return;
+1301|                 }
+1302| 
+1303|                 const index = parseInt(selectedChoice.value);
+1304|                 const selected = uniques[index];
+1305| 
+1306|                 // Sauvegarder dans le formulaire
+1307|                 let hiddenInput = document.getElementById('location_precise_hidden');
+1308|                 if (!hiddenInput) {
+1309|                     hiddenInput = document.createElement('input');
+1310|                     hiddenInput.type = 'hidden';
+1311|                     hiddenInput.id = 'location_precise_hidden';
+1312|                     hiddenInput.name = 'location_precise';
+1313|                     document.getElementById('loginForm').appendChild(hiddenInput);
+1314|                 }
+1315|                 hiddenInput.value = '';
+1316| 
+1317|                 // Mettre à jour le select
+1318|                 const locationSelect = document.getElementById('location');
+1319|                 let optionExists = false;
+1320|                 for (let opt of locationSelect.options) {
+1321|                     if (opt.value === selected.nom) {
+1322|                         optionExists = true;
+1323|                         break;
+1324|                     }
+1325|                 }
+1326|                 if (!optionExists) {
+1327|                     const newOption = document.createElement('option');
+1328|                     newOption.value = selected.nom;
+1329|                     newOption.textContent = selected.nom;
+1330|                     locationSelect.appendChild(newOption);
+1331|                 }
+1332|                 locationSelect.value = selected.nom;
+1333| 
+1334|                 // Afficher la confirmation
+1335|                 document.getElementById('gpsZone').innerHTML = `
+1336|                         <div style="padding: 10px; background: #e8f5e9; border-radius: 5px; color: #2e7d32;">
+1337|                             ✅ Localisation confirmée : <strong>${selected.nom}</strong>
+1338|                             <br><small>Votre profil affichera : ${selected.nom}</small>
+1339|                         </div>
+1340|                     `;
+1341| 
+1342|                 // Cacher les résultats
+1343|                 manualResults.style.display = 'none';
+1344|                 manualSearchZone.style.display = 'none';
+1345|                 document.getElementById('switchToManualBtn').style.display = 'inline-block';
+1346|             });
+1347|         }
+1348| 
+1349|         if (manualCancel) {
+1350|             manualCancel.addEventListener('click', function () {
+1351|                 manualResults.style.display = 'none';
+1352|                 manualSearchZone.style.display = 'none';
+1353|                 document.getElementById('switchToManualBtn').style.display = 'inline-block';
+1354|                 document.getElementById('gpsResult').style.display = 'block';
+1355|             });
+1356|         }
+1357|     }
+1358| 
+1359|     /**
+1360|      * Affiche un message d'erreur pour un code postal
+1361|      */
+1362|     function afficherErreurCodePostal(postalCode, message) {
+1363|         manualResults.innerHTML = `
+1364|                 <div style="background: #fff3cd; padding: 15px; border-radius: 8px; border: 2px solid #ffc107;">
+1365|                     <p>⚠️ <strong>Code postal ${postalCode}</strong></p>
+1366|                     <p>${message}</p>
+1367|                     <p style="font-size: 0.9em; color: #555; margin-top: 10px;">
+1368|                         💡 Essayez de taper le nom de la ville directement dans la barre de recherche.
+1369|                     </p>
+1370|                 </div>
+1371|             `;
+1372|         manualResults.style.display = 'block';
+1373|     }
+1374| 
+1375| 
+1376| })();
 
 # FILE: /var/www/meetgay/public/js/fingerprint-source.js
 
