@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-24 18:31:07
+# Généré le 2026-06-24 18:33:42
 
 # Instructions IA non disponibles
 
@@ -4727,7 +4727,889 @@
 
 # FILE: /var/www/meetgay/public/js/geolocalisation.js
 
-1| ﻿
+1| ﻿// ========== 1.GÉOLOCALISATION ==========
+2| document.addEventListener('DOMContentLoaded', function () {
+3| 
+4|     // Références des éléments
+5|     const locationSelect = document.getElementById('location');
+6|     const gpsZone = document.getElementById('gpsZone');
+7|     const gpsStatus = document.getElementById('gpsStatus');
+8|     const gpsResult = document.getElementById('gpsResult');
+9|     const detectedCity = document.getElementById('detectedCity');
+10|     const displayPreview = document.getElementById('displayPreview');
+11|     const gpsConsent = document.getElementById('gpsConsent');
+12|     const gpsConfirm = document.getElementById('gpsConfirm');
+13|     const gpsCancel = document.getElementById('gpsCancel');
+14| 
+15|     let detectedLat = null;
+16|     let detectedLng = null;
+17|     let detectedCityName = '';
+18|     let detectedRegionName = '';  // ← la commune (county)
+19| 
+20|     // 1. Détecter le changement dans la liste déroulante
+21|     locationSelect.addEventListener('change', function () {
+22|         if (this.value === 'GPS') {
+23|             // Afficher la zone GPS
+24|             gpsZone.style.display = 'block';
+25|             gpsResult.style.display = 'none';
+26|             gpsStatus.style.display = 'block';
+27|             gpsStatus.innerHTML = '📡 Recherche de votre position...';
+28|             gpsConsent.checked = false;
+29|             gpsConfirm.disabled = true;
+30| 
+31|             // Démarrer la géolocalisation
+32|             startGeolocation();
+33|         } else {
+34|             // Si l'utilisateur choisit autre chose, cacher la zone GPS
+35|             gpsZone.style.display = 'none';
+36|             gpsConsent.checked = false;
+37|             gpsConfirm.disabled = true;
+38|         }
+39|     });
+40| 
+41|     // 2. Fonction de géolocalisation
+42|     function startGeolocation() {
+43|         if (!navigator.geolocation) {
+44|             gpsStatus.innerHTML = '❌ Votre navigateur ne supporte pas la géolocalisation. Utilisez la liste déroulante.';
+45|             return;
+46|         }
+47| 
+48|         navigator.geolocation.getCurrentPosition(
+49|             // Succès
+50|             function (position) {
+51|                 detectedLat = position.coords.latitude;
+52|                 detectedLng = position.coords.longitude;
+53| 
+54|                 gpsStatus.innerHTML = '📍 Position trouvée ! Je cherche le nom de la ville...';
+55| 
+56|                 // Appel à Nominatim pour avoir le nom de la ville
+57|                 getCityName(detectedLat, detectedLng);
+58| 
+59|             },
+60|             // Erreur
+61|             function (error) {
+62|                 let msg = '❌ Erreur de géolocalisation : ';
+63|                 switch (error.code) {
+64|                     case error.PERMISSION_DENIED:
+65|                         msg += 'Vous avez refusé l\'accès à votre position. Utilisez la liste déroulante.';
+66|                         break;
+67|                     case error.POSITION_UNAVAILABLE:
+68|                         msg += 'Position indisponible. Vérifiez votre connexion.';
+69|                         break;
+70|                     case error.TIMEOUT:
+71|                         msg += 'Temps écoulé. Réessayez.';
+72|                         break;
+73|                     default:
+74|                         msg += error.message;
+75|                 }
+76|                 gpsStatus.innerHTML = msg;
+77|             },
+78|             {
+79|                 enableHighAccuracy: true,
+80|                 timeout: 10000,
+81|                 maximumAge: 0
+82|             }
+83|         );
+84|     }
+85| 
+86|     function getCityName(lat, lng) {
+87|         const url = `/api/geocode?lat=${lat}&lng=${lng}`;
+88| 
+89|         fetch(url)
+90|             .then(response => response.json())
+91|             .then(data => {
+92|                 console.log('📡 Réponse Google Maps:', data);
+93| 
+94|                 if (data.status === 'OK' && data.results.length > 0) {
+95|                     // On prend le premier résultat (le plus précis)
+96|                     // === NOUVEAU CODE ===
+97|                     // 🔥 On prend le résultat le PLUS PRÉCIS (viewport le plus petit)
+98|                     const sortedResults = [...data.results].sort((a, b) => {
+99|                         const sizeA = (a.geometry.viewport.northeast.lat - a.geometry.viewport.southwest.lat) *
+100|                             (a.geometry.viewport.northeast.lng - a.geometry.viewport.southwest.lng);
+101|                         const sizeB = (b.geometry.viewport.northeast.lat - b.geometry.viewport.southwest.lat) *
+102|                             (b.geometry.viewport.northeast.lng - b.geometry.viewport.southwest.lng);
+103|                         return sizeA - sizeB;
+104|                     });
+105|                     const result = sortedResults[0];
+106|                     console.log('📍 Résultat le PLUS PRÉCIS sélectionné:', result.formatted_address);
+107|                     const components = result.address_components;
+108| 
+109|                     // --- RÉCUPÉRATION DES COMPOSANTS ---
+110|                     const trouver = (type) => components.find(c => c.types.includes(type))?.long_name;
+111| 
+112|                     const locality = trouver("locality") || trouver("postal_town");
+113|                     const sublocality = trouver("sublocality") || trouver("sublocality_level_1") || trouver("neighborhood");
+114|                     const postalCode = trouver("postal_code");
+115|                     const province = trouver("administrative_area_level_2") || trouver("administrative_area_level_3");
+116|                     const region = trouver("administrative_area_level_1");
+117| 
+118|                     // 🔥 NOUVEAU : Récupérer les localités du code postal
+119|                     const postcodeLocalities = data.results.find(r => r.types.includes("postal_code"))?.postcode_localities || [];
+120| 
+121|                     console.log('📍 Locality:', locality);
+122|                     console.log('📍 Sublocality:', sublocality);
+123|                     console.log('📍 Postcode Localities:', postcodeLocalities);
+124| 
+125|                     // --- DÉTERMINATION DE LA COMMUNE PRÉCISE ---
+126|                     let communePrecise = locality;
+127| 
+128|                     // Priorité 1: sublocality (Pamel, Borchtlombeek, Strijtem)
+129|                     if (sublocality && sublocality !== locality) {
+130|                         communePrecise = sublocality;
+131|                     }
+132|                     // Priorité 2: postcode_localities (si sublocality n'existe pas)
+133|                     else if (postcodeLocalities.length > 0 && postcodeLocalities[0] !== locality) {
+134|                         communePrecise = postcodeLocalities[0];
+135|                     }
+136| 
+137|                     console.log('✅ Commune précise trouvée:', communePrecise);
+138| 
+139|                     // --- AFFICHAGE ---
+140|                     gpsStatus.style.display = 'none';
+141|                     gpsResult.style.display = 'block';
+142|                     detectedCity.textContent = locality;
+143|                     document.getElementById('detectedCounty').textContent = communePrecise;
+144| 
+145|                     // OPTION 1 : juste la ville
+146|                     document.getElementById('choiceRegionLabel').textContent = locality;
+147| 
+148|                     // OPTION 2 : commune précise + ville (si différente)
+149|                     let option2 = locality;
+150|                     if (communePrecise && communePrecise !== locality) {
+151|                         option2 = `${communePrecise} - ${locality}`;
+152|                     } else if (country) {
+153|                         option2 = `${locality} - ${country}`;
+154|                     }
+155|                     document.getElementById('choicePreciseLabel').textContent = option2;
+156| 
+157|                     // Réinitialiser les radios
+158|                     document.querySelectorAll('input[name="locationChoice"]').forEach(el => el.checked = false);
+159|                     document.getElementById('gpsConsent').checked = false;
+160|                     document.getElementById('gpsConfirm').disabled = true;
+161|                     gpsConsent.disabled = false;
+162| 
+163|                     // Stocker pour confirmation
+164|                     detectedCityName = locality;
+165|                     detectedRegionName = communePrecise;
+166| 
+167|                     // Message informatif
+168|                     const infoMsg = document.createElement('div');
+169|                     infoMsg.style.cssText = 'font-size: 0.8em; color: #666; margin-top: 5px;';
+170|                     infoMsg.innerHTML = `
+171|                     ℹ️ <strong>Option 1:</strong> ${locality}<br>
+172|                     ℹ️ <strong>Option 2:</strong> ${option2}
+173|                 `;
+174|                     const oldMsg = document.querySelector('.gps-info-msg');
+175|                     if (oldMsg) oldMsg.remove();
+176|                     infoMsg.className = 'gps-info-msg';
+177|                     document.querySelector('#gpsResult')?.appendChild(infoMsg);
+178| 
+179|                 } else {
+180|                     gpsStatus.innerHTML = '❌ Erreur Google Maps';
+181|                 }
+182|             })
+183|             .catch(error => {
+184|                 gpsStatus.innerHTML = '❌ Erreur';
+185|                 console.error(error);
+186|             });
+187|     }
+188| 
+189|     // 4. Case à cocher : activer/désactiver le bouton Confirmer
+190|     gpsConsent.addEventListener('change', function () {
+191|         const radioSelected = document.querySelector('input[name="locationChoice"]:checked') !== null;
+192|         gpsConfirm.disabled = !(this.checked && radioSelected);
+193|     });
+194| 
+195|     // 👇 NOUVEAU : Écouter les radios
+196|     document.querySelectorAll('input[name="locationChoice"]').forEach(radio => {
+197|         radio.addEventListener('change', function () {
+198|             const consentChecked = gpsConsent.checked;
+199|             gpsConfirm.disabled = !(consentChecked && this.checked);
+200|         });
+201|     });
+202| 
+203|     // 5. Bouton Confirmer
+204|     gpsConfirm.addEventListener('click', function () {
+205|         if (!detectedCityName) {
+206|             alert('Aucune ville détectée. Réessayez.');
+207|             return;
+208|         }
+209| 
+210|         const selectedChoice = document.querySelector('input[name="locationChoice"]:checked');
+211|         if (!selectedChoice) {
+212|             alert('Veuillez choisir comment afficher votre localité.');
+213|             return;
+214|         }
+215| 
+216|         let locationNameValue = '';
+217|         let locationPreciseValue = null;
+218| 
+219|         if (selectedChoice.value === 'region_only') {
+220|             // Option 1 : juste la ville
+221|             locationNameValue = detectedCityName;      // ex: "Dilbeek"
+222|             locationPreciseValue = null;
+223|         } else {
+224|             // Option 2 : commune + ville
+225|             if (detectedRegionName && detectedRegionName !== detectedCityName) {
+226|                 locationNameValue = detectedCityName;          // ex: "Dilbeek"
+227|                 locationPreciseValue = detectedRegionName;     // ex: "Bekkerzeel"
+228|             } else {
+229|                 locationNameValue = detectedCityName;
+230|                 locationPreciseValue = null;
+231|             }
+232|         }
+233| 
+234|         // 🔥 DEBUG - Vérifier les valeurs
+235|         console.log('📍 Sauvegarde GPS - locationName:', locationNameValue);
+236|         console.log('📍 Sauvegarde GPS - locationPrecise:', locationPreciseValue);
+237| 
+238|         // Sauvegarder dans le champ caché
+239|         let hiddenInput = document.getElementById('location_precise_hidden');
+240|         if (!hiddenInput) {
+241|             hiddenInput = document.createElement('input');
+242|             hiddenInput.type = 'hidden';
+243|             hiddenInput.id = 'location_precise_hidden';
+244|             hiddenInput.name = 'location_precise';
+245|             document.getElementById('loginForm').appendChild(hiddenInput);
+246|         }
+247|         hiddenInput.value = locationPreciseValue !== null ? locationPreciseValue : '';
+248| 
+249|         // 🔥 On met la VILLE dans le select, pas "GPS"
+250|         // On crée une option pour la ville si elle n'existe pas
+251|         const locationSelect = document.getElementById('location');
+252|         let optionExists = false;
+253|         for (let opt of locationSelect.options) {
+254|             if (opt.value === locationNameValue) {
+255|                 optionExists = true;
+256|                 break;
+257|             }
+258|         }
+259|         if (!optionExists) {
+260|             const newOption = document.createElement('option');
+261|             newOption.value = locationNameValue;
+262|             newOption.textContent = locationNameValue;
+263|             locationSelect.appendChild(newOption);
+264|         }
+265|         locationSelect.value = locationNameValue;
+266|         locationSelect.disabled = false; // Ne pas désactiver
+267| 
+268|         // Afficher le résumé
+269|         const displayText = locationPreciseValue ? `${locationPreciseValue} - ${locationNameValue}` : locationNameValue;
+270| 
+271|         gpsZone.innerHTML = `
+272|         <div style="padding: 10px; background: #e8f5e9; border-radius: 5px; color: #2e7d32;">
+273|             ✅ Localisation confirmée : <strong>${locationNameValue}</strong>
+274|             <br><small>Votre profil affichera : ${displayText}</small>
+275|         </div>
+276|     `;
+277|     });
+278| 
+279| 
+280|     // 6. Bouton Annuler / Reset
+281|     gpsCancel.addEventListener('click', function () {
+282|         // Remettre le select sur une valeur vide
+283|         locationSelect.value = '';
+284|         locationSelect.disabled = false;
+285| 
+286|         // Cacher la zone GPS
+287|         gpsZone.style.display = 'none';
+288|         gpsResult.style.display = 'none';
+289|         gpsStatus.style.display = 'block';
+290|         gpsConsent.checked = false;
+291|         gpsConsent.disabled = true;
+292|         gpsConfirm.disabled = true;
+293| 
+294|         // Supprimer le champ caché
+295|         const hiddenInput = document.getElementById('location_precise_hidden');
+296|         if (hiddenInput) {
+297|             hiddenInput.remove();
+298|         }
+299| 
+300|         detectedCityName = '';
+301|         detectedLat = null;
+302|         detectedLng = null;
+303|     });
+304| 
+305|     // Réinitialiser les radios
+306|     document.querySelectorAll('input[name="locationChoice"]').forEach(el => el.checked = false);
+307| 
+308| });
+309| //FIN GPS
+310| 
+311| // ===== 2.FONCTION DE RECHERCHE MANUELLE - VERSION PROPRE =====
+312| function rechercherLocalite(query) {
+313|     const queryString = String(query).trim();
+314| 
+315|     if (!queryString) {
+316|         manualResults.innerHTML = `<div class="result-error">Veuillez entrer un code postal ou un nom de lieu.</div>`;
+317|         manualResults.style.display = 'block';
+318|         return;
+319|     }
+320| 
+321|     // ÉTAPE 1 : Recherche initiale pour obtenir les coordonnées
+322|     const searchQuery = `${queryString}, Belgique`;
+323|     const urlGeo = `/api/geocode?address=${encodeURIComponent(searchQuery)}&language=fr`;
+324| 
+325|     console.log('🚀 Recherche initiale:', searchQuery);
+326| 
+327|     manualResults.innerHTML = '<div class="result-loading">🔍 Recherche en cours...</div>';
+328|     manualResults.style.display = 'block';
+329| 
+330|     fetch(urlGeo)
+331|         .then(response => response.json())
+332|         .then(dataGeo => {
+333|             console.log('📡 Résultat recherche initiale:', dataGeo);
+334| 
+335|             if (dataGeo.status !== 'OK' || !dataGeo.results || dataGeo.results.length === 0) {
+336|                 manualResults.innerHTML = `
+337|                             <div class="result-error">❌ Aucun résultat trouvé pour "${queryString}".</div>
+338|                         `;
+339|                 return;
+340|             }
+341| 
+342|             const firstResult = dataGeo.results[0];
+343|             const location = firstResult.geometry?.location;
+344| 
+345|             if (!location) {
+346|                 manualResults.innerHTML = `<div class="result-error">❌ Impossible d'obtenir les coordonnées.</div>`;
+347|                 return;
+348|             }
+349| 
+350|             const lat = location.lat;
+351|             const lng = location.lng;
+352| 
+353|             console.log(`📍 Coordonnées: lat=${lat}, lng=${lng}`);
+354| 
+355|             // ÉTAPE 2 : Recherche inversée
+356|             const urlReverse = `/api/geocode?lat=${lat}&lng=${lng}&language=fr`;
+357| 
+358|             return fetch(urlReverse);
+359|         })
+360|         .then(response => {
+361|             if (!response) return;
+362|             return response.json();
+363|         })
+364|         .then(dataReverse => {
+365|             if (!dataReverse) return;
+366| 
+367|             console.log('📡 Résultat recherche inversée:', dataReverse);
+368| 
+369|             if (dataReverse.status !== 'OK' || !dataReverse.results || dataReverse.results.length === 0) {
+370|                 manualResults.innerHTML = `
+371|                             <div class="result-error">❌ Aucun résultat trouvé pour les coordonnées.</div>
+372|                         `;
+373|                 return;
+374|             }
+375| 
+376|             // 🔥 EXTRAIRE LES DONNÉES
+377|             const data = extraireDonnees(dataReverse.results);
+378| 
+379|             // 🔥 CONSTRUIRE LES OPTIONS
+380|             const optionsArray = construireOptions(data);
+381| 
+382|             console.log('📍 Options trouvées:', optionsArray);
+383|             console.log('📦 Données extraites:', data);
+384| 
+385|             if (optionsArray.length === 0) {
+386|                 manualResults.innerHTML = `
+387|                             <div class="result-error">❌ Aucune option disponible pour "${query}".</div>
+388|                         `;
+389|                 return;
+390|             }
+391| 
+392|             // Stocker les données pour la suite
+393|             window._currentLocationData = data;
+394|             window._originalOptions = optionsArray;
+395|             window._originalQuery = query;
+396| 
+397|             // Afficher les options
+398|             afficherOptionsManuelles(optionsArray, query);
+399|         })
+400|         .catch(error => {
+401|             console.error('❌ Erreur:', error);
+402|             manualResults.innerHTML = `<div class="result-error">❌ Erreur de recherche.</div>`;
+403|         });
+404| }
+405| 
+406| // ===== 3.EXTRAIRE LES DONNÉES DE L'API =====
+407| function extraireDonnees(results) {
+408|     let city = null;
+409|     let commune = null;
+410|     let postalCode = null;
+411|     let province = null;
+412|     let region = null;
+413|     let postcodeLocalities = [];
+414|     let sublocalityLevel1 = null;
+415|     let sublocalityLevel2 = null;
+416|     let sublocalityLevel3 = null;
+417|     let sublocalityLevel4 = null;
+418|     let adminLevel3 = null;
+419|     let adminLevel4 = null;
+420|     let neighborhood = null;
+421|     let country = null;
+422|     let lat = null;
+423|     let lng = null;
+424| 
+425|     results.forEach(result => {
+426|         const components = result.address_components || [];
+427| 
+428|         // Extraire chaque composant
+429|         const locality = components.find(c => c.types.includes('locality') || c.types.includes('postal_town'))?.long_name;
+430|         const sublocality = components.find(c => c.types.includes('sublocality'))?.long_name;
+431|         const neigh = components.find(c => c.types.includes('neighborhood'))?.long_name;
+432|         const postal = components.find(c => c.types.includes('postal_code'))?.long_name;
+433|         const prov = components.find(c => c.types.includes('administrative_area_level_2'))?.long_name;
+434|         const reg = components.find(c => c.types.includes('administrative_area_level_1'))?.long_name;
+435|         const subL1 = components.find(c => c.types.includes('sublocality_level_1'))?.long_name;
+436|         const subL2 = components.find(c => c.types.includes('sublocality_level_2'))?.long_name;
+437|         const subL3 = components.find(c => c.types.includes('sublocality_level_3'))?.long_name;
+438|         const subL4 = components.find(c => c.types.includes('sublocality_level_4'))?.long_name;
+439|         const admin3 = components.find(c => c.types.includes('administrative_area_level_3'))?.long_name;
+440|         const admin4 = components.find(c => c.types.includes('administrative_area_level_4'))?.long_name;
+441|         const cntry = components.find(c => c.types.includes('country'))?.long_name;
+442| 
+443|         // Coordonnées
+444|         if (result.geometry?.location) {
+445|             lat = result.geometry.location.lat;
+446|             lng = result.geometry.location.lng;
+447|         }
+448| 
+449|         // Récupérer postcode_localities
+450|         const postLoc = result.postcode_localities || [];
+451|         if (postLoc.length > 0) {
+452|             postcodeLocalities = postLoc;
+453|         }
+454| 
+455|         // Stocker les valeurs trouvées (priorité au premier résultat)
+456|         if (locality && !city) city = locality;
+457|         if (sublocality && !commune) commune = sublocality;
+458|         if (neigh && !neighborhood) neighborhood = neigh;
+459|         if (postal && !postalCode) postalCode = postal;
+460|         if (prov && !province) province = prov;
+461|         if (reg && !region) region = reg;
+462|         if (subL1 && !sublocalityLevel1) sublocalityLevel1 = subL1;
+463|         if (subL2 && !sublocalityLevel2) sublocalityLevel2 = subL2;
+464|         if (subL3 && !sublocalityLevel3) sublocalityLevel3 = subL3;
+465|         if (subL4 && !sublocalityLevel4) sublocalityLevel4 = subL4;
+466|         if (admin3 && !adminLevel3) adminLevel3 = admin3;
+467|         if (admin4 && !adminLevel4) adminLevel4 = admin4;
+468|         if (cntry && !country) country = cntry;
+469|     });
+470| 
+471|     // Règle pour la commune : si commune = city, on prend la première postcode_localities
+472|     if (commune === city && postcodeLocalities.length > 0 && postcodeLocalities[0] !== city) {
+473|         commune = postcodeLocalities[0];
+474|     }
+475| 
+476|     // Fallback : si commune est null, on prend city
+477|     if (!commune) commune = city;
+478| 
+479|     return {
+480|         city,
+481|         commune,
+482|         postalCode,
+483|         province,
+484|         region,
+485|         postcodeLocalities,
+486|         sublocalityLevel1,
+487|         sublocalityLevel2,
+488|         sublocalityLevel3,
+489|         sublocalityLevel4,
+490|         adminLevel3,
+491|         adminLevel4,
+492|         neighborhood,
+493|         country,
+494|         lat,
+495|         lng
+496|     };
+497| }
+498| 
+499| // ===== 4.CONSTRUIRE LES OPTIONS POUR L'UTILISATEUR =====
+500| function construireOptions(data) {
+501|     const options = [];
+502| 
+503|     function addOption(text, type) {
+504|         if (text && text.trim() !== '') {
+505|             options.push({
+506|                 text: text,
+507|                 type: type,
+508|                 display: debugMode ? `${text} (${type})` : text
+509|             });
+510|         }
+511|     }
+512| 
+513|     // 1. Code postal + Ville
+514|     if (data.postalCode && data.city) {
+515|         addOption(`${data.postalCode} ${data.city}`, 'location_city');
+516|     }
+517| 
+518|     // 2. Code postal + Commune
+519|     if (data.postalCode && data.commune) {
+520|         addOption(`${data.postalCode} ${data.commune}`, 'location_commune');
+521|     }
+522| 
+523|     // 3. Ville seule
+524|     if (data.city) {
+525|         addOption(data.city, 'location_city');
+526|     }
+527| 
+528|     // 4. Commune seule
+529|     if (data.commune) {
+530|         addOption(data.commune, 'location_commune');
+531|     }
+532| 
+533|     // 5. Code postal seul
+534|     if (data.postalCode) {
+535|         addOption(data.postalCode, 'location_postal_code');
+536|     }
+537| 
+538|     // 6. Toutes les localités du code postal
+539|     if (data.postcodeLocalities && data.postcodeLocalities.length > 0) {
+540|         data.postcodeLocalities.forEach(loc => {
+541|             if (data.postalCode) {
+542|                 addOption(`${data.postalCode} ${loc}`, 'location_postcode_localities');
+543|             } else {
+544|                 addOption(loc, 'location_postcode_localities');
+545|             }
+546|         });
+547|     }
+548| 
+549|     // 7. Sous-localités (niveaux 1 à 4)
+550|     const sublocalityLevels = [
+551|         { value: data.sublocalityLevel1, type: 'sublocality_level_1' },
+552|         { value: data.sublocalityLevel2, type: 'sublocality_level_2' },
+553|         { value: data.sublocalityLevel3, type: 'sublocality_level_3' },
+554|         { value: data.sublocalityLevel4, type: 'sublocality_level_4' }
+555|     ];
+556| 
+557|     sublocalityLevels.forEach(({ value, type }) => {
+558|         if (value) {
+559|             addOption(value, type);
+560|             if (data.postalCode) {
+561|                 addOption(`${data.postalCode} ${value}`, type);
+562|             }
+563|         }
+564|     });
+565| 
+566|     // 8. Province (TOUJOURS ajoutée)
+567|     if (data.province) {
+568|         addOption(data.province, 'location_province');
+569|     }
+570| 
+571|     // 9. Région (TOUJOURS ajoutée)
+572|     if (data.region) {
+573|         addOption(data.region, 'location_region');
+574|     }
+575| 
+576|     // 10. Niveau administratif 3 (TOUJOURS ajouté)
+577|     if (data.adminLevel3) {
+578|         addOption(data.adminLevel3, 'admin_level_3');
+579|     }
+580| 
+581|     // 11. Niveau administratif 4 (TOUJOURS ajouté)
+582|     if (data.adminLevel4) {
+583|         addOption(data.adminLevel4, 'admin_level_4');
+584|     }
+585| 
+586|     // 12. Quartier (TOUJOURS ajouté)
+587|     if (data.neighborhood) {
+588|         addOption(data.neighborhood, 'neighborhood');
+589|     }
+590| 
+591|     // 13. Pays (TOUJOURS ajouté)
+592|     if (data.country) {
+593|         addOption(data.country, 'country');
+594|     }
+595| 
+596|     return options;
+597| }
+598| 
+599| // ===== 5.AFFICHER LES OPTIONS (PHASE 1 + PHASE 2) =====
+600| function afficherOptionsManuelles(options, query) {
+601|     let html = `
+602|             <div style="background: #f0f8f0; padding: 15px; border-radius: 8px; border: 2px solid #4CAF50;">
+603|                 <p style="font-weight: bold; color: #2e7d32;">📍 Résultats pour "${query}"</p>
+604|                 <p>Choisissez votre localité :</p>
+605|                 <div style="margin: 10px 0; display: flex; flex-direction: column; gap: 8px;">
+606|             `;
+607| 
+608|     options.forEach((option, index) => {
+609|         const displayText = option.display || option.text;
+610|         html += `
+611|                 <label style="display: flex; align-items: center; gap: 10px; font-size: 0.95em; cursor: pointer; padding: 8px 12px; border-radius: 8px; border: 1px solid #e0e0e0; transition: background 0.2s;" 
+612|                        onmouseover="this.style.background='#e8f5e9'" 
+613|                        onmouseout="this.style.background='white'">
+614|                     <input type="radio" name="manualLocationChoice" value="${index}">
+615|                     <span>${displayText}</span>
+616|                 </label>
+617|             `;
+618|     });
+619| 
+620|     html += `
+621|                 </div>
+622|                 <div style="margin-top: 10px; display: flex; gap: 10px;">
+623|                     <button type="button" id="manualLocationConfirm" disabled style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 50px; cursor: pointer;">✅ Confirmer</button>
+624|                     <button type="button" id="manualLocationCancel" style="padding: 10px 20px; background: #f44336; color: white; border: none; border-radius: 50px; cursor: pointer;">🔄 Annuler</button>
+625|                 </div>
+626|             </div>
+627|             `;
+628| 
+629|     manualResults.innerHTML = html;
+630|     manualResults.style.display = 'block';
+631| 
+632|     const confirmBtn = document.getElementById('manualLocationConfirm');
+633|     const cancelBtn = document.getElementById('manualLocationCancel');
+634|     const radios = document.querySelectorAll('input[name="manualLocationChoice"]');
+635| 
+636|     function updateConfirmButton() {
+637|         const radioSelected = document.querySelector('input[name="manualLocationChoice"]:checked') !== null;
+638|         if (confirmBtn) {
+639|             confirmBtn.disabled = !radioSelected;
+640|         }
+641|     }
+642| 
+643|     radios.forEach(radio => {
+644|         radio.addEventListener('change', updateConfirmButton);
+645|     });
+646| 
+647|     // Activer le bouton par défaut
+648|     updateConfirmButton();
+649| 
+650|     if (confirmBtn) {
+651|         confirmBtn.addEventListener('click', function () {
+652|             const selectedChoice = document.querySelector('input[name="manualLocationChoice"]:checked');
+653|             if (!selectedChoice) {
+654|                 alert('Veuillez choisir une option.');
+655|                 return;
+656|             }
+657| 
+658|             const index = parseInt(selectedChoice.value);
+659|             const selectedOption = options[index];
+660|             const selected = selectedOption.text;
+661| 
+662|             // Récupérer les données stockées
+663|             const locationData = window._currentLocationData || {};
+664| 
+665|             // Extraire les informations de l'option choisie
+666|             let ville = selected;
+667|             let commune = locationData.commune || null;
+668|             let postalCode = locationData.postalCode || null;
+669|             let province = locationData.province || null;
+670|             let region = locationData.region || null;
+671|             let postcodeLocalities = locationData.postcodeLocalities || [];
+672|             let sublocalityLevel1 = locationData.sublocalityLevel1 || null;
+673|             let sublocalityLevel2 = locationData.sublocalityLevel2 || null;
+674|             let sublocalityLevel3 = locationData.sublocalityLevel3 || null;
+675|             let sublocalityLevel4 = locationData.sublocalityLevel4 || null;
+676| 
+677|             // Extraire le code postal si présent
+678|             const postalMatch = selected.match(/^([0-9]{4})\s/);
+679|             if (postalMatch) {
+680|                 postalCode = postalMatch[1];
+681|                 ville = selected.replace(/^[0-9]{4}\s/, '');
+682|             }
+683| 
+684|             // Extraire la commune si virgule
+685|             if (selected.includes(',')) {
+686|                 const parts = selected.split(', ');
+687|                 commune = parts[0];
+688|                 if (commune === ville) commune = null;
+689|                 if (parts.length >= 3) province = parts[2];
+690|                 if (parts.length >= 4) region = parts[3];
+691|             }
+692| 
+693|             // Extraire la commune si virgule
+694|             if (selected.includes(',')) {
+695|                 const parts = selected.split(', ');
+696|                 commune = parts[0];
+697|                 if (commune === ville) commune = null;
+698|                 if (parts.length >= 3) province = parts[2];
+699|                 if (parts.length >= 4) region = parts[3];
+700|             }
+701| 
+702|             // Stocker les données pour la phase 2
+703|             window._selectedLocationData = {
+704|                 ville: ville,
+705|                 commune: commune,
+706|                 province: province,
+707|                 region: region,
+708|                 postalCode: postalCode,
+709|                 postcodeLocalities: postcodeLocalities,
+710|                 sublocalityLevel1: sublocalityLevel1,
+711|                 sublocalityLevel2: sublocalityLevel2,
+712|                 sublocalityLevel3: sublocalityLevel3,
+713|                 sublocalityLevel4: sublocalityLevel4,
+714|                 locationData: locationData
+715|             };
+716| 
+717|             // Afficher la phase 2
+718|             afficherChoixFormat();
+719|         });
+720|     }
+721| 
+722|     if (cancelBtn) {
+723|         cancelBtn.addEventListener('click', function () {
+724|             manualResults.style.display = 'none';
+725|             manualSearchZone.style.display = 'none';
+726|             document.getElementById('switchToManualBtn').style.display = 'inline-block';
+727|             document.getElementById('gpsResult').style.display = 'block';
+728|         });
+729|     }
+730| }
+731| 
+732| // ===== PHASE 2 : CHOIX DU FORMAT D'AFFICHAGE =====
+733| function afficherChoixFormat() {
+734|     const data = window._selectedLocationData;
+735|     if (!data) return;
+736| 
+737|     const ville = data.ville;
+738|     const commune = data.commune;
+739| 
+740|     // Construire les exemples dynamiquement
+741|     let exempleVilleSeule = ville;
+742|     let exempleCommuneVille = commune && commune !== ville ? `${commune} - ${ville}` : ville;
+743| 
+744|     const html = `
+745|             <div style="background: #f0f8f0; padding: 15px; border-radius: 8px; border: 2px solid #4CAF50;">
+746|                 <p style="font-weight: bold; color: #2e7d32;">📌 Comment voulez-vous afficher votre localité ?</p>
+747|                 <div style="margin: 15px 0; display: flex; flex-direction: column; gap: 10px;">
+748|                     <label style="display: flex; align-items: center; gap: 10px; font-size: 1em; cursor: pointer; padding: 10px 12px; border-radius: 8px; border: 1px solid #e0e0e0; background: #fafafa;">
+749|                         <input type="radio" name="displayFormat" value="city_only" checked>
+750|                         <span>📍 <strong>${exempleVilleSeule}</strong></span>
+751|                     </label>
+752|                     <label style="display: flex; align-items: center; gap: 10px; font-size: 1em; cursor: pointer; padding: 10px 12px; border-radius: 8px; border: 1px solid #e0e0e0; background: #fafafa;">
+753|                         <input type="radio" name="displayFormat" value="commune_city">
+754|                         <span>📍 <strong>${exempleCommuneVille}</strong></span>
+755|                     </label>
+756|                 </div>
+757|                 <div style="margin-top: 10px;">
+758|                     <label style="display: flex; align-items: center; gap: 8px; font-size: 0.9em;">
+759|                         <input type="checkbox" id="finalConsent">
+760|                         J'accepte que ma localité soit utilisée dans mon profil
+761|                     </label>
+762|                 </div>
+763|                 <div style="margin-top: 10px; display: flex; gap: 10px;">
+764|                     <button type="button" id="finalConfirm" disabled style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 50px; cursor: pointer;">✅ Confirmer</button>
+765|                     <button type="button" id="finalCancel" style="padding: 10px 20px; background: #f44336; color: white; border: none; border-radius: 50px; cursor: pointer;">🔄 Retour</button>
+766|                 </div>
+767|             </div>
+768|             `;
+769| 
+770|     manualResults.innerHTML = html;
+771|     manualResults.style.display = 'block';
+772| 
+773|     const consent = document.getElementById('finalConsent');
+774|     const confirmBtn = document.getElementById('finalConfirm');
+775|     const cancelBtn = document.getElementById('finalCancel');
+776|     const radios = document.querySelectorAll('input[name="displayFormat"]');
+777| 
+778|     function updateButton() {
+779|         const consentChecked = consent?.checked || false;
+780|         const radioSelected = document.querySelector('input[name="displayFormat"]:checked') !== null;
+781|         confirmBtn.disabled = !(consentChecked && radioSelected);
+782|     }
+783| 
+784|     consent?.addEventListener('change', updateButton);
+785|     radios.forEach(r => r.addEventListener('change', updateButton));
+786| 
+787|     // Confirmer le format
+788|     confirmBtn?.addEventListener('click', function () {
+789|         const format = document.querySelector('input[name="displayFormat"]:checked')?.value || 'city_only';
+790|         const data = window._selectedLocationData;
+791| 
+792|         // Construire le texte final
+793|         let displayText = '';
+794|         if (format === 'city_only') {
+795|             displayText = data.ville;
+796|         } else {
+797|             let parts = [];
+798|             if (data.commune && data.commune !== data.ville) {
+799|                 parts.push(data.commune);
+800|             }
+801|             parts.push(data.ville);
+802|             displayText = parts.join(' - ');
+803|         }
+804| 
+805|         // 🔥 STOCKER DANS LES CHAMPS CACHÉS
+806|         function setHidden(id, value) {
+807|             let el = document.getElementById(id);
+808|             if (!el) {
+809|                 el = document.createElement('input');
+810|                 el.type = 'hidden';
+811|                 el.id = id;
+812|                 el.name = id.replace('_hidden', '');
+813|                 document.getElementById('loginForm').appendChild(el);
+814|             }
+815|             el.value = (value !== null && value !== undefined && value !== '') ? value : '';
+816|         }
+817| 
+818|         setHidden('location_city_hidden', data.ville);
+819|         setHidden('location_commune_hidden', data.commune || null);
+820|         setHidden('location_postal_code_hidden', data.postalCode || null);
+821|         setHidden('location_province_hidden', data.province || null);
+822|         setHidden('location_region_hidden', data.region || null);
+823|         setHidden('location_precise_hidden', displayText);
+824|         setHidden('location_display_format_hidden', format);
+825| 
+826|         // 🔥 STOCKER TOUTES LES DONNÉES
+827|         setHidden('location_sublocality_level_1_hidden', data.sublocalityLevel1 || null);
+828|         setHidden('location_sublocality_level_2_hidden', data.sublocalityLevel2 || null);
+829|         setHidden('location_sublocality_level_3_hidden', data.sublocalityLevel3 || null);
+830|         setHidden('location_sublocality_level_4_hidden', data.sublocalityLevel4 || null);
+831|         setHidden('location_admin_level_3_hidden', data.adminLevel3 || null);
+832|         setHidden('location_admin_level_4_hidden', data.adminLevel4 || null);
+833|         setHidden('location_neighborhood_hidden', data.neighborhood || null);
+834|         setHidden('location_country_hidden', data.country || null);
+835|         setHidden('location_lat_hidden', data.lat || null);
+836|         setHidden('location_lng_hidden', data.lng || null);
+837| 
+838|         // Stocker les localités du code postal
+839|         if (data.postcodeLocalities && data.postcodeLocalities.length > 0) {
+840|             setHidden('location_postcode_localities_hidden', data.postcodeLocalities.join(', '));
+841|         } else {
+842|             setHidden('location_postcode_localities_hidden', null);
+843|         }
+844| 
+845|         // Mettre à jour le select
+846|         const locationSelect = document.getElementById('location');
+847|         let optionExists = false;
+848|         for (let opt of locationSelect.options) {
+849|             if (opt.value === data.ville) {
+850|                 optionExists = true;
+851|                 break;
+852|             }
+853|         }
+854|         if (!optionExists) {
+855|             const newOption = document.createElement('option');
+856|             newOption.value = data.ville;
+857|             newOption.textContent = data.ville;
+858|             locationSelect.appendChild(newOption);
+859|         }
+860|         locationSelect.value = data.ville;
+861| 
+862|         // Afficher la confirmation finale
+863|         document.getElementById('gpsZone').innerHTML = `
+864|                     <div style="padding: 10px; background: #e8f5e9; border-radius: 5px; color: #2e7d32;">
+865|                         ✅ Localisation confirmée : <strong>${displayText}</strong>
+866|                         <br><small>Votre profil affichera : ${displayText}</small>
+867|                     </div>
+868|                 `;
+869| 
+870|         manualResults.style.display = 'none';
+871|         manualSearchZone.style.display = 'none';
+872|         document.getElementById('switchToManualBtn').style.display = 'inline-block';
+873|     });
+874| 
+875|     // Retour à la phase 1
+876|     cancelBtn?.addEventListener('click', function () {
+877|         const originalOptions = window._originalOptions || [];
+878|         const originalQuery = window._originalQuery || '';
+879|         if (originalOptions.length > 0) {
+880|             afficherOptionsManuelles(originalOptions, originalQuery);
+881|         }
+882|     });
+883| }
 
 # FILE: /var/www/meetgay/public/js/menus-data.js
 
@@ -12041,7 +12923,889 @@
 
 # FILE: /var/www/meetgay/public/js/geolocalisation.js
 
-1| ﻿
+1| ﻿// ========== 1.GÉOLOCALISATION ==========
+2| document.addEventListener('DOMContentLoaded', function () {
+3| 
+4|     // Références des éléments
+5|     const locationSelect = document.getElementById('location');
+6|     const gpsZone = document.getElementById('gpsZone');
+7|     const gpsStatus = document.getElementById('gpsStatus');
+8|     const gpsResult = document.getElementById('gpsResult');
+9|     const detectedCity = document.getElementById('detectedCity');
+10|     const displayPreview = document.getElementById('displayPreview');
+11|     const gpsConsent = document.getElementById('gpsConsent');
+12|     const gpsConfirm = document.getElementById('gpsConfirm');
+13|     const gpsCancel = document.getElementById('gpsCancel');
+14| 
+15|     let detectedLat = null;
+16|     let detectedLng = null;
+17|     let detectedCityName = '';
+18|     let detectedRegionName = '';  // ← la commune (county)
+19| 
+20|     // 1. Détecter le changement dans la liste déroulante
+21|     locationSelect.addEventListener('change', function () {
+22|         if (this.value === 'GPS') {
+23|             // Afficher la zone GPS
+24|             gpsZone.style.display = 'block';
+25|             gpsResult.style.display = 'none';
+26|             gpsStatus.style.display = 'block';
+27|             gpsStatus.innerHTML = '📡 Recherche de votre position...';
+28|             gpsConsent.checked = false;
+29|             gpsConfirm.disabled = true;
+30| 
+31|             // Démarrer la géolocalisation
+32|             startGeolocation();
+33|         } else {
+34|             // Si l'utilisateur choisit autre chose, cacher la zone GPS
+35|             gpsZone.style.display = 'none';
+36|             gpsConsent.checked = false;
+37|             gpsConfirm.disabled = true;
+38|         }
+39|     });
+40| 
+41|     // 2. Fonction de géolocalisation
+42|     function startGeolocation() {
+43|         if (!navigator.geolocation) {
+44|             gpsStatus.innerHTML = '❌ Votre navigateur ne supporte pas la géolocalisation. Utilisez la liste déroulante.';
+45|             return;
+46|         }
+47| 
+48|         navigator.geolocation.getCurrentPosition(
+49|             // Succès
+50|             function (position) {
+51|                 detectedLat = position.coords.latitude;
+52|                 detectedLng = position.coords.longitude;
+53| 
+54|                 gpsStatus.innerHTML = '📍 Position trouvée ! Je cherche le nom de la ville...';
+55| 
+56|                 // Appel à Nominatim pour avoir le nom de la ville
+57|                 getCityName(detectedLat, detectedLng);
+58| 
+59|             },
+60|             // Erreur
+61|             function (error) {
+62|                 let msg = '❌ Erreur de géolocalisation : ';
+63|                 switch (error.code) {
+64|                     case error.PERMISSION_DENIED:
+65|                         msg += 'Vous avez refusé l\'accès à votre position. Utilisez la liste déroulante.';
+66|                         break;
+67|                     case error.POSITION_UNAVAILABLE:
+68|                         msg += 'Position indisponible. Vérifiez votre connexion.';
+69|                         break;
+70|                     case error.TIMEOUT:
+71|                         msg += 'Temps écoulé. Réessayez.';
+72|                         break;
+73|                     default:
+74|                         msg += error.message;
+75|                 }
+76|                 gpsStatus.innerHTML = msg;
+77|             },
+78|             {
+79|                 enableHighAccuracy: true,
+80|                 timeout: 10000,
+81|                 maximumAge: 0
+82|             }
+83|         );
+84|     }
+85| 
+86|     function getCityName(lat, lng) {
+87|         const url = `/api/geocode?lat=${lat}&lng=${lng}`;
+88| 
+89|         fetch(url)
+90|             .then(response => response.json())
+91|             .then(data => {
+92|                 console.log('📡 Réponse Google Maps:', data);
+93| 
+94|                 if (data.status === 'OK' && data.results.length > 0) {
+95|                     // On prend le premier résultat (le plus précis)
+96|                     // === NOUVEAU CODE ===
+97|                     // 🔥 On prend le résultat le PLUS PRÉCIS (viewport le plus petit)
+98|                     const sortedResults = [...data.results].sort((a, b) => {
+99|                         const sizeA = (a.geometry.viewport.northeast.lat - a.geometry.viewport.southwest.lat) *
+100|                             (a.geometry.viewport.northeast.lng - a.geometry.viewport.southwest.lng);
+101|                         const sizeB = (b.geometry.viewport.northeast.lat - b.geometry.viewport.southwest.lat) *
+102|                             (b.geometry.viewport.northeast.lng - b.geometry.viewport.southwest.lng);
+103|                         return sizeA - sizeB;
+104|                     });
+105|                     const result = sortedResults[0];
+106|                     console.log('📍 Résultat le PLUS PRÉCIS sélectionné:', result.formatted_address);
+107|                     const components = result.address_components;
+108| 
+109|                     // --- RÉCUPÉRATION DES COMPOSANTS ---
+110|                     const trouver = (type) => components.find(c => c.types.includes(type))?.long_name;
+111| 
+112|                     const locality = trouver("locality") || trouver("postal_town");
+113|                     const sublocality = trouver("sublocality") || trouver("sublocality_level_1") || trouver("neighborhood");
+114|                     const postalCode = trouver("postal_code");
+115|                     const province = trouver("administrative_area_level_2") || trouver("administrative_area_level_3");
+116|                     const region = trouver("administrative_area_level_1");
+117| 
+118|                     // 🔥 NOUVEAU : Récupérer les localités du code postal
+119|                     const postcodeLocalities = data.results.find(r => r.types.includes("postal_code"))?.postcode_localities || [];
+120| 
+121|                     console.log('📍 Locality:', locality);
+122|                     console.log('📍 Sublocality:', sublocality);
+123|                     console.log('📍 Postcode Localities:', postcodeLocalities);
+124| 
+125|                     // --- DÉTERMINATION DE LA COMMUNE PRÉCISE ---
+126|                     let communePrecise = locality;
+127| 
+128|                     // Priorité 1: sublocality (Pamel, Borchtlombeek, Strijtem)
+129|                     if (sublocality && sublocality !== locality) {
+130|                         communePrecise = sublocality;
+131|                     }
+132|                     // Priorité 2: postcode_localities (si sublocality n'existe pas)
+133|                     else if (postcodeLocalities.length > 0 && postcodeLocalities[0] !== locality) {
+134|                         communePrecise = postcodeLocalities[0];
+135|                     }
+136| 
+137|                     console.log('✅ Commune précise trouvée:', communePrecise);
+138| 
+139|                     // --- AFFICHAGE ---
+140|                     gpsStatus.style.display = 'none';
+141|                     gpsResult.style.display = 'block';
+142|                     detectedCity.textContent = locality;
+143|                     document.getElementById('detectedCounty').textContent = communePrecise;
+144| 
+145|                     // OPTION 1 : juste la ville
+146|                     document.getElementById('choiceRegionLabel').textContent = locality;
+147| 
+148|                     // OPTION 2 : commune précise + ville (si différente)
+149|                     let option2 = locality;
+150|                     if (communePrecise && communePrecise !== locality) {
+151|                         option2 = `${communePrecise} - ${locality}`;
+152|                     } else if (country) {
+153|                         option2 = `${locality} - ${country}`;
+154|                     }
+155|                     document.getElementById('choicePreciseLabel').textContent = option2;
+156| 
+157|                     // Réinitialiser les radios
+158|                     document.querySelectorAll('input[name="locationChoice"]').forEach(el => el.checked = false);
+159|                     document.getElementById('gpsConsent').checked = false;
+160|                     document.getElementById('gpsConfirm').disabled = true;
+161|                     gpsConsent.disabled = false;
+162| 
+163|                     // Stocker pour confirmation
+164|                     detectedCityName = locality;
+165|                     detectedRegionName = communePrecise;
+166| 
+167|                     // Message informatif
+168|                     const infoMsg = document.createElement('div');
+169|                     infoMsg.style.cssText = 'font-size: 0.8em; color: #666; margin-top: 5px;';
+170|                     infoMsg.innerHTML = `
+171|                     ℹ️ <strong>Option 1:</strong> ${locality}<br>
+172|                     ℹ️ <strong>Option 2:</strong> ${option2}
+173|                 `;
+174|                     const oldMsg = document.querySelector('.gps-info-msg');
+175|                     if (oldMsg) oldMsg.remove();
+176|                     infoMsg.className = 'gps-info-msg';
+177|                     document.querySelector('#gpsResult')?.appendChild(infoMsg);
+178| 
+179|                 } else {
+180|                     gpsStatus.innerHTML = '❌ Erreur Google Maps';
+181|                 }
+182|             })
+183|             .catch(error => {
+184|                 gpsStatus.innerHTML = '❌ Erreur';
+185|                 console.error(error);
+186|             });
+187|     }
+188| 
+189|     // 4. Case à cocher : activer/désactiver le bouton Confirmer
+190|     gpsConsent.addEventListener('change', function () {
+191|         const radioSelected = document.querySelector('input[name="locationChoice"]:checked') !== null;
+192|         gpsConfirm.disabled = !(this.checked && radioSelected);
+193|     });
+194| 
+195|     // 👇 NOUVEAU : Écouter les radios
+196|     document.querySelectorAll('input[name="locationChoice"]').forEach(radio => {
+197|         radio.addEventListener('change', function () {
+198|             const consentChecked = gpsConsent.checked;
+199|             gpsConfirm.disabled = !(consentChecked && this.checked);
+200|         });
+201|     });
+202| 
+203|     // 5. Bouton Confirmer
+204|     gpsConfirm.addEventListener('click', function () {
+205|         if (!detectedCityName) {
+206|             alert('Aucune ville détectée. Réessayez.');
+207|             return;
+208|         }
+209| 
+210|         const selectedChoice = document.querySelector('input[name="locationChoice"]:checked');
+211|         if (!selectedChoice) {
+212|             alert('Veuillez choisir comment afficher votre localité.');
+213|             return;
+214|         }
+215| 
+216|         let locationNameValue = '';
+217|         let locationPreciseValue = null;
+218| 
+219|         if (selectedChoice.value === 'region_only') {
+220|             // Option 1 : juste la ville
+221|             locationNameValue = detectedCityName;      // ex: "Dilbeek"
+222|             locationPreciseValue = null;
+223|         } else {
+224|             // Option 2 : commune + ville
+225|             if (detectedRegionName && detectedRegionName !== detectedCityName) {
+226|                 locationNameValue = detectedCityName;          // ex: "Dilbeek"
+227|                 locationPreciseValue = detectedRegionName;     // ex: "Bekkerzeel"
+228|             } else {
+229|                 locationNameValue = detectedCityName;
+230|                 locationPreciseValue = null;
+231|             }
+232|         }
+233| 
+234|         // 🔥 DEBUG - Vérifier les valeurs
+235|         console.log('📍 Sauvegarde GPS - locationName:', locationNameValue);
+236|         console.log('📍 Sauvegarde GPS - locationPrecise:', locationPreciseValue);
+237| 
+238|         // Sauvegarder dans le champ caché
+239|         let hiddenInput = document.getElementById('location_precise_hidden');
+240|         if (!hiddenInput) {
+241|             hiddenInput = document.createElement('input');
+242|             hiddenInput.type = 'hidden';
+243|             hiddenInput.id = 'location_precise_hidden';
+244|             hiddenInput.name = 'location_precise';
+245|             document.getElementById('loginForm').appendChild(hiddenInput);
+246|         }
+247|         hiddenInput.value = locationPreciseValue !== null ? locationPreciseValue : '';
+248| 
+249|         // 🔥 On met la VILLE dans le select, pas "GPS"
+250|         // On crée une option pour la ville si elle n'existe pas
+251|         const locationSelect = document.getElementById('location');
+252|         let optionExists = false;
+253|         for (let opt of locationSelect.options) {
+254|             if (opt.value === locationNameValue) {
+255|                 optionExists = true;
+256|                 break;
+257|             }
+258|         }
+259|         if (!optionExists) {
+260|             const newOption = document.createElement('option');
+261|             newOption.value = locationNameValue;
+262|             newOption.textContent = locationNameValue;
+263|             locationSelect.appendChild(newOption);
+264|         }
+265|         locationSelect.value = locationNameValue;
+266|         locationSelect.disabled = false; // Ne pas désactiver
+267| 
+268|         // Afficher le résumé
+269|         const displayText = locationPreciseValue ? `${locationPreciseValue} - ${locationNameValue}` : locationNameValue;
+270| 
+271|         gpsZone.innerHTML = `
+272|         <div style="padding: 10px; background: #e8f5e9; border-radius: 5px; color: #2e7d32;">
+273|             ✅ Localisation confirmée : <strong>${locationNameValue}</strong>
+274|             <br><small>Votre profil affichera : ${displayText}</small>
+275|         </div>
+276|     `;
+277|     });
+278| 
+279| 
+280|     // 6. Bouton Annuler / Reset
+281|     gpsCancel.addEventListener('click', function () {
+282|         // Remettre le select sur une valeur vide
+283|         locationSelect.value = '';
+284|         locationSelect.disabled = false;
+285| 
+286|         // Cacher la zone GPS
+287|         gpsZone.style.display = 'none';
+288|         gpsResult.style.display = 'none';
+289|         gpsStatus.style.display = 'block';
+290|         gpsConsent.checked = false;
+291|         gpsConsent.disabled = true;
+292|         gpsConfirm.disabled = true;
+293| 
+294|         // Supprimer le champ caché
+295|         const hiddenInput = document.getElementById('location_precise_hidden');
+296|         if (hiddenInput) {
+297|             hiddenInput.remove();
+298|         }
+299| 
+300|         detectedCityName = '';
+301|         detectedLat = null;
+302|         detectedLng = null;
+303|     });
+304| 
+305|     // Réinitialiser les radios
+306|     document.querySelectorAll('input[name="locationChoice"]').forEach(el => el.checked = false);
+307| 
+308| });
+309| //FIN GPS
+310| 
+311| // ===== 2.FONCTION DE RECHERCHE MANUELLE - VERSION PROPRE =====
+312| function rechercherLocalite(query) {
+313|     const queryString = String(query).trim();
+314| 
+315|     if (!queryString) {
+316|         manualResults.innerHTML = `<div class="result-error">Veuillez entrer un code postal ou un nom de lieu.</div>`;
+317|         manualResults.style.display = 'block';
+318|         return;
+319|     }
+320| 
+321|     // ÉTAPE 1 : Recherche initiale pour obtenir les coordonnées
+322|     const searchQuery = `${queryString}, Belgique`;
+323|     const urlGeo = `/api/geocode?address=${encodeURIComponent(searchQuery)}&language=fr`;
+324| 
+325|     console.log('🚀 Recherche initiale:', searchQuery);
+326| 
+327|     manualResults.innerHTML = '<div class="result-loading">🔍 Recherche en cours...</div>';
+328|     manualResults.style.display = 'block';
+329| 
+330|     fetch(urlGeo)
+331|         .then(response => response.json())
+332|         .then(dataGeo => {
+333|             console.log('📡 Résultat recherche initiale:', dataGeo);
+334| 
+335|             if (dataGeo.status !== 'OK' || !dataGeo.results || dataGeo.results.length === 0) {
+336|                 manualResults.innerHTML = `
+337|                             <div class="result-error">❌ Aucun résultat trouvé pour "${queryString}".</div>
+338|                         `;
+339|                 return;
+340|             }
+341| 
+342|             const firstResult = dataGeo.results[0];
+343|             const location = firstResult.geometry?.location;
+344| 
+345|             if (!location) {
+346|                 manualResults.innerHTML = `<div class="result-error">❌ Impossible d'obtenir les coordonnées.</div>`;
+347|                 return;
+348|             }
+349| 
+350|             const lat = location.lat;
+351|             const lng = location.lng;
+352| 
+353|             console.log(`📍 Coordonnées: lat=${lat}, lng=${lng}`);
+354| 
+355|             // ÉTAPE 2 : Recherche inversée
+356|             const urlReverse = `/api/geocode?lat=${lat}&lng=${lng}&language=fr`;
+357| 
+358|             return fetch(urlReverse);
+359|         })
+360|         .then(response => {
+361|             if (!response) return;
+362|             return response.json();
+363|         })
+364|         .then(dataReverse => {
+365|             if (!dataReverse) return;
+366| 
+367|             console.log('📡 Résultat recherche inversée:', dataReverse);
+368| 
+369|             if (dataReverse.status !== 'OK' || !dataReverse.results || dataReverse.results.length === 0) {
+370|                 manualResults.innerHTML = `
+371|                             <div class="result-error">❌ Aucun résultat trouvé pour les coordonnées.</div>
+372|                         `;
+373|                 return;
+374|             }
+375| 
+376|             // 🔥 EXTRAIRE LES DONNÉES
+377|             const data = extraireDonnees(dataReverse.results);
+378| 
+379|             // 🔥 CONSTRUIRE LES OPTIONS
+380|             const optionsArray = construireOptions(data);
+381| 
+382|             console.log('📍 Options trouvées:', optionsArray);
+383|             console.log('📦 Données extraites:', data);
+384| 
+385|             if (optionsArray.length === 0) {
+386|                 manualResults.innerHTML = `
+387|                             <div class="result-error">❌ Aucune option disponible pour "${query}".</div>
+388|                         `;
+389|                 return;
+390|             }
+391| 
+392|             // Stocker les données pour la suite
+393|             window._currentLocationData = data;
+394|             window._originalOptions = optionsArray;
+395|             window._originalQuery = query;
+396| 
+397|             // Afficher les options
+398|             afficherOptionsManuelles(optionsArray, query);
+399|         })
+400|         .catch(error => {
+401|             console.error('❌ Erreur:', error);
+402|             manualResults.innerHTML = `<div class="result-error">❌ Erreur de recherche.</div>`;
+403|         });
+404| }
+405| 
+406| // ===== 3.EXTRAIRE LES DONNÉES DE L'API =====
+407| function extraireDonnees(results) {
+408|     let city = null;
+409|     let commune = null;
+410|     let postalCode = null;
+411|     let province = null;
+412|     let region = null;
+413|     let postcodeLocalities = [];
+414|     let sublocalityLevel1 = null;
+415|     let sublocalityLevel2 = null;
+416|     let sublocalityLevel3 = null;
+417|     let sublocalityLevel4 = null;
+418|     let adminLevel3 = null;
+419|     let adminLevel4 = null;
+420|     let neighborhood = null;
+421|     let country = null;
+422|     let lat = null;
+423|     let lng = null;
+424| 
+425|     results.forEach(result => {
+426|         const components = result.address_components || [];
+427| 
+428|         // Extraire chaque composant
+429|         const locality = components.find(c => c.types.includes('locality') || c.types.includes('postal_town'))?.long_name;
+430|         const sublocality = components.find(c => c.types.includes('sublocality'))?.long_name;
+431|         const neigh = components.find(c => c.types.includes('neighborhood'))?.long_name;
+432|         const postal = components.find(c => c.types.includes('postal_code'))?.long_name;
+433|         const prov = components.find(c => c.types.includes('administrative_area_level_2'))?.long_name;
+434|         const reg = components.find(c => c.types.includes('administrative_area_level_1'))?.long_name;
+435|         const subL1 = components.find(c => c.types.includes('sublocality_level_1'))?.long_name;
+436|         const subL2 = components.find(c => c.types.includes('sublocality_level_2'))?.long_name;
+437|         const subL3 = components.find(c => c.types.includes('sublocality_level_3'))?.long_name;
+438|         const subL4 = components.find(c => c.types.includes('sublocality_level_4'))?.long_name;
+439|         const admin3 = components.find(c => c.types.includes('administrative_area_level_3'))?.long_name;
+440|         const admin4 = components.find(c => c.types.includes('administrative_area_level_4'))?.long_name;
+441|         const cntry = components.find(c => c.types.includes('country'))?.long_name;
+442| 
+443|         // Coordonnées
+444|         if (result.geometry?.location) {
+445|             lat = result.geometry.location.lat;
+446|             lng = result.geometry.location.lng;
+447|         }
+448| 
+449|         // Récupérer postcode_localities
+450|         const postLoc = result.postcode_localities || [];
+451|         if (postLoc.length > 0) {
+452|             postcodeLocalities = postLoc;
+453|         }
+454| 
+455|         // Stocker les valeurs trouvées (priorité au premier résultat)
+456|         if (locality && !city) city = locality;
+457|         if (sublocality && !commune) commune = sublocality;
+458|         if (neigh && !neighborhood) neighborhood = neigh;
+459|         if (postal && !postalCode) postalCode = postal;
+460|         if (prov && !province) province = prov;
+461|         if (reg && !region) region = reg;
+462|         if (subL1 && !sublocalityLevel1) sublocalityLevel1 = subL1;
+463|         if (subL2 && !sublocalityLevel2) sublocalityLevel2 = subL2;
+464|         if (subL3 && !sublocalityLevel3) sublocalityLevel3 = subL3;
+465|         if (subL4 && !sublocalityLevel4) sublocalityLevel4 = subL4;
+466|         if (admin3 && !adminLevel3) adminLevel3 = admin3;
+467|         if (admin4 && !adminLevel4) adminLevel4 = admin4;
+468|         if (cntry && !country) country = cntry;
+469|     });
+470| 
+471|     // Règle pour la commune : si commune = city, on prend la première postcode_localities
+472|     if (commune === city && postcodeLocalities.length > 0 && postcodeLocalities[0] !== city) {
+473|         commune = postcodeLocalities[0];
+474|     }
+475| 
+476|     // Fallback : si commune est null, on prend city
+477|     if (!commune) commune = city;
+478| 
+479|     return {
+480|         city,
+481|         commune,
+482|         postalCode,
+483|         province,
+484|         region,
+485|         postcodeLocalities,
+486|         sublocalityLevel1,
+487|         sublocalityLevel2,
+488|         sublocalityLevel3,
+489|         sublocalityLevel4,
+490|         adminLevel3,
+491|         adminLevel4,
+492|         neighborhood,
+493|         country,
+494|         lat,
+495|         lng
+496|     };
+497| }
+498| 
+499| // ===== 4.CONSTRUIRE LES OPTIONS POUR L'UTILISATEUR =====
+500| function construireOptions(data) {
+501|     const options = [];
+502| 
+503|     function addOption(text, type) {
+504|         if (text && text.trim() !== '') {
+505|             options.push({
+506|                 text: text,
+507|                 type: type,
+508|                 display: debugMode ? `${text} (${type})` : text
+509|             });
+510|         }
+511|     }
+512| 
+513|     // 1. Code postal + Ville
+514|     if (data.postalCode && data.city) {
+515|         addOption(`${data.postalCode} ${data.city}`, 'location_city');
+516|     }
+517| 
+518|     // 2. Code postal + Commune
+519|     if (data.postalCode && data.commune) {
+520|         addOption(`${data.postalCode} ${data.commune}`, 'location_commune');
+521|     }
+522| 
+523|     // 3. Ville seule
+524|     if (data.city) {
+525|         addOption(data.city, 'location_city');
+526|     }
+527| 
+528|     // 4. Commune seule
+529|     if (data.commune) {
+530|         addOption(data.commune, 'location_commune');
+531|     }
+532| 
+533|     // 5. Code postal seul
+534|     if (data.postalCode) {
+535|         addOption(data.postalCode, 'location_postal_code');
+536|     }
+537| 
+538|     // 6. Toutes les localités du code postal
+539|     if (data.postcodeLocalities && data.postcodeLocalities.length > 0) {
+540|         data.postcodeLocalities.forEach(loc => {
+541|             if (data.postalCode) {
+542|                 addOption(`${data.postalCode} ${loc}`, 'location_postcode_localities');
+543|             } else {
+544|                 addOption(loc, 'location_postcode_localities');
+545|             }
+546|         });
+547|     }
+548| 
+549|     // 7. Sous-localités (niveaux 1 à 4)
+550|     const sublocalityLevels = [
+551|         { value: data.sublocalityLevel1, type: 'sublocality_level_1' },
+552|         { value: data.sublocalityLevel2, type: 'sublocality_level_2' },
+553|         { value: data.sublocalityLevel3, type: 'sublocality_level_3' },
+554|         { value: data.sublocalityLevel4, type: 'sublocality_level_4' }
+555|     ];
+556| 
+557|     sublocalityLevels.forEach(({ value, type }) => {
+558|         if (value) {
+559|             addOption(value, type);
+560|             if (data.postalCode) {
+561|                 addOption(`${data.postalCode} ${value}`, type);
+562|             }
+563|         }
+564|     });
+565| 
+566|     // 8. Province (TOUJOURS ajoutée)
+567|     if (data.province) {
+568|         addOption(data.province, 'location_province');
+569|     }
+570| 
+571|     // 9. Région (TOUJOURS ajoutée)
+572|     if (data.region) {
+573|         addOption(data.region, 'location_region');
+574|     }
+575| 
+576|     // 10. Niveau administratif 3 (TOUJOURS ajouté)
+577|     if (data.adminLevel3) {
+578|         addOption(data.adminLevel3, 'admin_level_3');
+579|     }
+580| 
+581|     // 11. Niveau administratif 4 (TOUJOURS ajouté)
+582|     if (data.adminLevel4) {
+583|         addOption(data.adminLevel4, 'admin_level_4');
+584|     }
+585| 
+586|     // 12. Quartier (TOUJOURS ajouté)
+587|     if (data.neighborhood) {
+588|         addOption(data.neighborhood, 'neighborhood');
+589|     }
+590| 
+591|     // 13. Pays (TOUJOURS ajouté)
+592|     if (data.country) {
+593|         addOption(data.country, 'country');
+594|     }
+595| 
+596|     return options;
+597| }
+598| 
+599| // ===== 5.AFFICHER LES OPTIONS (PHASE 1 + PHASE 2) =====
+600| function afficherOptionsManuelles(options, query) {
+601|     let html = `
+602|             <div style="background: #f0f8f0; padding: 15px; border-radius: 8px; border: 2px solid #4CAF50;">
+603|                 <p style="font-weight: bold; color: #2e7d32;">📍 Résultats pour "${query}"</p>
+604|                 <p>Choisissez votre localité :</p>
+605|                 <div style="margin: 10px 0; display: flex; flex-direction: column; gap: 8px;">
+606|             `;
+607| 
+608|     options.forEach((option, index) => {
+609|         const displayText = option.display || option.text;
+610|         html += `
+611|                 <label style="display: flex; align-items: center; gap: 10px; font-size: 0.95em; cursor: pointer; padding: 8px 12px; border-radius: 8px; border: 1px solid #e0e0e0; transition: background 0.2s;" 
+612|                        onmouseover="this.style.background='#e8f5e9'" 
+613|                        onmouseout="this.style.background='white'">
+614|                     <input type="radio" name="manualLocationChoice" value="${index}">
+615|                     <span>${displayText}</span>
+616|                 </label>
+617|             `;
+618|     });
+619| 
+620|     html += `
+621|                 </div>
+622|                 <div style="margin-top: 10px; display: flex; gap: 10px;">
+623|                     <button type="button" id="manualLocationConfirm" disabled style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 50px; cursor: pointer;">✅ Confirmer</button>
+624|                     <button type="button" id="manualLocationCancel" style="padding: 10px 20px; background: #f44336; color: white; border: none; border-radius: 50px; cursor: pointer;">🔄 Annuler</button>
+625|                 </div>
+626|             </div>
+627|             `;
+628| 
+629|     manualResults.innerHTML = html;
+630|     manualResults.style.display = 'block';
+631| 
+632|     const confirmBtn = document.getElementById('manualLocationConfirm');
+633|     const cancelBtn = document.getElementById('manualLocationCancel');
+634|     const radios = document.querySelectorAll('input[name="manualLocationChoice"]');
+635| 
+636|     function updateConfirmButton() {
+637|         const radioSelected = document.querySelector('input[name="manualLocationChoice"]:checked') !== null;
+638|         if (confirmBtn) {
+639|             confirmBtn.disabled = !radioSelected;
+640|         }
+641|     }
+642| 
+643|     radios.forEach(radio => {
+644|         radio.addEventListener('change', updateConfirmButton);
+645|     });
+646| 
+647|     // Activer le bouton par défaut
+648|     updateConfirmButton();
+649| 
+650|     if (confirmBtn) {
+651|         confirmBtn.addEventListener('click', function () {
+652|             const selectedChoice = document.querySelector('input[name="manualLocationChoice"]:checked');
+653|             if (!selectedChoice) {
+654|                 alert('Veuillez choisir une option.');
+655|                 return;
+656|             }
+657| 
+658|             const index = parseInt(selectedChoice.value);
+659|             const selectedOption = options[index];
+660|             const selected = selectedOption.text;
+661| 
+662|             // Récupérer les données stockées
+663|             const locationData = window._currentLocationData || {};
+664| 
+665|             // Extraire les informations de l'option choisie
+666|             let ville = selected;
+667|             let commune = locationData.commune || null;
+668|             let postalCode = locationData.postalCode || null;
+669|             let province = locationData.province || null;
+670|             let region = locationData.region || null;
+671|             let postcodeLocalities = locationData.postcodeLocalities || [];
+672|             let sublocalityLevel1 = locationData.sublocalityLevel1 || null;
+673|             let sublocalityLevel2 = locationData.sublocalityLevel2 || null;
+674|             let sublocalityLevel3 = locationData.sublocalityLevel3 || null;
+675|             let sublocalityLevel4 = locationData.sublocalityLevel4 || null;
+676| 
+677|             // Extraire le code postal si présent
+678|             const postalMatch = selected.match(/^([0-9]{4})\s/);
+679|             if (postalMatch) {
+680|                 postalCode = postalMatch[1];
+681|                 ville = selected.replace(/^[0-9]{4}\s/, '');
+682|             }
+683| 
+684|             // Extraire la commune si virgule
+685|             if (selected.includes(',')) {
+686|                 const parts = selected.split(', ');
+687|                 commune = parts[0];
+688|                 if (commune === ville) commune = null;
+689|                 if (parts.length >= 3) province = parts[2];
+690|                 if (parts.length >= 4) region = parts[3];
+691|             }
+692| 
+693|             // Extraire la commune si virgule
+694|             if (selected.includes(',')) {
+695|                 const parts = selected.split(', ');
+696|                 commune = parts[0];
+697|                 if (commune === ville) commune = null;
+698|                 if (parts.length >= 3) province = parts[2];
+699|                 if (parts.length >= 4) region = parts[3];
+700|             }
+701| 
+702|             // Stocker les données pour la phase 2
+703|             window._selectedLocationData = {
+704|                 ville: ville,
+705|                 commune: commune,
+706|                 province: province,
+707|                 region: region,
+708|                 postalCode: postalCode,
+709|                 postcodeLocalities: postcodeLocalities,
+710|                 sublocalityLevel1: sublocalityLevel1,
+711|                 sublocalityLevel2: sublocalityLevel2,
+712|                 sublocalityLevel3: sublocalityLevel3,
+713|                 sublocalityLevel4: sublocalityLevel4,
+714|                 locationData: locationData
+715|             };
+716| 
+717|             // Afficher la phase 2
+718|             afficherChoixFormat();
+719|         });
+720|     }
+721| 
+722|     if (cancelBtn) {
+723|         cancelBtn.addEventListener('click', function () {
+724|             manualResults.style.display = 'none';
+725|             manualSearchZone.style.display = 'none';
+726|             document.getElementById('switchToManualBtn').style.display = 'inline-block';
+727|             document.getElementById('gpsResult').style.display = 'block';
+728|         });
+729|     }
+730| }
+731| 
+732| // ===== PHASE 2 : CHOIX DU FORMAT D'AFFICHAGE =====
+733| function afficherChoixFormat() {
+734|     const data = window._selectedLocationData;
+735|     if (!data) return;
+736| 
+737|     const ville = data.ville;
+738|     const commune = data.commune;
+739| 
+740|     // Construire les exemples dynamiquement
+741|     let exempleVilleSeule = ville;
+742|     let exempleCommuneVille = commune && commune !== ville ? `${commune} - ${ville}` : ville;
+743| 
+744|     const html = `
+745|             <div style="background: #f0f8f0; padding: 15px; border-radius: 8px; border: 2px solid #4CAF50;">
+746|                 <p style="font-weight: bold; color: #2e7d32;">📌 Comment voulez-vous afficher votre localité ?</p>
+747|                 <div style="margin: 15px 0; display: flex; flex-direction: column; gap: 10px;">
+748|                     <label style="display: flex; align-items: center; gap: 10px; font-size: 1em; cursor: pointer; padding: 10px 12px; border-radius: 8px; border: 1px solid #e0e0e0; background: #fafafa;">
+749|                         <input type="radio" name="displayFormat" value="city_only" checked>
+750|                         <span>📍 <strong>${exempleVilleSeule}</strong></span>
+751|                     </label>
+752|                     <label style="display: flex; align-items: center; gap: 10px; font-size: 1em; cursor: pointer; padding: 10px 12px; border-radius: 8px; border: 1px solid #e0e0e0; background: #fafafa;">
+753|                         <input type="radio" name="displayFormat" value="commune_city">
+754|                         <span>📍 <strong>${exempleCommuneVille}</strong></span>
+755|                     </label>
+756|                 </div>
+757|                 <div style="margin-top: 10px;">
+758|                     <label style="display: flex; align-items: center; gap: 8px; font-size: 0.9em;">
+759|                         <input type="checkbox" id="finalConsent">
+760|                         J'accepte que ma localité soit utilisée dans mon profil
+761|                     </label>
+762|                 </div>
+763|                 <div style="margin-top: 10px; display: flex; gap: 10px;">
+764|                     <button type="button" id="finalConfirm" disabled style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 50px; cursor: pointer;">✅ Confirmer</button>
+765|                     <button type="button" id="finalCancel" style="padding: 10px 20px; background: #f44336; color: white; border: none; border-radius: 50px; cursor: pointer;">🔄 Retour</button>
+766|                 </div>
+767|             </div>
+768|             `;
+769| 
+770|     manualResults.innerHTML = html;
+771|     manualResults.style.display = 'block';
+772| 
+773|     const consent = document.getElementById('finalConsent');
+774|     const confirmBtn = document.getElementById('finalConfirm');
+775|     const cancelBtn = document.getElementById('finalCancel');
+776|     const radios = document.querySelectorAll('input[name="displayFormat"]');
+777| 
+778|     function updateButton() {
+779|         const consentChecked = consent?.checked || false;
+780|         const radioSelected = document.querySelector('input[name="displayFormat"]:checked') !== null;
+781|         confirmBtn.disabled = !(consentChecked && radioSelected);
+782|     }
+783| 
+784|     consent?.addEventListener('change', updateButton);
+785|     radios.forEach(r => r.addEventListener('change', updateButton));
+786| 
+787|     // Confirmer le format
+788|     confirmBtn?.addEventListener('click', function () {
+789|         const format = document.querySelector('input[name="displayFormat"]:checked')?.value || 'city_only';
+790|         const data = window._selectedLocationData;
+791| 
+792|         // Construire le texte final
+793|         let displayText = '';
+794|         if (format === 'city_only') {
+795|             displayText = data.ville;
+796|         } else {
+797|             let parts = [];
+798|             if (data.commune && data.commune !== data.ville) {
+799|                 parts.push(data.commune);
+800|             }
+801|             parts.push(data.ville);
+802|             displayText = parts.join(' - ');
+803|         }
+804| 
+805|         // 🔥 STOCKER DANS LES CHAMPS CACHÉS
+806|         function setHidden(id, value) {
+807|             let el = document.getElementById(id);
+808|             if (!el) {
+809|                 el = document.createElement('input');
+810|                 el.type = 'hidden';
+811|                 el.id = id;
+812|                 el.name = id.replace('_hidden', '');
+813|                 document.getElementById('loginForm').appendChild(el);
+814|             }
+815|             el.value = (value !== null && value !== undefined && value !== '') ? value : '';
+816|         }
+817| 
+818|         setHidden('location_city_hidden', data.ville);
+819|         setHidden('location_commune_hidden', data.commune || null);
+820|         setHidden('location_postal_code_hidden', data.postalCode || null);
+821|         setHidden('location_province_hidden', data.province || null);
+822|         setHidden('location_region_hidden', data.region || null);
+823|         setHidden('location_precise_hidden', displayText);
+824|         setHidden('location_display_format_hidden', format);
+825| 
+826|         // 🔥 STOCKER TOUTES LES DONNÉES
+827|         setHidden('location_sublocality_level_1_hidden', data.sublocalityLevel1 || null);
+828|         setHidden('location_sublocality_level_2_hidden', data.sublocalityLevel2 || null);
+829|         setHidden('location_sublocality_level_3_hidden', data.sublocalityLevel3 || null);
+830|         setHidden('location_sublocality_level_4_hidden', data.sublocalityLevel4 || null);
+831|         setHidden('location_admin_level_3_hidden', data.adminLevel3 || null);
+832|         setHidden('location_admin_level_4_hidden', data.adminLevel4 || null);
+833|         setHidden('location_neighborhood_hidden', data.neighborhood || null);
+834|         setHidden('location_country_hidden', data.country || null);
+835|         setHidden('location_lat_hidden', data.lat || null);
+836|         setHidden('location_lng_hidden', data.lng || null);
+837| 
+838|         // Stocker les localités du code postal
+839|         if (data.postcodeLocalities && data.postcodeLocalities.length > 0) {
+840|             setHidden('location_postcode_localities_hidden', data.postcodeLocalities.join(', '));
+841|         } else {
+842|             setHidden('location_postcode_localities_hidden', null);
+843|         }
+844| 
+845|         // Mettre à jour le select
+846|         const locationSelect = document.getElementById('location');
+847|         let optionExists = false;
+848|         for (let opt of locationSelect.options) {
+849|             if (opt.value === data.ville) {
+850|                 optionExists = true;
+851|                 break;
+852|             }
+853|         }
+854|         if (!optionExists) {
+855|             const newOption = document.createElement('option');
+856|             newOption.value = data.ville;
+857|             newOption.textContent = data.ville;
+858|             locationSelect.appendChild(newOption);
+859|         }
+860|         locationSelect.value = data.ville;
+861| 
+862|         // Afficher la confirmation finale
+863|         document.getElementById('gpsZone').innerHTML = `
+864|                     <div style="padding: 10px; background: #e8f5e9; border-radius: 5px; color: #2e7d32;">
+865|                         ✅ Localisation confirmée : <strong>${displayText}</strong>
+866|                         <br><small>Votre profil affichera : ${displayText}</small>
+867|                     </div>
+868|                 `;
+869| 
+870|         manualResults.style.display = 'none';
+871|         manualSearchZone.style.display = 'none';
+872|         document.getElementById('switchToManualBtn').style.display = 'inline-block';
+873|     });
+874| 
+875|     // Retour à la phase 1
+876|     cancelBtn?.addEventListener('click', function () {
+877|         const originalOptions = window._originalOptions || [];
+878|         const originalQuery = window._originalQuery || '';
+879|         if (originalOptions.length > 0) {
+880|             afficherOptionsManuelles(originalOptions, originalQuery);
+881|         }
+882|     });
+883| }
 
 # FILE: /var/www/meetgay/public/js/menus-data.js
 
