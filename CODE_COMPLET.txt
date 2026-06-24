@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET (Live)
-# Généré le 2026-06-24 17:35:48
+# Généré le 2026-06-24 17:38:55
 
 # Instructions IA non disponibles
 
@@ -3963,744 +3963,626 @@
 944|                     manualLocationInput.value = description;
 945|                     suggestionsContainer.style.display = 'none';
 946| 
-947|                     rechercherLocaliteAvecPlaceId(placeId, description);
-948|                 });
-949| 
-950|                 item.addEventListener('mouseenter', function () {
-951|                     this.style.background = '#e8f5e9';
-952|                 });
-953| 
-954|                 item.addEventListener('mouseleave', function () {
-955|                     this.style.background = 'white';
-956|                 });
-957|             });
-958|         }
-959| 
-960|         // ===== FONCTION POUR RECHERCHER LES DÉTAILS D'UN LIEU =====
-961|         function rechercherLocaliteAvecPlaceId(placeId, description) {
-962|             console.log('🔍 Recherche des détails pour:', placeId, description);
-963| 
-964|             fetch(`/api/geocode?place_id=${placeId}&language=fr`)
-965|                 .then(response => response.json())
-966|                 .then(data => {
-967|                     if (data.status === 'OK' && data.results.length > 0) {
-968|                         const result = data.results[0];
-969|                         const components = result.address_components || [];
-970| 
-971|                         function trouver(type) {
-972|                             const comp = components.find(c => c.types.includes(type));
-973|                             return comp ? comp.long_name : null;
-974|                         }
-975| 
-976|                         // 🔥 RECHERCHE ÉTENDUE - Plus de types pour capturer plus de données
-977|                         // 🔥 EXTRACTION COMPLÈTE - TOUT CAPTURER
-978|                         const locality = trouver("locality") || trouver("postal_town");
-979|                         const sublocality = trouver("sublocality") || trouver("sublocality_level_1") || trouver("neighborhood");
-980|                         const postalCode = trouver("postal_code");
-981|                         const province = trouver("administrative_area_level_2") || trouver("administrative_area_level_3");
-982|                         const region = trouver("administrative_area_level_1");
-983|                         const neighborhood = trouver("neighborhood");
-984|                         const country = trouver("country");
-985| 
-986|                         // 🔥 RÉCUPÉRER LES LOCALITÉS DU CODE POSTAL
-987|                         const postcodeLocalities = data.results.find(r => r.types.includes("postal_code"))?.postcode_localities || [];
-988| 
-989|                         console.log('📍 Composants extraits COMPLETS:', {
-990|                             locality, sublocality, postalCode, province, region, neighborhood, country, postcodeLocalities
-991|                         });
-992| 
-993| 
-994|                         // 📌 CRÉER TOUS LES CHAMPS CACHÉS
-995|                         function setHidden(id, value) {
-996|                             let el = document.getElementById(id);
-997|                             if (!el) {
-998|                                 el = document.createElement('input');
-999|                                 el.type = 'hidden';
-1000|                                 el.id = id;
-1001|                                 el.name = id.replace('_hidden', '');
-1002|                                 document.getElementById('loginForm').appendChild(el);
-1003|                             }
-1004|                             el.value = (value !== null && value !== undefined && value !== '') ? value : '';
-1005|                         }
+947|                     // Utiliser la description comme requête pour la recherche principale
+948|                     rechercherLocalite(description);
+949|                 });
+950| 
+951|                 item.addEventListener('mouseenter', function () {
+952|                     this.style.background = '#e8f5e9';
+953|                 });
+954| 
+955|                 item.addEventListener('mouseleave', function () {
+956|                     this.style.background = 'white';
+957|                 });
+958|             });
+959|         }
+960| 
+961| 
+962|         // Bouton "Ma localité n'est pas bonne"
+963|         if (switchToManualBtn) {
+964|             switchToManualBtn.addEventListener('click', function () {
+965|                 document.getElementById('gpsResult').style.display = 'none';
+966|                 manualSearchZone.style.display = 'block';
+967|                 this.style.display = 'none';
+968| 
+969|                 if (!autocompleteReady) {
+970|                     loadGooglePlaces();
+971|                 }
+972| 
+973|                 setTimeout(() => manualLocationInput.focus(), 100);
+974|             });
+975|         }
+976| 
+977|         // Si l'utilisateur appuie sur Entrée, lancer la recherche
+978|         if (manualLocationInput) {
+979|             manualLocationInput.addEventListener('keypress', function (e) {
+980|                 if (e.key === 'Enter') {
+981|                     e.preventDefault();
+982|                     suggestionsContainer.style.display = 'none';
+983|                     const query = this.value.trim();
+984|                     if (query) {
+985|                         rechercherLocalite(query);
+986|                     }
+987|                 }
+988|             });
+989|         }
+990| 
+991|         // ===== FONCTION DE RECHERCHE MANUELLE - VERSION PROPRE =====
+992|         function rechercherLocalite(query) {
+993|             const queryString = String(query).trim();
+994| 
+995|             if (!queryString) {
+996|                 manualResults.innerHTML = `<div class="result-error">Veuillez entrer un code postal ou un nom de lieu.</div>`;
+997|                 manualResults.style.display = 'block';
+998|                 return;
+999|             }
+1000| 
+1001|             // ÉTAPE 1 : Recherche initiale pour obtenir les coordonnées
+1002|             const searchQuery = `${queryString}, Belgique`;
+1003|             const urlGeo = `/api/geocode?address=${encodeURIComponent(searchQuery)}&language=fr`;
+1004| 
+1005|             console.log('🚀 Recherche initiale:', searchQuery);
 1006| 
-1007|                         // 🔥 Stocker la commune précise (priorité: sublocality > neighborhood > locality)
-1008| 
-1009|                         let communePrecise = sublocality || neighborhood || locality;
-1010| 
-1011|                         // Si on a une sous-localité, on l'utilise comme commune
-1012|                         if (sublocality && sublocality !== locality) {
-1013|                             communePrecise = sublocality;
-1014|                         } else if (neighborhood && neighborhood !== locality) {
-1015|                             communePrecise = neighborhood;
-1016|                         } else if (locality) {
-1017|                             communePrecise = locality;
-1018|                         }
-1019| 
-1020|                         // Si on a une province et que c'est différent de la ville, on la garde
-1021|                         if (province && province !== locality && !communePrecise) {
-1022|                             communePrecise = province;
-1023|                         }
+1007|             manualResults.innerHTML = '<div class="result-loading">🔍 Recherche en cours...</div>';
+1008|             manualResults.style.display = 'block';
+1009| 
+1010|             fetch(urlGeo)
+1011|                 .then(response => response.json())
+1012|                 .then(dataGeo => {
+1013|                     console.log('📡 Résultat recherche initiale:', dataGeo);
+1014| 
+1015|                     if (dataGeo.status !== 'OK' || !dataGeo.results || dataGeo.results.length === 0) {
+1016|                         manualResults.innerHTML = `
+1017|                             <div class="result-error">❌ Aucun résultat trouvé pour "${queryString}".</div>
+1018|                         `;
+1019|                         return;
+1020|                     }
+1021| 
+1022|                     const firstResult = dataGeo.results[0];
+1023|                     const location = firstResult.geometry?.location;
 1024| 
-1025|                         setHidden('location_city_hidden', locality);
-1026|                         setHidden('location_commune_hidden', sublocality || (postcodeLocalities.length > 0 ? postcodeLocalities[0] : null));
-1027|                         setHidden('location_postal_code_hidden', postalCode);
-1028|                         setHidden('location_province_hidden', province);
-1029|                         setHidden('location_region_hidden', region);
-1030|                         setHidden('location_precise_hidden', sublocality || locality || (postcodeLocalities.length > 0 ? postcodeLocalities[0] : null));
-1031|                         setHidden('location_postcode_localities_hidden', postcodeLocalities.length > 0 ? postcodeLocalities.join(', ') : null);
+1025|                     if (!location) {
+1026|                         manualResults.innerHTML = `<div class="result-error">❌ Impossible d'obtenir les coordonnées.</div>`;
+1027|                         return;
+1028|                     }
+1029| 
+1030|                     const lat = location.lat;
+1031|                     const lng = location.lng;
 1032| 
-1033|                         // 🔥 STOCKER AUSSI LES AUTRES COMMUNES DU CODE POSTAL (dans une autre colonne ou en notes)
-1034|                         // On peut les stocker dans location_precise ou une nouvelle colonne
-1035| 
-1036|                         // Mettre à jour le select avec la ville
-1037|                         const locationSelect = document.getElementById('location');
-1038|                         if (locality) {
-1039|                             let optionExists = false;
-1040|                             for (let opt of locationSelect.options) {
-1041|                                 if (opt.value === locality) {
-1042|                                     optionExists = true;
-1043|                                     break;
-1044|                                 }
-1045|                             }
-1046|                             if (!optionExists) {
-1047|                                 const newOption = document.createElement('option');
-1048|                                 newOption.value = locality;
-1049|                                 newOption.textContent = locality;
-1050|                                 locationSelect.appendChild(newOption);
-1051|                             }
-1052|                             locationSelect.value = locality;
-1053|                         }
-1054| 
-1055|                         // 🎯 AFFICHAGE : seulement commune + ville (pas d'adresse complète)
-1056|                         let displayParts = [];
-1057|                         if (communePrecise && communePrecise !== locality) {
-1058|                             displayParts.push(communePrecise);
-1059|                         }
-1060|                         displayParts.push(locality);
-1061|                         // Si on a une province et que c'est différent, on l'ajoute en 3ème
-1062|                         if (province && province !== locality && province !== communePrecise) {
-1063|                             displayParts.push(province);
-1064|                         }
-1065|                         const displayText = displayParts.join(' - ');
-1066| 
-1067|                         // Message de confirmation amélioré
-1068|                         const msg = document.createElement('div');
-1069|                         msg.style.cssText = 'padding: 10px; background: #e8f5e9; border-radius: 5px; color: #2e7d32; margin-top: 10px;';
-1070|                         msg.innerHTML = `✅ Localisation sélectionnée : <strong>${displayText}</strong>`;
-1071|                         const existingMsg = document.querySelector('.location-confirm-msg');
-1072|                         if (existingMsg) existingMsg.remove();
-1073|                         msg.className = 'location-confirm-msg';
-1074|                         document.getElementById('manualResults').appendChild(msg);
-1075|                     }
-1076|                 })
-1077|                 .catch(err => console.error('Erreur geocode:', err));
-1078|         }
-1079| 
-1080|         // Bouton "Ma localité n'est pas bonne"
-1081|         if (switchToManualBtn) {
-1082|             switchToManualBtn.addEventListener('click', function () {
-1083|                 document.getElementById('gpsResult').style.display = 'none';
-1084|                 manualSearchZone.style.display = 'block';
-1085|                 this.style.display = 'none';
-1086| 
-1087|                 if (!autocompleteReady) {
-1088|                     loadGooglePlaces();
-1089|                 }
-1090| 
-1091|                 setTimeout(() => manualLocationInput.focus(), 100);
-1092|             });
-1093|         }
-1094| 
-1095|         // Si l'utilisateur appuie sur Entrée, lancer la recherche
-1096|         if (manualLocationInput) {
-1097|             manualLocationInput.addEventListener('keypress', function (e) {
-1098|                 if (e.key === 'Enter') {
-1099|                     e.preventDefault();
-1100|                     suggestionsContainer.style.display = 'none';
-1101|                     const query = this.value.trim();
-1102|                     if (query) {
-1103|                         rechercherLocalite(query);
-1104|                     }
-1105|                 }
-1106|             });
-1107|         }
-1108| 
-1109|         // ===== FONCTION DE RECHERCHE MANUELLE - VERSION PROPRE =====
-1110|         function rechercherLocalite(query) {
-1111|             const queryString = String(query).trim();
-1112| 
-1113|             if (!queryString) {
-1114|                 manualResults.innerHTML = `<div class="result-error">Veuillez entrer un code postal ou un nom de lieu.</div>`;
-1115|                 manualResults.style.display = 'block';
-1116|                 return;
-1117|             }
-1118| 
-1119|             // ÉTAPE 1 : Recherche initiale pour obtenir les coordonnées
-1120|             const searchQuery = `${queryString}, Belgique`;
-1121|             const urlGeo = `/api/geocode?address=${encodeURIComponent(searchQuery)}&language=fr`;
+1033|                     console.log(`📍 Coordonnées: lat=${lat}, lng=${lng}`);
+1034| 
+1035|                     // ÉTAPE 2 : Recherche inversée
+1036|                     const urlReverse = `/api/geocode?lat=${lat}&lng=${lng}&language=fr`;
+1037| 
+1038|                     return fetch(urlReverse);
+1039|                 })
+1040|                 .then(response => {
+1041|                     if (!response) return;
+1042|                     return response.json();
+1043|                 })
+1044|                 .then(dataReverse => {
+1045|                     if (!dataReverse) return;
+1046| 
+1047|                     console.log('📡 Résultat recherche inversée:', dataReverse);
+1048| 
+1049|                     if (dataReverse.status !== 'OK' || !dataReverse.results || dataReverse.results.length === 0) {
+1050|                         manualResults.innerHTML = `
+1051|                             <div class="result-error">❌ Aucun résultat trouvé pour les coordonnées.</div>
+1052|                         `;
+1053|                         return;
+1054|                     }
+1055| 
+1056|                     // 🔥 EXTRAIRE LES DONNÉES
+1057|                     const data = extraireDonnees(dataReverse.results);
+1058| 
+1059|                     // 🔥 CONSTRUIRE LES OPTIONS
+1060|                     const optionsArray = construireOptions(data);
+1061| 
+1062|                     console.log('📍 Options trouvées:', optionsArray);
+1063|                     console.log('📦 Données extraites:', data);
+1064| 
+1065|                     if (optionsArray.length === 0) {
+1066|                         manualResults.innerHTML = `
+1067|                             <div class="result-error">❌ Aucune option disponible pour "${query}".</div>
+1068|                         `;
+1069|                         return;
+1070|                     }
+1071| 
+1072|                     // Stocker les données pour la suite
+1073|                     window._currentLocationData = data;
+1074|                     window._originalOptions = optionsArray;
+1075|                     window._originalQuery = query;
+1076| 
+1077|                     // Afficher les options
+1078|                     afficherOptionsManuelles(optionsArray, query);
+1079|                 })
+1080|                 .catch(error => {
+1081|                     console.error('❌ Erreur:', error);
+1082|                     manualResults.innerHTML = `<div class="result-error">❌ Erreur de recherche.</div>`;
+1083|                 });
+1084|         }
+1085| 
+1086|         // ===== EXTRAIRE LES DONNÉES DE L'API =====
+1087|         function extraireDonnees(results) {
+1088|             let city = null;
+1089|             let commune = null;
+1090|             let postalCode = null;
+1091|             let province = null;
+1092|             let region = null;
+1093|             let postcodeLocalities = [];
+1094|             let sublocalityLevel1 = null;
+1095|             let sublocalityLevel2 = null;
+1096|             let sublocalityLevel3 = null;
+1097|             let sublocalityLevel4 = null;
+1098|             let adminLevel3 = null;
+1099|             let adminLevel4 = null;
+1100|             let neighborhood = null;
+1101|             let country = null;
+1102|             let lat = null;
+1103|             let lng = null;
+1104| 
+1105|             results.forEach(result => {
+1106|                 const components = result.address_components || [];
+1107| 
+1108|                 // Extraire chaque composant
+1109|                 const locality = components.find(c => c.types.includes('locality') || c.types.includes('postal_town'))?.long_name;
+1110|                 const sublocality = components.find(c => c.types.includes('sublocality'))?.long_name;
+1111|                 const neigh = components.find(c => c.types.includes('neighborhood'))?.long_name;
+1112|                 const postal = components.find(c => c.types.includes('postal_code'))?.long_name;
+1113|                 const prov = components.find(c => c.types.includes('administrative_area_level_2'))?.long_name;
+1114|                 const reg = components.find(c => c.types.includes('administrative_area_level_1'))?.long_name;
+1115|                 const subL1 = components.find(c => c.types.includes('sublocality_level_1'))?.long_name;
+1116|                 const subL2 = components.find(c => c.types.includes('sublocality_level_2'))?.long_name;
+1117|                 const subL3 = components.find(c => c.types.includes('sublocality_level_3'))?.long_name;
+1118|                 const subL4 = components.find(c => c.types.includes('sublocality_level_4'))?.long_name;
+1119|                 const admin3 = components.find(c => c.types.includes('administrative_area_level_3'))?.long_name;
+1120|                 const admin4 = components.find(c => c.types.includes('administrative_area_level_4'))?.long_name;
+1121|                 const cntry = components.find(c => c.types.includes('country'))?.long_name;
 1122| 
-1123|             console.log('🚀 Recherche initiale:', searchQuery);
-1124| 
-1125|             manualResults.innerHTML = '<div class="result-loading">🔍 Recherche en cours...</div>';
-1126|             manualResults.style.display = 'block';
-1127| 
-1128|             fetch(urlGeo)
-1129|                 .then(response => response.json())
-1130|                 .then(dataGeo => {
-1131|                     console.log('📡 Résultat recherche initiale:', dataGeo);
-1132| 
-1133|                     if (dataGeo.status !== 'OK' || !dataGeo.results || dataGeo.results.length === 0) {
-1134|                         manualResults.innerHTML = `
-1135|                             <div class="result-error">❌ Aucun résultat trouvé pour "${queryString}".</div>
-1136|                         `;
-1137|                         return;
-1138|                     }
-1139| 
-1140|                     const firstResult = dataGeo.results[0];
-1141|                     const location = firstResult.geometry?.location;
-1142| 
-1143|                     if (!location) {
-1144|                         manualResults.innerHTML = `<div class="result-error">❌ Impossible d'obtenir les coordonnées.</div>`;
-1145|                         return;
-1146|                     }
-1147| 
-1148|                     const lat = location.lat;
-1149|                     const lng = location.lng;
+1123|                 // Coordonnées
+1124|                 if (result.geometry?.location) {
+1125|                     lat = result.geometry.location.lat;
+1126|                     lng = result.geometry.location.lng;
+1127|                 }
+1128| 
+1129|                 // Récupérer postcode_localities
+1130|                 const postLoc = result.postcode_localities || [];
+1131|                 if (postLoc.length > 0) {
+1132|                     postcodeLocalities = postLoc;
+1133|                 }
+1134| 
+1135|                 // Stocker les valeurs trouvées (priorité au premier résultat)
+1136|                 if (locality && !city) city = locality;
+1137|                 if (sublocality && !commune) commune = sublocality;
+1138|                 if (neigh && !neighborhood) neighborhood = neigh;
+1139|                 if (postal && !postalCode) postalCode = postal;
+1140|                 if (prov && !province) province = prov;
+1141|                 if (reg && !region) region = reg;
+1142|                 if (subL1 && !sublocalityLevel1) sublocalityLevel1 = subL1;
+1143|                 if (subL2 && !sublocalityLevel2) sublocalityLevel2 = subL2;
+1144|                 if (subL3 && !sublocalityLevel3) sublocalityLevel3 = subL3;
+1145|                 if (subL4 && !sublocalityLevel4) sublocalityLevel4 = subL4;
+1146|                 if (admin3 && !adminLevel3) adminLevel3 = admin3;
+1147|                 if (admin4 && !adminLevel4) adminLevel4 = admin4;
+1148|                 if (cntry && !country) country = cntry;
+1149|             });
 1150| 
-1151|                     console.log(`📍 Coordonnées: lat=${lat}, lng=${lng}`);
-1152| 
-1153|                     // ÉTAPE 2 : Recherche inversée
-1154|                     const urlReverse = `/api/geocode?lat=${lat}&lng=${lng}&language=fr`;
+1151|             // Règle pour la commune : si commune = city, on prend la première postcode_localities
+1152|             if (commune === city && postcodeLocalities.length > 0 && postcodeLocalities[0] !== city) {
+1153|                 commune = postcodeLocalities[0];
+1154|             }
 1155| 
-1156|                     return fetch(urlReverse);
-1157|                 })
-1158|                 .then(response => {
-1159|                     if (!response) return;
-1160|                     return response.json();
-1161|                 })
-1162|                 .then(dataReverse => {
-1163|                     if (!dataReverse) return;
-1164| 
-1165|                     console.log('📡 Résultat recherche inversée:', dataReverse);
-1166| 
-1167|                     if (dataReverse.status !== 'OK' || !dataReverse.results || dataReverse.results.length === 0) {
-1168|                         manualResults.innerHTML = `
-1169|                             <div class="result-error">❌ Aucun résultat trouvé pour les coordonnées.</div>
-1170|                         `;
-1171|                         return;
-1172|                     }
-1173| 
-1174|                     // 🔥 EXTRAIRE LES DONNÉES
-1175|                     const data = extraireDonnees(dataReverse.results);
-1176| 
-1177|                     // 🔥 CONSTRUIRE LES OPTIONS
-1178|                     const optionsArray = construireOptions(data);
-1179| 
-1180|                     console.log('📍 Options trouvées:', optionsArray);
-1181|                     console.log('📦 Données extraites:', data);
+1156|             // Fallback : si commune est null, on prend city
+1157|             if (!commune) commune = city;
+1158| 
+1159|             return {
+1160|                 city,
+1161|                 commune,
+1162|                 postalCode,
+1163|                 province,
+1164|                 region,
+1165|                 postcodeLocalities,
+1166|                 sublocalityLevel1,
+1167|                 sublocalityLevel2,
+1168|                 sublocalityLevel3,
+1169|                 sublocalityLevel4,
+1170|                 adminLevel3,
+1171|                 adminLevel4,
+1172|                 neighborhood,
+1173|                 country,
+1174|                 lat,
+1175|                 lng
+1176|             };
+1177|         }
+1178|         // ===== CONSTRUIRE LES OPTIONS POUR L'UTILISATEUR =====
+1179|         // ===== CONSTRUIRE LES OPTIONS POUR L'UTILISATEUR (TOUT, SANS FILTRE) =====
+1180|         function construireOptions(data) {
+1181|             const options = [];
 1182| 
-1183|                     if (optionsArray.length === 0) {
-1184|                         manualResults.innerHTML = `
-1185|                             <div class="result-error">❌ Aucune option disponible pour "${query}".</div>
-1186|                         `;
-1187|                         return;
-1188|                     }
-1189| 
-1190|                     // Stocker les données pour la suite
-1191|                     window._currentLocationData = data;
-1192|                     window._originalOptions = optionsArray;
-1193|                     window._originalQuery = query;
-1194| 
-1195|                     // Afficher les options
-1196|                     afficherOptionsManuelles(optionsArray, query);
-1197|                 })
-1198|                 .catch(error => {
-1199|                     console.error('❌ Erreur:', error);
-1200|                     manualResults.innerHTML = `<div class="result-error">❌ Erreur de recherche.</div>`;
-1201|                 });
-1202|         }
-1203| 
-1204|         // ===== EXTRAIRE LES DONNÉES DE L'API =====
-1205|         function extraireDonnees(results) {
-1206|             let city = null;
-1207|             let commune = null;
-1208|             let postalCode = null;
-1209|             let province = null;
-1210|             let region = null;
-1211|             let postcodeLocalities = [];
-1212|             let sublocalityLevel1 = null;
-1213|             let sublocalityLevel2 = null;
-1214|             let sublocalityLevel3 = null;
-1215|             let sublocalityLevel4 = null;
-1216|             let adminLevel3 = null;
-1217|             let adminLevel4 = null;
-1218|             let neighborhood = null;
-1219|             let country = null;
-1220|             let lat = null;
-1221|             let lng = null;
-1222| 
-1223|             results.forEach(result => {
-1224|                 const components = result.address_components || [];
-1225| 
-1226|                 // Extraire chaque composant
-1227|                 const locality = components.find(c => c.types.includes('locality') || c.types.includes('postal_town'))?.long_name;
-1228|                 const sublocality = components.find(c => c.types.includes('sublocality'))?.long_name;
-1229|                 const neigh = components.find(c => c.types.includes('neighborhood'))?.long_name;
-1230|                 const postal = components.find(c => c.types.includes('postal_code'))?.long_name;
-1231|                 const prov = components.find(c => c.types.includes('administrative_area_level_2'))?.long_name;
-1232|                 const reg = components.find(c => c.types.includes('administrative_area_level_1'))?.long_name;
-1233|                 const subL1 = components.find(c => c.types.includes('sublocality_level_1'))?.long_name;
-1234|                 const subL2 = components.find(c => c.types.includes('sublocality_level_2'))?.long_name;
-1235|                 const subL3 = components.find(c => c.types.includes('sublocality_level_3'))?.long_name;
-1236|                 const subL4 = components.find(c => c.types.includes('sublocality_level_4'))?.long_name;
-1237|                 const admin3 = components.find(c => c.types.includes('administrative_area_level_3'))?.long_name;
-1238|                 const admin4 = components.find(c => c.types.includes('administrative_area_level_4'))?.long_name;
-1239|                 const cntry = components.find(c => c.types.includes('country'))?.long_name;
-1240| 
-1241|                 // Coordonnées
-1242|                 if (result.geometry?.location) {
-1243|                     lat = result.geometry.location.lat;
-1244|                     lng = result.geometry.location.lng;
-1245|                 }
-1246| 
-1247|                 // Récupérer postcode_localities
-1248|                 const postLoc = result.postcode_localities || [];
-1249|                 if (postLoc.length > 0) {
-1250|                     postcodeLocalities = postLoc;
-1251|                 }
-1252| 
-1253|                 // Stocker les valeurs trouvées (priorité au premier résultat)
-1254|                 if (locality && !city) city = locality;
-1255|                 if (sublocality && !commune) commune = sublocality;
-1256|                 if (neigh && !neighborhood) neighborhood = neigh;
-1257|                 if (postal && !postalCode) postalCode = postal;
-1258|                 if (prov && !province) province = prov;
-1259|                 if (reg && !region) region = reg;
-1260|                 if (subL1 && !sublocalityLevel1) sublocalityLevel1 = subL1;
-1261|                 if (subL2 && !sublocalityLevel2) sublocalityLevel2 = subL2;
-1262|                 if (subL3 && !sublocalityLevel3) sublocalityLevel3 = subL3;
-1263|                 if (subL4 && !sublocalityLevel4) sublocalityLevel4 = subL4;
-1264|                 if (admin3 && !adminLevel3) adminLevel3 = admin3;
-1265|                 if (admin4 && !adminLevel4) adminLevel4 = admin4;
-1266|                 if (cntry && !country) country = cntry;
-1267|             });
-1268| 
-1269|             // Règle pour la commune : si commune = city, on prend la première postcode_localities
-1270|             if (commune === city && postcodeLocalities.length > 0 && postcodeLocalities[0] !== city) {
-1271|                 commune = postcodeLocalities[0];
-1272|             }
-1273| 
-1274|             // Fallback : si commune est null, on prend city
-1275|             if (!commune) commune = city;
-1276| 
-1277|             return {
-1278|                 city,
-1279|                 commune,
-1280|                 postalCode,
-1281|                 province,
-1282|                 region,
-1283|                 postcodeLocalities,
-1284|                 sublocalityLevel1,
-1285|                 sublocalityLevel2,
-1286|                 sublocalityLevel3,
-1287|                 sublocalityLevel4,
-1288|                 adminLevel3,
-1289|                 adminLevel4,
-1290|                 neighborhood,
-1291|                 country,
-1292|                 lat,
-1293|                 lng
-1294|             };
-1295|         }
-1296|         // ===== CONSTRUIRE LES OPTIONS POUR L'UTILISATEUR =====
-1297|         // ===== CONSTRUIRE LES OPTIONS POUR L'UTILISATEUR (TOUT, SANS FILTRE) =====
-1298|         function construireOptions(data) {
-1299|             const options = [];
-1300| 
-1301|             function addOption(text, type) {
-1302|                 if (text && text.trim() !== '') {
-1303|                     options.push({
-1304|                         text: text,
-1305|                         type: type,
-1306|                         display: debugMode ? `${text} (${type})` : text
-1307|                     });
-1308|                 }
-1309|             }
-1310| 
-1311|             // 1. Code postal + Ville
-1312|             if (data.postalCode && data.city) {
-1313|                 addOption(`${data.postalCode} ${data.city}`, 'location_city');
-1314|             }
+1183|             function addOption(text, type) {
+1184|                 if (text && text.trim() !== '') {
+1185|                     options.push({
+1186|                         text: text,
+1187|                         type: type,
+1188|                         display: debugMode ? `${text} (${type})` : text
+1189|                     });
+1190|                 }
+1191|             }
+1192| 
+1193|             // 1. Code postal + Ville
+1194|             if (data.postalCode && data.city) {
+1195|                 addOption(`${data.postalCode} ${data.city}`, 'location_city');
+1196|             }
+1197| 
+1198|             // 2. Code postal + Commune
+1199|             if (data.postalCode && data.commune) {
+1200|                 addOption(`${data.postalCode} ${data.commune}`, 'location_commune');
+1201|             }
+1202| 
+1203|             // 3. Ville seule
+1204|             if (data.city) {
+1205|                 addOption(data.city, 'location_city');
+1206|             }
+1207| 
+1208|             // 4. Commune seule
+1209|             if (data.commune) {
+1210|                 addOption(data.commune, 'location_commune');
+1211|             }
+1212| 
+1213|             // 5. Code postal seul
+1214|             if (data.postalCode) {
+1215|                 addOption(data.postalCode, 'location_postal_code');
+1216|             }
+1217| 
+1218|             // 6. Toutes les localités du code postal
+1219|             if (data.postcodeLocalities && data.postcodeLocalities.length > 0) {
+1220|                 data.postcodeLocalities.forEach(loc => {
+1221|                     if (data.postalCode) {
+1222|                         addOption(`${data.postalCode} ${loc}`, 'location_postcode_localities');
+1223|                     } else {
+1224|                         addOption(loc, 'location_postcode_localities');
+1225|                     }
+1226|                 });
+1227|             }
+1228| 
+1229|             // 7. Sous-localités (niveaux 1 à 4)
+1230|             const sublocalityLevels = [
+1231|                 { value: data.sublocalityLevel1, type: 'sublocality_level_1' },
+1232|                 { value: data.sublocalityLevel2, type: 'sublocality_level_2' },
+1233|                 { value: data.sublocalityLevel3, type: 'sublocality_level_3' },
+1234|                 { value: data.sublocalityLevel4, type: 'sublocality_level_4' }
+1235|             ];
+1236| 
+1237|             sublocalityLevels.forEach(({ value, type }) => {
+1238|                 if (value) {
+1239|                     addOption(value, type);
+1240|                     if (data.postalCode) {
+1241|                         addOption(`${data.postalCode} ${value}`, type);
+1242|                     }
+1243|                 }
+1244|             });
+1245| 
+1246|             // 8. Province (TOUJOURS ajoutée)
+1247|             if (data.province) {
+1248|                 addOption(data.province, 'location_province');
+1249|             }
+1250| 
+1251|             // 9. Région (TOUJOURS ajoutée)
+1252|             if (data.region) {
+1253|                 addOption(data.region, 'location_region');
+1254|             }
+1255| 
+1256|             // 10. Niveau administratif 3 (TOUJOURS ajouté)
+1257|             if (data.adminLevel3) {
+1258|                 addOption(data.adminLevel3, 'admin_level_3');
+1259|             }
+1260| 
+1261|             // 11. Niveau administratif 4 (TOUJOURS ajouté)
+1262|             if (data.adminLevel4) {
+1263|                 addOption(data.adminLevel4, 'admin_level_4');
+1264|             }
+1265| 
+1266|             // 12. Quartier (TOUJOURS ajouté)
+1267|             if (data.neighborhood) {
+1268|                 addOption(data.neighborhood, 'neighborhood');
+1269|             }
+1270| 
+1271|             // 13. Pays (TOUJOURS ajouté)
+1272|             if (data.country) {
+1273|                 addOption(data.country, 'country');
+1274|             }
+1275| 
+1276|             return options;
+1277|         }
+1278| 
+1279|         // ===== AFFICHER LES OPTIONS (PHASE 1 + PHASE 2) =====
+1280|         function afficherOptionsManuelles(options, query) {
+1281|             let html = `
+1282|             <div style="background: #f0f8f0; padding: 15px; border-radius: 8px; border: 2px solid #4CAF50;">
+1283|                 <p style="font-weight: bold; color: #2e7d32;">📍 Résultats pour "${query}"</p>
+1284|                 <p>Choisissez votre localité :</p>
+1285|                 <div style="margin: 10px 0; display: flex; flex-direction: column; gap: 8px;">
+1286|             `;
+1287| 
+1288|             options.forEach((option, index) => {
+1289|                 const displayText = option.display || option.text;
+1290|                 html += `
+1291|                 <label style="display: flex; align-items: center; gap: 10px; font-size: 0.95em; cursor: pointer; padding: 8px 12px; border-radius: 8px; border: 1px solid #e0e0e0; transition: background 0.2s;" 
+1292|                        onmouseover="this.style.background='#e8f5e9'" 
+1293|                        onmouseout="this.style.background='white'">
+1294|                     <input type="radio" name="manualLocationChoice" value="${index}">
+1295|                     <span>${displayText}</span>
+1296|                 </label>
+1297|             `;
+1298|             });
+1299| 
+1300|             html += `
+1301|                 </div>
+1302|                 <div style="margin-top: 10px; display: flex; gap: 10px;">
+1303|                     <button type="button" id="manualLocationConfirm" disabled style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 50px; cursor: pointer;">✅ Confirmer</button>
+1304|                     <button type="button" id="manualLocationCancel" style="padding: 10px 20px; background: #f44336; color: white; border: none; border-radius: 50px; cursor: pointer;">🔄 Annuler</button>
+1305|                 </div>
+1306|             </div>
+1307|             `;
+1308| 
+1309|             manualResults.innerHTML = html;
+1310|             manualResults.style.display = 'block';
+1311| 
+1312|             const confirmBtn = document.getElementById('manualLocationConfirm');
+1313|             const cancelBtn = document.getElementById('manualLocationCancel');
+1314|             const radios = document.querySelectorAll('input[name="manualLocationChoice"]');
 1315| 
-1316|             // 2. Code postal + Commune
-1317|             if (data.postalCode && data.commune) {
-1318|                 addOption(`${data.postalCode} ${data.commune}`, 'location_commune');
-1319|             }
-1320| 
-1321|             // 3. Ville seule
-1322|             if (data.city) {
-1323|                 addOption(data.city, 'location_city');
-1324|             }
-1325| 
-1326|             // 4. Commune seule
-1327|             if (data.commune) {
-1328|                 addOption(data.commune, 'location_commune');
-1329|             }
-1330| 
-1331|             // 5. Code postal seul
-1332|             if (data.postalCode) {
-1333|                 addOption(data.postalCode, 'location_postal_code');
-1334|             }
-1335| 
-1336|             // 6. Toutes les localités du code postal
-1337|             if (data.postcodeLocalities && data.postcodeLocalities.length > 0) {
-1338|                 data.postcodeLocalities.forEach(loc => {
-1339|                     if (data.postalCode) {
-1340|                         addOption(`${data.postalCode} ${loc}`, 'location_postcode_localities');
-1341|                     } else {
-1342|                         addOption(loc, 'location_postcode_localities');
-1343|                     }
-1344|                 });
-1345|             }
-1346| 
-1347|             // 7. Sous-localités (niveaux 1 à 4)
-1348|             const sublocalityLevels = [
-1349|                 { value: data.sublocalityLevel1, type: 'sublocality_level_1' },
-1350|                 { value: data.sublocalityLevel2, type: 'sublocality_level_2' },
-1351|                 { value: data.sublocalityLevel3, type: 'sublocality_level_3' },
-1352|                 { value: data.sublocalityLevel4, type: 'sublocality_level_4' }
-1353|             ];
-1354| 
-1355|             sublocalityLevels.forEach(({ value, type }) => {
-1356|                 if (value) {
-1357|                     addOption(value, type);
-1358|                     if (data.postalCode) {
-1359|                         addOption(`${data.postalCode} ${value}`, type);
-1360|                     }
-1361|                 }
-1362|             });
+1316|             function updateConfirmButton() {
+1317|                 const radioSelected = document.querySelector('input[name="manualLocationChoice"]:checked') !== null;
+1318|                 if (confirmBtn) {
+1319|                     confirmBtn.disabled = !radioSelected;
+1320|                 }
+1321|             }
+1322| 
+1323|             radios.forEach(radio => {
+1324|                 radio.addEventListener('change', updateConfirmButton);
+1325|             });
+1326| 
+1327|             // Activer le bouton par défaut
+1328|             updateConfirmButton();
+1329| 
+1330|             if (confirmBtn) {
+1331|                 confirmBtn.addEventListener('click', function () {
+1332|                     const selectedChoice = document.querySelector('input[name="manualLocationChoice"]:checked');
+1333|                     if (!selectedChoice) {
+1334|                         alert('Veuillez choisir une option.');
+1335|                         return;
+1336|                     }
+1337| 
+1338|                     const index = parseInt(selectedChoice.value);
+1339|                     const selectedOption = options[index];
+1340|                     const selected = selectedOption.text;
+1341| 
+1342|                     // Récupérer les données stockées
+1343|                     const locationData = window._currentLocationData || {};
+1344| 
+1345|                     // Extraire les informations de l'option choisie
+1346|                     let ville = selected;
+1347|                     let commune = locationData.commune || null;
+1348|                     let postalCode = locationData.postalCode || null;
+1349|                     let province = locationData.province || null;
+1350|                     let region = locationData.region || null;
+1351|                     let postcodeLocalities = locationData.postcodeLocalities || [];
+1352|                     let sublocalityLevel1 = locationData.sublocalityLevel1 || null;
+1353|                     let sublocalityLevel2 = locationData.sublocalityLevel2 || null;
+1354|                     let sublocalityLevel3 = locationData.sublocalityLevel3 || null;
+1355|                     let sublocalityLevel4 = locationData.sublocalityLevel4 || null;
+1356| 
+1357|                     // Extraire le code postal si présent
+1358|                     const postalMatch = selected.match(/^([0-9]{4})\s/);
+1359|                     if (postalMatch) {
+1360|                         postalCode = postalMatch[1];
+1361|                         ville = selected.replace(/^[0-9]{4}\s/, '');
+1362|                     }
 1363| 
-1364|             // 8. Province (TOUJOURS ajoutée)
-1365|             if (data.province) {
-1366|                 addOption(data.province, 'location_province');
-1367|             }
-1368| 
-1369|             // 9. Région (TOUJOURS ajoutée)
-1370|             if (data.region) {
-1371|                 addOption(data.region, 'location_region');
-1372|             }
-1373| 
-1374|             // 10. Niveau administratif 3 (TOUJOURS ajouté)
-1375|             if (data.adminLevel3) {
-1376|                 addOption(data.adminLevel3, 'admin_level_3');
-1377|             }
-1378| 
-1379|             // 11. Niveau administratif 4 (TOUJOURS ajouté)
-1380|             if (data.adminLevel4) {
-1381|                 addOption(data.adminLevel4, 'admin_level_4');
-1382|             }
-1383| 
-1384|             // 12. Quartier (TOUJOURS ajouté)
-1385|             if (data.neighborhood) {
-1386|                 addOption(data.neighborhood, 'neighborhood');
-1387|             }
-1388| 
-1389|             // 13. Pays (TOUJOURS ajouté)
-1390|             if (data.country) {
-1391|                 addOption(data.country, 'country');
-1392|             }
-1393| 
-1394|             return options;
-1395|         }
+1364|                     // Extraire la commune si virgule
+1365|                     if (selected.includes(',')) {
+1366|                         const parts = selected.split(', ');
+1367|                         commune = parts[0];
+1368|                         if (commune === ville) commune = null;
+1369|                         if (parts.length >= 3) province = parts[2];
+1370|                         if (parts.length >= 4) region = parts[3];
+1371|                     }
+1372| 
+1373|                     // Extraire la commune si virgule
+1374|                     if (selected.includes(',')) {
+1375|                         const parts = selected.split(', ');
+1376|                         commune = parts[0];
+1377|                         if (commune === ville) commune = null;
+1378|                         if (parts.length >= 3) province = parts[2];
+1379|                         if (parts.length >= 4) region = parts[3];
+1380|                     }
+1381| 
+1382|                     // Stocker les données pour la phase 2
+1383|                     window._selectedLocationData = {
+1384|                         ville: ville,
+1385|                         commune: commune,
+1386|                         province: province,
+1387|                         region: region,
+1388|                         postalCode: postalCode,
+1389|                         postcodeLocalities: postcodeLocalities,
+1390|                         sublocalityLevel1: sublocalityLevel1,
+1391|                         sublocalityLevel2: sublocalityLevel2,
+1392|                         sublocalityLevel3: sublocalityLevel3,
+1393|                         sublocalityLevel4: sublocalityLevel4,
+1394|                         locationData: locationData
+1395|                     };
 1396| 
-1397|         // ===== AFFICHER LES OPTIONS (PHASE 1 + PHASE 2) =====
-1398|         function afficherOptionsManuelles(options, query) {
-1399|             let html = `
-1400|             <div style="background: #f0f8f0; padding: 15px; border-radius: 8px; border: 2px solid #4CAF50;">
-1401|                 <p style="font-weight: bold; color: #2e7d32;">📍 Résultats pour "${query}"</p>
-1402|                 <p>Choisissez votre localité :</p>
-1403|                 <div style="margin: 10px 0; display: flex; flex-direction: column; gap: 8px;">
-1404|             `;
-1405| 
-1406|             options.forEach((option, index) => {
-1407|                 const displayText = option.display || option.text;
-1408|                 html += `
-1409|                 <label style="display: flex; align-items: center; gap: 10px; font-size: 0.95em; cursor: pointer; padding: 8px 12px; border-radius: 8px; border: 1px solid #e0e0e0; transition: background 0.2s;" 
-1410|                        onmouseover="this.style.background='#e8f5e9'" 
-1411|                        onmouseout="this.style.background='white'">
-1412|                     <input type="radio" name="manualLocationChoice" value="${index}">
-1413|                     <span>${displayText}</span>
-1414|                 </label>
-1415|             `;
-1416|             });
-1417| 
-1418|             html += `
-1419|                 </div>
-1420|                 <div style="margin-top: 10px; display: flex; gap: 10px;">
-1421|                     <button type="button" id="manualLocationConfirm" disabled style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 50px; cursor: pointer;">✅ Confirmer</button>
-1422|                     <button type="button" id="manualLocationCancel" style="padding: 10px 20px; background: #f44336; color: white; border: none; border-radius: 50px; cursor: pointer;">🔄 Annuler</button>
-1423|                 </div>
-1424|             </div>
-1425|             `;
-1426| 
-1427|             manualResults.innerHTML = html;
-1428|             manualResults.style.display = 'block';
-1429| 
-1430|             const confirmBtn = document.getElementById('manualLocationConfirm');
-1431|             const cancelBtn = document.getElementById('manualLocationCancel');
-1432|             const radios = document.querySelectorAll('input[name="manualLocationChoice"]');
-1433| 
-1434|             function updateConfirmButton() {
-1435|                 const radioSelected = document.querySelector('input[name="manualLocationChoice"]:checked') !== null;
-1436|                 if (confirmBtn) {
-1437|                     confirmBtn.disabled = !radioSelected;
-1438|                 }
-1439|             }
-1440| 
-1441|             radios.forEach(radio => {
-1442|                 radio.addEventListener('change', updateConfirmButton);
-1443|             });
-1444| 
-1445|             // Activer le bouton par défaut
-1446|             updateConfirmButton();
-1447| 
-1448|             if (confirmBtn) {
-1449|                 confirmBtn.addEventListener('click', function () {
-1450|                     const selectedChoice = document.querySelector('input[name="manualLocationChoice"]:checked');
-1451|                     if (!selectedChoice) {
-1452|                         alert('Veuillez choisir une option.');
-1453|                         return;
-1454|                     }
-1455| 
-1456|                     const index = parseInt(selectedChoice.value);
-1457|                     const selectedOption = options[index];
-1458|                     const selected = selectedOption.text;
-1459| 
-1460|                     // Récupérer les données stockées
-1461|                     const locationData = window._currentLocationData || {};
-1462| 
-1463|                     // Extraire les informations de l'option choisie
-1464|                     let ville = selected;
-1465|                     let commune = locationData.commune || null;
-1466|                     let postalCode = locationData.postalCode || null;
-1467|                     let province = locationData.province || null;
-1468|                     let region = locationData.region || null;
-1469|                     let postcodeLocalities = locationData.postcodeLocalities || [];
-1470|                     let sublocalityLevel1 = locationData.sublocalityLevel1 || null;
-1471|                     let sublocalityLevel2 = locationData.sublocalityLevel2 || null;
-1472|                     let sublocalityLevel3 = locationData.sublocalityLevel3 || null;
-1473|                     let sublocalityLevel4 = locationData.sublocalityLevel4 || null;
-1474| 
-1475|                     // Extraire le code postal si présent
-1476|                     const postalMatch = selected.match(/^([0-9]{4})\s/);
-1477|                     if (postalMatch) {
-1478|                         postalCode = postalMatch[1];
-1479|                         ville = selected.replace(/^[0-9]{4}\s/, '');
+1397|                     // Afficher la phase 2
+1398|                     afficherChoixFormat();
+1399|                 });
+1400|             }
+1401| 
+1402|             if (cancelBtn) {
+1403|                 cancelBtn.addEventListener('click', function () {
+1404|                     manualResults.style.display = 'none';
+1405|                     manualSearchZone.style.display = 'none';
+1406|                     document.getElementById('switchToManualBtn').style.display = 'inline-block';
+1407|                     document.getElementById('gpsResult').style.display = 'block';
+1408|                 });
+1409|             }
+1410|         }
+1411| 
+1412|         // ===== PHASE 2 : CHOIX DU FORMAT D'AFFICHAGE =====
+1413|         function afficherChoixFormat() {
+1414|             const data = window._selectedLocationData;
+1415|             if (!data) return;
+1416| 
+1417|             const ville = data.ville;
+1418|             const commune = data.commune;
+1419| 
+1420|             // Construire les exemples dynamiquement
+1421|             let exempleVilleSeule = ville;
+1422|             let exempleCommuneVille = commune && commune !== ville ? `${commune} - ${ville}` : ville;
+1423| 
+1424|             const html = `
+1425|             <div style="background: #f0f8f0; padding: 15px; border-radius: 8px; border: 2px solid #4CAF50;">
+1426|                 <p style="font-weight: bold; color: #2e7d32;">📌 Comment voulez-vous afficher votre localité ?</p>
+1427|                 <div style="margin: 15px 0; display: flex; flex-direction: column; gap: 10px;">
+1428|                     <label style="display: flex; align-items: center; gap: 10px; font-size: 1em; cursor: pointer; padding: 10px 12px; border-radius: 8px; border: 1px solid #e0e0e0; background: #fafafa;">
+1429|                         <input type="radio" name="displayFormat" value="city_only" checked>
+1430|                         <span>📍 <strong>${exempleVilleSeule}</strong></span>
+1431|                     </label>
+1432|                     <label style="display: flex; align-items: center; gap: 10px; font-size: 1em; cursor: pointer; padding: 10px 12px; border-radius: 8px; border: 1px solid #e0e0e0; background: #fafafa;">
+1433|                         <input type="radio" name="displayFormat" value="commune_city">
+1434|                         <span>📍 <strong>${exempleCommuneVille}</strong></span>
+1435|                     </label>
+1436|                 </div>
+1437|                 <div style="margin-top: 10px;">
+1438|                     <label style="display: flex; align-items: center; gap: 8px; font-size: 0.9em;">
+1439|                         <input type="checkbox" id="finalConsent">
+1440|                         J'accepte que ma localité soit utilisée dans mon profil
+1441|                     </label>
+1442|                 </div>
+1443|                 <div style="margin-top: 10px; display: flex; gap: 10px;">
+1444|                     <button type="button" id="finalConfirm" disabled style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 50px; cursor: pointer;">✅ Confirmer</button>
+1445|                     <button type="button" id="finalCancel" style="padding: 10px 20px; background: #f44336; color: white; border: none; border-radius: 50px; cursor: pointer;">🔄 Retour</button>
+1446|                 </div>
+1447|             </div>
+1448|             `;
+1449| 
+1450|             manualResults.innerHTML = html;
+1451|             manualResults.style.display = 'block';
+1452| 
+1453|             const consent = document.getElementById('finalConsent');
+1454|             const confirmBtn = document.getElementById('finalConfirm');
+1455|             const cancelBtn = document.getElementById('finalCancel');
+1456|             const radios = document.querySelectorAll('input[name="displayFormat"]');
+1457| 
+1458|             function updateButton() {
+1459|                 const consentChecked = consent?.checked || false;
+1460|                 const radioSelected = document.querySelector('input[name="displayFormat"]:checked') !== null;
+1461|                 confirmBtn.disabled = !(consentChecked && radioSelected);
+1462|             }
+1463| 
+1464|             consent?.addEventListener('change', updateButton);
+1465|             radios.forEach(r => r.addEventListener('change', updateButton));
+1466| 
+1467|             // Confirmer le format
+1468|             confirmBtn?.addEventListener('click', function () {
+1469|                 const format = document.querySelector('input[name="displayFormat"]:checked')?.value || 'city_only';
+1470|                 const data = window._selectedLocationData;
+1471| 
+1472|                 // Construire le texte final
+1473|                 let displayText = '';
+1474|                 if (format === 'city_only') {
+1475|                     displayText = data.ville;
+1476|                 } else {
+1477|                     let parts = [];
+1478|                     if (data.commune && data.commune !== data.ville) {
+1479|                         parts.push(data.commune);
 1480|                     }
-1481| 
-1482|                     // Extraire la commune si virgule
-1483|                     if (selected.includes(',')) {
-1484|                         const parts = selected.split(', ');
-1485|                         commune = parts[0];
-1486|                         if (commune === ville) commune = null;
-1487|                         if (parts.length >= 3) province = parts[2];
-1488|                         if (parts.length >= 4) region = parts[3];
-1489|                     }
-1490| 
-1491|                     // Extraire la commune si virgule
-1492|                     if (selected.includes(',')) {
-1493|                         const parts = selected.split(', ');
-1494|                         commune = parts[0];
-1495|                         if (commune === ville) commune = null;
-1496|                         if (parts.length >= 3) province = parts[2];
-1497|                         if (parts.length >= 4) region = parts[3];
-1498|                     }
-1499| 
-1500|                     // Stocker les données pour la phase 2
-1501|                     window._selectedLocationData = {
-1502|                         ville: ville,
-1503|                         commune: commune,
-1504|                         province: province,
-1505|                         region: region,
-1506|                         postalCode: postalCode,
-1507|                         postcodeLocalities: postcodeLocalities,
-1508|                         sublocalityLevel1: sublocalityLevel1,
-1509|                         sublocalityLevel2: sublocalityLevel2,
-1510|                         sublocalityLevel3: sublocalityLevel3,
-1511|                         sublocalityLevel4: sublocalityLevel4,
-1512|                         locationData: locationData
-1513|                     };
-1514| 
-1515|                     // Afficher la phase 2
-1516|                     afficherChoixFormat();
-1517|                 });
-1518|             }
-1519| 
-1520|             if (cancelBtn) {
-1521|                 cancelBtn.addEventListener('click', function () {
-1522|                     manualResults.style.display = 'none';
-1523|                     manualSearchZone.style.display = 'none';
-1524|                     document.getElementById('switchToManualBtn').style.display = 'inline-block';
-1525|                     document.getElementById('gpsResult').style.display = 'block';
-1526|                 });
-1527|             }
-1528|         }
-1529| 
-1530|         // ===== PHASE 2 : CHOIX DU FORMAT D'AFFICHAGE =====
-1531|         function afficherChoixFormat() {
-1532|             const data = window._selectedLocationData;
-1533|             if (!data) return;
-1534| 
-1535|             const ville = data.ville;
-1536|             const commune = data.commune;
-1537| 
-1538|             // Construire les exemples dynamiquement
-1539|             let exempleVilleSeule = ville;
-1540|             let exempleCommuneVille = commune && commune !== ville ? `${commune} - ${ville}` : ville;
+1481|                     parts.push(data.ville);
+1482|                     displayText = parts.join(' - ');
+1483|                 }
+1484| 
+1485|                 // 🔥 STOCKER DANS LES CHAMPS CACHÉS
+1486|                 function setHidden(id, value) {
+1487|                     let el = document.getElementById(id);
+1488|                     if (!el) {
+1489|                         el = document.createElement('input');
+1490|                         el.type = 'hidden';
+1491|                         el.id = id;
+1492|                         el.name = id.replace('_hidden', '');
+1493|                         document.getElementById('loginForm').appendChild(el);
+1494|                     }
+1495|                     el.value = (value !== null && value !== undefined && value !== '') ? value : '';
+1496|                 }
+1497| 
+1498|                 setHidden('location_city_hidden', data.ville);
+1499|                 setHidden('location_commune_hidden', data.commune || null);
+1500|                 setHidden('location_postal_code_hidden', data.postalCode || null);
+1501|                 setHidden('location_province_hidden', data.province || null);
+1502|                 setHidden('location_region_hidden', data.region || null);
+1503|                 setHidden('location_precise_hidden', displayText);
+1504|                 setHidden('location_display_format_hidden', format);
+1505| 
+1506|                 // 🔥 STOCKER TOUTES LES DONNÉES
+1507|                 setHidden('location_sublocality_level_1_hidden', data.sublocalityLevel1 || null);
+1508|                 setHidden('location_sublocality_level_2_hidden', data.sublocalityLevel2 || null);
+1509|                 setHidden('location_sublocality_level_3_hidden', data.sublocalityLevel3 || null);
+1510|                 setHidden('location_sublocality_level_4_hidden', data.sublocalityLevel4 || null);
+1511|                 setHidden('location_admin_level_3_hidden', data.adminLevel3 || null);
+1512|                 setHidden('location_admin_level_4_hidden', data.adminLevel4 || null);
+1513|                 setHidden('location_neighborhood_hidden', data.neighborhood || null);
+1514|                 setHidden('location_country_hidden', data.country || null);
+1515|                 setHidden('location_lat_hidden', data.lat || null);
+1516|                 setHidden('location_lng_hidden', data.lng || null);
+1517| 
+1518|                 // Stocker les localités du code postal
+1519|                 if (data.postcodeLocalities && data.postcodeLocalities.length > 0) {
+1520|                     setHidden('location_postcode_localities_hidden', data.postcodeLocalities.join(', '));
+1521|                 } else {
+1522|                     setHidden('location_postcode_localities_hidden', null);
+1523|                 }
+1524| 
+1525|                 // Mettre à jour le select
+1526|                 const locationSelect = document.getElementById('location');
+1527|                 let optionExists = false;
+1528|                 for (let opt of locationSelect.options) {
+1529|                     if (opt.value === data.ville) {
+1530|                         optionExists = true;
+1531|                         break;
+1532|                     }
+1533|                 }
+1534|                 if (!optionExists) {
+1535|                     const newOption = document.createElement('option');
+1536|                     newOption.value = data.ville;
+1537|                     newOption.textContent = data.ville;
+1538|                     locationSelect.appendChild(newOption);
+1539|                 }
+1540|                 locationSelect.value = data.ville;
 1541| 
-1542|             const html = `
-1543|             <div style="background: #f0f8f0; padding: 15px; border-radius: 8px; border: 2px solid #4CAF50;">
-1544|                 <p style="font-weight: bold; color: #2e7d32;">📌 Comment voulez-vous afficher votre localité ?</p>
-1545|                 <div style="margin: 15px 0; display: flex; flex-direction: column; gap: 10px;">
-1546|                     <label style="display: flex; align-items: center; gap: 10px; font-size: 1em; cursor: pointer; padding: 10px 12px; border-radius: 8px; border: 1px solid #e0e0e0; background: #fafafa;">
-1547|                         <input type="radio" name="displayFormat" value="city_only" checked>
-1548|                         <span>📍 <strong>${exempleVilleSeule}</strong></span>
-1549|                     </label>
-1550|                     <label style="display: flex; align-items: center; gap: 10px; font-size: 1em; cursor: pointer; padding: 10px 12px; border-radius: 8px; border: 1px solid #e0e0e0; background: #fafafa;">
-1551|                         <input type="radio" name="displayFormat" value="commune_city">
-1552|                         <span>📍 <strong>${exempleCommuneVille}</strong></span>
-1553|                     </label>
-1554|                 </div>
-1555|                 <div style="margin-top: 10px;">
-1556|                     <label style="display: flex; align-items: center; gap: 8px; font-size: 0.9em;">
-1557|                         <input type="checkbox" id="finalConsent">
-1558|                         J'accepte que ma localité soit utilisée dans mon profil
-1559|                     </label>
-1560|                 </div>
-1561|                 <div style="margin-top: 10px; display: flex; gap: 10px;">
-1562|                     <button type="button" id="finalConfirm" disabled style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 50px; cursor: pointer;">✅ Confirmer</button>
-1563|                     <button type="button" id="finalCancel" style="padding: 10px 20px; background: #f44336; color: white; border: none; border-radius: 50px; cursor: pointer;">🔄 Retour</button>
-1564|                 </div>
-1565|             </div>
-1566|             `;
-1567| 
-1568|             manualResults.innerHTML = html;
-1569|             manualResults.style.display = 'block';
-1570| 
-1571|             const consent = document.getElementById('finalConsent');
-1572|             const confirmBtn = document.getElementById('finalConfirm');
-1573|             const cancelBtn = document.getElementById('finalCancel');
-1574|             const radios = document.querySelectorAll('input[name="displayFormat"]');
-1575| 
-1576|             function updateButton() {
-1577|                 const consentChecked = consent?.checked || false;
-1578|                 const radioSelected = document.querySelector('input[name="displayFormat"]:checked') !== null;
-1579|                 confirmBtn.disabled = !(consentChecked && radioSelected);
-1580|             }
-1581| 
-1582|             consent?.addEventListener('change', updateButton);
-1583|             radios.forEach(r => r.addEventListener('change', updateButton));
-1584| 
-1585|             // Confirmer le format
-1586|             confirmBtn?.addEventListener('click', function () {
-1587|                 const format = document.querySelector('input[name="displayFormat"]:checked')?.value || 'city_only';
-1588|                 const data = window._selectedLocationData;
-1589| 
-1590|                 // Construire le texte final
-1591|                 let displayText = '';
-1592|                 if (format === 'city_only') {
-1593|                     displayText = data.ville;
-1594|                 } else {
-1595|                     let parts = [];
-1596|                     if (data.commune && data.commune !== data.ville) {
-1597|                         parts.push(data.commune);
-1598|                     }
-1599|                     parts.push(data.ville);
-1600|                     displayText = parts.join(' - ');
-1601|                 }
-1602| 
-1603|                 // 🔥 STOCKER DANS LES CHAMPS CACHÉS
-1604|                 function setHidden(id, value) {
-1605|                     let el = document.getElementById(id);
-1606|                     if (!el) {
-1607|                         el = document.createElement('input');
-1608|                         el.type = 'hidden';
-1609|                         el.id = id;
-1610|                         el.name = id.replace('_hidden', '');
-1611|                         document.getElementById('loginForm').appendChild(el);
-1612|                     }
-1613|                     el.value = (value !== null && value !== undefined && value !== '') ? value : '';
-1614|                 }
-1615| 
-1616|                 setHidden('location_city_hidden', data.ville);
-1617|                 setHidden('location_commune_hidden', data.commune || null);
-1618|                 setHidden('location_postal_code_hidden', data.postalCode || null);
-1619|                 setHidden('location_province_hidden', data.province || null);
-1620|                 setHidden('location_region_hidden', data.region || null);
-1621|                 setHidden('location_precise_hidden', displayText);
-1622|                 setHidden('location_display_format_hidden', format);
-1623| 
-1624|                 // 🔥 STOCKER TOUTES LES DONNÉES
-1625|                 setHidden('location_sublocality_level_1_hidden', data.sublocalityLevel1 || null);
-1626|                 setHidden('location_sublocality_level_2_hidden', data.sublocalityLevel2 || null);
-1627|                 setHidden('location_sublocality_level_3_hidden', data.sublocalityLevel3 || null);
-1628|                 setHidden('location_sublocality_level_4_hidden', data.sublocalityLevel4 || null);
-1629|                 setHidden('location_admin_level_3_hidden', data.adminLevel3 || null);
-1630|                 setHidden('location_admin_level_4_hidden', data.adminLevel4 || null);
-1631|                 setHidden('location_neighborhood_hidden', data.neighborhood || null);
-1632|                 setHidden('location_country_hidden', data.country || null);
-1633|                 setHidden('location_lat_hidden', data.lat || null);
-1634|                 setHidden('location_lng_hidden', data.lng || null);
-1635| 
-1636|                 // Stocker les localités du code postal
-1637|                 if (data.postcodeLocalities && data.postcodeLocalities.length > 0) {
-1638|                     setHidden('location_postcode_localities_hidden', data.postcodeLocalities.join(', '));
-1639|                 } else {
-1640|                     setHidden('location_postcode_localities_hidden', null);
-1641|                 }
-1642| 
-1643|                 // Mettre à jour le select
-1644|                 const locationSelect = document.getElementById('location');
-1645|                 let optionExists = false;
-1646|                 for (let opt of locationSelect.options) {
-1647|                     if (opt.value === data.ville) {
-1648|                         optionExists = true;
-1649|                         break;
-1650|                     }
-1651|                 }
-1652|                 if (!optionExists) {
-1653|                     const newOption = document.createElement('option');
-1654|                     newOption.value = data.ville;
-1655|                     newOption.textContent = data.ville;
-1656|                     locationSelect.appendChild(newOption);
-1657|                 }
-1658|                 locationSelect.value = data.ville;
-1659| 
-1660|                 // Afficher la confirmation finale
-1661|                 document.getElementById('gpsZone').innerHTML = `
-1662|                     <div style="padding: 10px; background: #e8f5e9; border-radius: 5px; color: #2e7d32;">
-1663|                         ✅ Localisation confirmée : <strong>${displayText}</strong>
-1664|                         <br><small>Votre profil affichera : ${displayText}</small>
-1665|                     </div>
-1666|                 `;
-1667| 
-1668|                 manualResults.style.display = 'none';
-1669|                 manualSearchZone.style.display = 'none';
-1670|                 document.getElementById('switchToManualBtn').style.display = 'inline-block';
-1671|             });
-1672| 
-1673|             // Retour à la phase 1
-1674|             cancelBtn?.addEventListener('click', function () {
-1675|                 const originalOptions = window._originalOptions || [];
-1676|                 const originalQuery = window._originalQuery || '';
-1677|                 if (originalOptions.length > 0) {
-1678|                     afficherOptionsManuelles(originalOptions, originalQuery);
-1679|                 }
-1680|             });
-1681|         }
-1682|     });
-1683| 
-1684| })();
+1542|                 // Afficher la confirmation finale
+1543|                 document.getElementById('gpsZone').innerHTML = `
+1544|                     <div style="padding: 10px; background: #e8f5e9; border-radius: 5px; color: #2e7d32;">
+1545|                         ✅ Localisation confirmée : <strong>${displayText}</strong>
+1546|                         <br><small>Votre profil affichera : ${displayText}</small>
+1547|                     </div>
+1548|                 `;
+1549| 
+1550|                 manualResults.style.display = 'none';
+1551|                 manualSearchZone.style.display = 'none';
+1552|                 document.getElementById('switchToManualBtn').style.display = 'inline-block';
+1553|             });
+1554| 
+1555|             // Retour à la phase 1
+1556|             cancelBtn?.addEventListener('click', function () {
+1557|                 const originalOptions = window._originalOptions || [];
+1558|                 const originalQuery = window._originalQuery || '';
+1559|                 if (originalOptions.length > 0) {
+1560|                     afficherOptionsManuelles(originalOptions, originalQuery);
+1561|                 }
+1562|             });
+1563|         }
+1564|     });
+1565| 
+1566| })();
 
 # FILE: /var/www/meetgay/public/js/fingerprint-source.js
 
@@ -11273,744 +11155,626 @@
 944|                     manualLocationInput.value = description;
 945|                     suggestionsContainer.style.display = 'none';
 946| 
-947|                     rechercherLocaliteAvecPlaceId(placeId, description);
-948|                 });
-949| 
-950|                 item.addEventListener('mouseenter', function () {
-951|                     this.style.background = '#e8f5e9';
-952|                 });
-953| 
-954|                 item.addEventListener('mouseleave', function () {
-955|                     this.style.background = 'white';
-956|                 });
-957|             });
-958|         }
-959| 
-960|         // ===== FONCTION POUR RECHERCHER LES DÉTAILS D'UN LIEU =====
-961|         function rechercherLocaliteAvecPlaceId(placeId, description) {
-962|             console.log('🔍 Recherche des détails pour:', placeId, description);
-963| 
-964|             fetch(`/api/geocode?place_id=${placeId}&language=fr`)
-965|                 .then(response => response.json())
-966|                 .then(data => {
-967|                     if (data.status === 'OK' && data.results.length > 0) {
-968|                         const result = data.results[0];
-969|                         const components = result.address_components || [];
-970| 
-971|                         function trouver(type) {
-972|                             const comp = components.find(c => c.types.includes(type));
-973|                             return comp ? comp.long_name : null;
-974|                         }
-975| 
-976|                         // 🔥 RECHERCHE ÉTENDUE - Plus de types pour capturer plus de données
-977|                         // 🔥 EXTRACTION COMPLÈTE - TOUT CAPTURER
-978|                         const locality = trouver("locality") || trouver("postal_town");
-979|                         const sublocality = trouver("sublocality") || trouver("sublocality_level_1") || trouver("neighborhood");
-980|                         const postalCode = trouver("postal_code");
-981|                         const province = trouver("administrative_area_level_2") || trouver("administrative_area_level_3");
-982|                         const region = trouver("administrative_area_level_1");
-983|                         const neighborhood = trouver("neighborhood");
-984|                         const country = trouver("country");
-985| 
-986|                         // 🔥 RÉCUPÉRER LES LOCALITÉS DU CODE POSTAL
-987|                         const postcodeLocalities = data.results.find(r => r.types.includes("postal_code"))?.postcode_localities || [];
-988| 
-989|                         console.log('📍 Composants extraits COMPLETS:', {
-990|                             locality, sublocality, postalCode, province, region, neighborhood, country, postcodeLocalities
-991|                         });
-992| 
-993| 
-994|                         // 📌 CRÉER TOUS LES CHAMPS CACHÉS
-995|                         function setHidden(id, value) {
-996|                             let el = document.getElementById(id);
-997|                             if (!el) {
-998|                                 el = document.createElement('input');
-999|                                 el.type = 'hidden';
-1000|                                 el.id = id;
-1001|                                 el.name = id.replace('_hidden', '');
-1002|                                 document.getElementById('loginForm').appendChild(el);
-1003|                             }
-1004|                             el.value = (value !== null && value !== undefined && value !== '') ? value : '';
-1005|                         }
+947|                     // Utiliser la description comme requête pour la recherche principale
+948|                     rechercherLocalite(description);
+949|                 });
+950| 
+951|                 item.addEventListener('mouseenter', function () {
+952|                     this.style.background = '#e8f5e9';
+953|                 });
+954| 
+955|                 item.addEventListener('mouseleave', function () {
+956|                     this.style.background = 'white';
+957|                 });
+958|             });
+959|         }
+960| 
+961| 
+962|         // Bouton "Ma localité n'est pas bonne"
+963|         if (switchToManualBtn) {
+964|             switchToManualBtn.addEventListener('click', function () {
+965|                 document.getElementById('gpsResult').style.display = 'none';
+966|                 manualSearchZone.style.display = 'block';
+967|                 this.style.display = 'none';
+968| 
+969|                 if (!autocompleteReady) {
+970|                     loadGooglePlaces();
+971|                 }
+972| 
+973|                 setTimeout(() => manualLocationInput.focus(), 100);
+974|             });
+975|         }
+976| 
+977|         // Si l'utilisateur appuie sur Entrée, lancer la recherche
+978|         if (manualLocationInput) {
+979|             manualLocationInput.addEventListener('keypress', function (e) {
+980|                 if (e.key === 'Enter') {
+981|                     e.preventDefault();
+982|                     suggestionsContainer.style.display = 'none';
+983|                     const query = this.value.trim();
+984|                     if (query) {
+985|                         rechercherLocalite(query);
+986|                     }
+987|                 }
+988|             });
+989|         }
+990| 
+991|         // ===== FONCTION DE RECHERCHE MANUELLE - VERSION PROPRE =====
+992|         function rechercherLocalite(query) {
+993|             const queryString = String(query).trim();
+994| 
+995|             if (!queryString) {
+996|                 manualResults.innerHTML = `<div class="result-error">Veuillez entrer un code postal ou un nom de lieu.</div>`;
+997|                 manualResults.style.display = 'block';
+998|                 return;
+999|             }
+1000| 
+1001|             // ÉTAPE 1 : Recherche initiale pour obtenir les coordonnées
+1002|             const searchQuery = `${queryString}, Belgique`;
+1003|             const urlGeo = `/api/geocode?address=${encodeURIComponent(searchQuery)}&language=fr`;
+1004| 
+1005|             console.log('🚀 Recherche initiale:', searchQuery);
 1006| 
-1007|                         // 🔥 Stocker la commune précise (priorité: sublocality > neighborhood > locality)
-1008| 
-1009|                         let communePrecise = sublocality || neighborhood || locality;
-1010| 
-1011|                         // Si on a une sous-localité, on l'utilise comme commune
-1012|                         if (sublocality && sublocality !== locality) {
-1013|                             communePrecise = sublocality;
-1014|                         } else if (neighborhood && neighborhood !== locality) {
-1015|                             communePrecise = neighborhood;
-1016|                         } else if (locality) {
-1017|                             communePrecise = locality;
-1018|                         }
-1019| 
-1020|                         // Si on a une province et que c'est différent de la ville, on la garde
-1021|                         if (province && province !== locality && !communePrecise) {
-1022|                             communePrecise = province;
-1023|                         }
+1007|             manualResults.innerHTML = '<div class="result-loading">🔍 Recherche en cours...</div>';
+1008|             manualResults.style.display = 'block';
+1009| 
+1010|             fetch(urlGeo)
+1011|                 .then(response => response.json())
+1012|                 .then(dataGeo => {
+1013|                     console.log('📡 Résultat recherche initiale:', dataGeo);
+1014| 
+1015|                     if (dataGeo.status !== 'OK' || !dataGeo.results || dataGeo.results.length === 0) {
+1016|                         manualResults.innerHTML = `
+1017|                             <div class="result-error">❌ Aucun résultat trouvé pour "${queryString}".</div>
+1018|                         `;
+1019|                         return;
+1020|                     }
+1021| 
+1022|                     const firstResult = dataGeo.results[0];
+1023|                     const location = firstResult.geometry?.location;
 1024| 
-1025|                         setHidden('location_city_hidden', locality);
-1026|                         setHidden('location_commune_hidden', sublocality || (postcodeLocalities.length > 0 ? postcodeLocalities[0] : null));
-1027|                         setHidden('location_postal_code_hidden', postalCode);
-1028|                         setHidden('location_province_hidden', province);
-1029|                         setHidden('location_region_hidden', region);
-1030|                         setHidden('location_precise_hidden', sublocality || locality || (postcodeLocalities.length > 0 ? postcodeLocalities[0] : null));
-1031|                         setHidden('location_postcode_localities_hidden', postcodeLocalities.length > 0 ? postcodeLocalities.join(', ') : null);
+1025|                     if (!location) {
+1026|                         manualResults.innerHTML = `<div class="result-error">❌ Impossible d'obtenir les coordonnées.</div>`;
+1027|                         return;
+1028|                     }
+1029| 
+1030|                     const lat = location.lat;
+1031|                     const lng = location.lng;
 1032| 
-1033|                         // 🔥 STOCKER AUSSI LES AUTRES COMMUNES DU CODE POSTAL (dans une autre colonne ou en notes)
-1034|                         // On peut les stocker dans location_precise ou une nouvelle colonne
-1035| 
-1036|                         // Mettre à jour le select avec la ville
-1037|                         const locationSelect = document.getElementById('location');
-1038|                         if (locality) {
-1039|                             let optionExists = false;
-1040|                             for (let opt of locationSelect.options) {
-1041|                                 if (opt.value === locality) {
-1042|                                     optionExists = true;
-1043|                                     break;
-1044|                                 }
-1045|                             }
-1046|                             if (!optionExists) {
-1047|                                 const newOption = document.createElement('option');
-1048|                                 newOption.value = locality;
-1049|                                 newOption.textContent = locality;
-1050|                                 locationSelect.appendChild(newOption);
-1051|                             }
-1052|                             locationSelect.value = locality;
-1053|                         }
-1054| 
-1055|                         // 🎯 AFFICHAGE : seulement commune + ville (pas d'adresse complète)
-1056|                         let displayParts = [];
-1057|                         if (communePrecise && communePrecise !== locality) {
-1058|                             displayParts.push(communePrecise);
-1059|                         }
-1060|                         displayParts.push(locality);
-1061|                         // Si on a une province et que c'est différent, on l'ajoute en 3ème
-1062|                         if (province && province !== locality && province !== communePrecise) {
-1063|                             displayParts.push(province);
-1064|                         }
-1065|                         const displayText = displayParts.join(' - ');
-1066| 
-1067|                         // Message de confirmation amélioré
-1068|                         const msg = document.createElement('div');
-1069|                         msg.style.cssText = 'padding: 10px; background: #e8f5e9; border-radius: 5px; color: #2e7d32; margin-top: 10px;';
-1070|                         msg.innerHTML = `✅ Localisation sélectionnée : <strong>${displayText}</strong>`;
-1071|                         const existingMsg = document.querySelector('.location-confirm-msg');
-1072|                         if (existingMsg) existingMsg.remove();
-1073|                         msg.className = 'location-confirm-msg';
-1074|                         document.getElementById('manualResults').appendChild(msg);
-1075|                     }
-1076|                 })
-1077|                 .catch(err => console.error('Erreur geocode:', err));
-1078|         }
-1079| 
-1080|         // Bouton "Ma localité n'est pas bonne"
-1081|         if (switchToManualBtn) {
-1082|             switchToManualBtn.addEventListener('click', function () {
-1083|                 document.getElementById('gpsResult').style.display = 'none';
-1084|                 manualSearchZone.style.display = 'block';
-1085|                 this.style.display = 'none';
-1086| 
-1087|                 if (!autocompleteReady) {
-1088|                     loadGooglePlaces();
-1089|                 }
-1090| 
-1091|                 setTimeout(() => manualLocationInput.focus(), 100);
-1092|             });
-1093|         }
-1094| 
-1095|         // Si l'utilisateur appuie sur Entrée, lancer la recherche
-1096|         if (manualLocationInput) {
-1097|             manualLocationInput.addEventListener('keypress', function (e) {
-1098|                 if (e.key === 'Enter') {
-1099|                     e.preventDefault();
-1100|                     suggestionsContainer.style.display = 'none';
-1101|                     const query = this.value.trim();
-1102|                     if (query) {
-1103|                         rechercherLocalite(query);
-1104|                     }
-1105|                 }
-1106|             });
-1107|         }
-1108| 
-1109|         // ===== FONCTION DE RECHERCHE MANUELLE - VERSION PROPRE =====
-1110|         function rechercherLocalite(query) {
-1111|             const queryString = String(query).trim();
-1112| 
-1113|             if (!queryString) {
-1114|                 manualResults.innerHTML = `<div class="result-error">Veuillez entrer un code postal ou un nom de lieu.</div>`;
-1115|                 manualResults.style.display = 'block';
-1116|                 return;
-1117|             }
-1118| 
-1119|             // ÉTAPE 1 : Recherche initiale pour obtenir les coordonnées
-1120|             const searchQuery = `${queryString}, Belgique`;
-1121|             const urlGeo = `/api/geocode?address=${encodeURIComponent(searchQuery)}&language=fr`;
+1033|                     console.log(`📍 Coordonnées: lat=${lat}, lng=${lng}`);
+1034| 
+1035|                     // ÉTAPE 2 : Recherche inversée
+1036|                     const urlReverse = `/api/geocode?lat=${lat}&lng=${lng}&language=fr`;
+1037| 
+1038|                     return fetch(urlReverse);
+1039|                 })
+1040|                 .then(response => {
+1041|                     if (!response) return;
+1042|                     return response.json();
+1043|                 })
+1044|                 .then(dataReverse => {
+1045|                     if (!dataReverse) return;
+1046| 
+1047|                     console.log('📡 Résultat recherche inversée:', dataReverse);
+1048| 
+1049|                     if (dataReverse.status !== 'OK' || !dataReverse.results || dataReverse.results.length === 0) {
+1050|                         manualResults.innerHTML = `
+1051|                             <div class="result-error">❌ Aucun résultat trouvé pour les coordonnées.</div>
+1052|                         `;
+1053|                         return;
+1054|                     }
+1055| 
+1056|                     // 🔥 EXTRAIRE LES DONNÉES
+1057|                     const data = extraireDonnees(dataReverse.results);
+1058| 
+1059|                     // 🔥 CONSTRUIRE LES OPTIONS
+1060|                     const optionsArray = construireOptions(data);
+1061| 
+1062|                     console.log('📍 Options trouvées:', optionsArray);
+1063|                     console.log('📦 Données extraites:', data);
+1064| 
+1065|                     if (optionsArray.length === 0) {
+1066|                         manualResults.innerHTML = `
+1067|                             <div class="result-error">❌ Aucune option disponible pour "${query}".</div>
+1068|                         `;
+1069|                         return;
+1070|                     }
+1071| 
+1072|                     // Stocker les données pour la suite
+1073|                     window._currentLocationData = data;
+1074|                     window._originalOptions = optionsArray;
+1075|                     window._originalQuery = query;
+1076| 
+1077|                     // Afficher les options
+1078|                     afficherOptionsManuelles(optionsArray, query);
+1079|                 })
+1080|                 .catch(error => {
+1081|                     console.error('❌ Erreur:', error);
+1082|                     manualResults.innerHTML = `<div class="result-error">❌ Erreur de recherche.</div>`;
+1083|                 });
+1084|         }
+1085| 
+1086|         // ===== EXTRAIRE LES DONNÉES DE L'API =====
+1087|         function extraireDonnees(results) {
+1088|             let city = null;
+1089|             let commune = null;
+1090|             let postalCode = null;
+1091|             let province = null;
+1092|             let region = null;
+1093|             let postcodeLocalities = [];
+1094|             let sublocalityLevel1 = null;
+1095|             let sublocalityLevel2 = null;
+1096|             let sublocalityLevel3 = null;
+1097|             let sublocalityLevel4 = null;
+1098|             let adminLevel3 = null;
+1099|             let adminLevel4 = null;
+1100|             let neighborhood = null;
+1101|             let country = null;
+1102|             let lat = null;
+1103|             let lng = null;
+1104| 
+1105|             results.forEach(result => {
+1106|                 const components = result.address_components || [];
+1107| 
+1108|                 // Extraire chaque composant
+1109|                 const locality = components.find(c => c.types.includes('locality') || c.types.includes('postal_town'))?.long_name;
+1110|                 const sublocality = components.find(c => c.types.includes('sublocality'))?.long_name;
+1111|                 const neigh = components.find(c => c.types.includes('neighborhood'))?.long_name;
+1112|                 const postal = components.find(c => c.types.includes('postal_code'))?.long_name;
+1113|                 const prov = components.find(c => c.types.includes('administrative_area_level_2'))?.long_name;
+1114|                 const reg = components.find(c => c.types.includes('administrative_area_level_1'))?.long_name;
+1115|                 const subL1 = components.find(c => c.types.includes('sublocality_level_1'))?.long_name;
+1116|                 const subL2 = components.find(c => c.types.includes('sublocality_level_2'))?.long_name;
+1117|                 const subL3 = components.find(c => c.types.includes('sublocality_level_3'))?.long_name;
+1118|                 const subL4 = components.find(c => c.types.includes('sublocality_level_4'))?.long_name;
+1119|                 const admin3 = components.find(c => c.types.includes('administrative_area_level_3'))?.long_name;
+1120|                 const admin4 = components.find(c => c.types.includes('administrative_area_level_4'))?.long_name;
+1121|                 const cntry = components.find(c => c.types.includes('country'))?.long_name;
 1122| 
-1123|             console.log('🚀 Recherche initiale:', searchQuery);
-1124| 
-1125|             manualResults.innerHTML = '<div class="result-loading">🔍 Recherche en cours...</div>';
-1126|             manualResults.style.display = 'block';
-1127| 
-1128|             fetch(urlGeo)
-1129|                 .then(response => response.json())
-1130|                 .then(dataGeo => {
-1131|                     console.log('📡 Résultat recherche initiale:', dataGeo);
-1132| 
-1133|                     if (dataGeo.status !== 'OK' || !dataGeo.results || dataGeo.results.length === 0) {
-1134|                         manualResults.innerHTML = `
-1135|                             <div class="result-error">❌ Aucun résultat trouvé pour "${queryString}".</div>
-1136|                         `;
-1137|                         return;
-1138|                     }
-1139| 
-1140|                     const firstResult = dataGeo.results[0];
-1141|                     const location = firstResult.geometry?.location;
-1142| 
-1143|                     if (!location) {
-1144|                         manualResults.innerHTML = `<div class="result-error">❌ Impossible d'obtenir les coordonnées.</div>`;
-1145|                         return;
-1146|                     }
-1147| 
-1148|                     const lat = location.lat;
-1149|                     const lng = location.lng;
+1123|                 // Coordonnées
+1124|                 if (result.geometry?.location) {
+1125|                     lat = result.geometry.location.lat;
+1126|                     lng = result.geometry.location.lng;
+1127|                 }
+1128| 
+1129|                 // Récupérer postcode_localities
+1130|                 const postLoc = result.postcode_localities || [];
+1131|                 if (postLoc.length > 0) {
+1132|                     postcodeLocalities = postLoc;
+1133|                 }
+1134| 
+1135|                 // Stocker les valeurs trouvées (priorité au premier résultat)
+1136|                 if (locality && !city) city = locality;
+1137|                 if (sublocality && !commune) commune = sublocality;
+1138|                 if (neigh && !neighborhood) neighborhood = neigh;
+1139|                 if (postal && !postalCode) postalCode = postal;
+1140|                 if (prov && !province) province = prov;
+1141|                 if (reg && !region) region = reg;
+1142|                 if (subL1 && !sublocalityLevel1) sublocalityLevel1 = subL1;
+1143|                 if (subL2 && !sublocalityLevel2) sublocalityLevel2 = subL2;
+1144|                 if (subL3 && !sublocalityLevel3) sublocalityLevel3 = subL3;
+1145|                 if (subL4 && !sublocalityLevel4) sublocalityLevel4 = subL4;
+1146|                 if (admin3 && !adminLevel3) adminLevel3 = admin3;
+1147|                 if (admin4 && !adminLevel4) adminLevel4 = admin4;
+1148|                 if (cntry && !country) country = cntry;
+1149|             });
 1150| 
-1151|                     console.log(`📍 Coordonnées: lat=${lat}, lng=${lng}`);
-1152| 
-1153|                     // ÉTAPE 2 : Recherche inversée
-1154|                     const urlReverse = `/api/geocode?lat=${lat}&lng=${lng}&language=fr`;
+1151|             // Règle pour la commune : si commune = city, on prend la première postcode_localities
+1152|             if (commune === city && postcodeLocalities.length > 0 && postcodeLocalities[0] !== city) {
+1153|                 commune = postcodeLocalities[0];
+1154|             }
 1155| 
-1156|                     return fetch(urlReverse);
-1157|                 })
-1158|                 .then(response => {
-1159|                     if (!response) return;
-1160|                     return response.json();
-1161|                 })
-1162|                 .then(dataReverse => {
-1163|                     if (!dataReverse) return;
-1164| 
-1165|                     console.log('📡 Résultat recherche inversée:', dataReverse);
-1166| 
-1167|                     if (dataReverse.status !== 'OK' || !dataReverse.results || dataReverse.results.length === 0) {
-1168|                         manualResults.innerHTML = `
-1169|                             <div class="result-error">❌ Aucun résultat trouvé pour les coordonnées.</div>
-1170|                         `;
-1171|                         return;
-1172|                     }
-1173| 
-1174|                     // 🔥 EXTRAIRE LES DONNÉES
-1175|                     const data = extraireDonnees(dataReverse.results);
-1176| 
-1177|                     // 🔥 CONSTRUIRE LES OPTIONS
-1178|                     const optionsArray = construireOptions(data);
-1179| 
-1180|                     console.log('📍 Options trouvées:', optionsArray);
-1181|                     console.log('📦 Données extraites:', data);
+1156|             // Fallback : si commune est null, on prend city
+1157|             if (!commune) commune = city;
+1158| 
+1159|             return {
+1160|                 city,
+1161|                 commune,
+1162|                 postalCode,
+1163|                 province,
+1164|                 region,
+1165|                 postcodeLocalities,
+1166|                 sublocalityLevel1,
+1167|                 sublocalityLevel2,
+1168|                 sublocalityLevel3,
+1169|                 sublocalityLevel4,
+1170|                 adminLevel3,
+1171|                 adminLevel4,
+1172|                 neighborhood,
+1173|                 country,
+1174|                 lat,
+1175|                 lng
+1176|             };
+1177|         }
+1178|         // ===== CONSTRUIRE LES OPTIONS POUR L'UTILISATEUR =====
+1179|         // ===== CONSTRUIRE LES OPTIONS POUR L'UTILISATEUR (TOUT, SANS FILTRE) =====
+1180|         function construireOptions(data) {
+1181|             const options = [];
 1182| 
-1183|                     if (optionsArray.length === 0) {
-1184|                         manualResults.innerHTML = `
-1185|                             <div class="result-error">❌ Aucune option disponible pour "${query}".</div>
-1186|                         `;
-1187|                         return;
-1188|                     }
-1189| 
-1190|                     // Stocker les données pour la suite
-1191|                     window._currentLocationData = data;
-1192|                     window._originalOptions = optionsArray;
-1193|                     window._originalQuery = query;
-1194| 
-1195|                     // Afficher les options
-1196|                     afficherOptionsManuelles(optionsArray, query);
-1197|                 })
-1198|                 .catch(error => {
-1199|                     console.error('❌ Erreur:', error);
-1200|                     manualResults.innerHTML = `<div class="result-error">❌ Erreur de recherche.</div>`;
-1201|                 });
-1202|         }
-1203| 
-1204|         // ===== EXTRAIRE LES DONNÉES DE L'API =====
-1205|         function extraireDonnees(results) {
-1206|             let city = null;
-1207|             let commune = null;
-1208|             let postalCode = null;
-1209|             let province = null;
-1210|             let region = null;
-1211|             let postcodeLocalities = [];
-1212|             let sublocalityLevel1 = null;
-1213|             let sublocalityLevel2 = null;
-1214|             let sublocalityLevel3 = null;
-1215|             let sublocalityLevel4 = null;
-1216|             let adminLevel3 = null;
-1217|             let adminLevel4 = null;
-1218|             let neighborhood = null;
-1219|             let country = null;
-1220|             let lat = null;
-1221|             let lng = null;
-1222| 
-1223|             results.forEach(result => {
-1224|                 const components = result.address_components || [];
-1225| 
-1226|                 // Extraire chaque composant
-1227|                 const locality = components.find(c => c.types.includes('locality') || c.types.includes('postal_town'))?.long_name;
-1228|                 const sublocality = components.find(c => c.types.includes('sublocality'))?.long_name;
-1229|                 const neigh = components.find(c => c.types.includes('neighborhood'))?.long_name;
-1230|                 const postal = components.find(c => c.types.includes('postal_code'))?.long_name;
-1231|                 const prov = components.find(c => c.types.includes('administrative_area_level_2'))?.long_name;
-1232|                 const reg = components.find(c => c.types.includes('administrative_area_level_1'))?.long_name;
-1233|                 const subL1 = components.find(c => c.types.includes('sublocality_level_1'))?.long_name;
-1234|                 const subL2 = components.find(c => c.types.includes('sublocality_level_2'))?.long_name;
-1235|                 const subL3 = components.find(c => c.types.includes('sublocality_level_3'))?.long_name;
-1236|                 const subL4 = components.find(c => c.types.includes('sublocality_level_4'))?.long_name;
-1237|                 const admin3 = components.find(c => c.types.includes('administrative_area_level_3'))?.long_name;
-1238|                 const admin4 = components.find(c => c.types.includes('administrative_area_level_4'))?.long_name;
-1239|                 const cntry = components.find(c => c.types.includes('country'))?.long_name;
-1240| 
-1241|                 // Coordonnées
-1242|                 if (result.geometry?.location) {
-1243|                     lat = result.geometry.location.lat;
-1244|                     lng = result.geometry.location.lng;
-1245|                 }
-1246| 
-1247|                 // Récupérer postcode_localities
-1248|                 const postLoc = result.postcode_localities || [];
-1249|                 if (postLoc.length > 0) {
-1250|                     postcodeLocalities = postLoc;
-1251|                 }
-1252| 
-1253|                 // Stocker les valeurs trouvées (priorité au premier résultat)
-1254|                 if (locality && !city) city = locality;
-1255|                 if (sublocality && !commune) commune = sublocality;
-1256|                 if (neigh && !neighborhood) neighborhood = neigh;
-1257|                 if (postal && !postalCode) postalCode = postal;
-1258|                 if (prov && !province) province = prov;
-1259|                 if (reg && !region) region = reg;
-1260|                 if (subL1 && !sublocalityLevel1) sublocalityLevel1 = subL1;
-1261|                 if (subL2 && !sublocalityLevel2) sublocalityLevel2 = subL2;
-1262|                 if (subL3 && !sublocalityLevel3) sublocalityLevel3 = subL3;
-1263|                 if (subL4 && !sublocalityLevel4) sublocalityLevel4 = subL4;
-1264|                 if (admin3 && !adminLevel3) adminLevel3 = admin3;
-1265|                 if (admin4 && !adminLevel4) adminLevel4 = admin4;
-1266|                 if (cntry && !country) country = cntry;
-1267|             });
-1268| 
-1269|             // Règle pour la commune : si commune = city, on prend la première postcode_localities
-1270|             if (commune === city && postcodeLocalities.length > 0 && postcodeLocalities[0] !== city) {
-1271|                 commune = postcodeLocalities[0];
-1272|             }
-1273| 
-1274|             // Fallback : si commune est null, on prend city
-1275|             if (!commune) commune = city;
-1276| 
-1277|             return {
-1278|                 city,
-1279|                 commune,
-1280|                 postalCode,
-1281|                 province,
-1282|                 region,
-1283|                 postcodeLocalities,
-1284|                 sublocalityLevel1,
-1285|                 sublocalityLevel2,
-1286|                 sublocalityLevel3,
-1287|                 sublocalityLevel4,
-1288|                 adminLevel3,
-1289|                 adminLevel4,
-1290|                 neighborhood,
-1291|                 country,
-1292|                 lat,
-1293|                 lng
-1294|             };
-1295|         }
-1296|         // ===== CONSTRUIRE LES OPTIONS POUR L'UTILISATEUR =====
-1297|         // ===== CONSTRUIRE LES OPTIONS POUR L'UTILISATEUR (TOUT, SANS FILTRE) =====
-1298|         function construireOptions(data) {
-1299|             const options = [];
-1300| 
-1301|             function addOption(text, type) {
-1302|                 if (text && text.trim() !== '') {
-1303|                     options.push({
-1304|                         text: text,
-1305|                         type: type,
-1306|                         display: debugMode ? `${text} (${type})` : text
-1307|                     });
-1308|                 }
-1309|             }
-1310| 
-1311|             // 1. Code postal + Ville
-1312|             if (data.postalCode && data.city) {
-1313|                 addOption(`${data.postalCode} ${data.city}`, 'location_city');
-1314|             }
+1183|             function addOption(text, type) {
+1184|                 if (text && text.trim() !== '') {
+1185|                     options.push({
+1186|                         text: text,
+1187|                         type: type,
+1188|                         display: debugMode ? `${text} (${type})` : text
+1189|                     });
+1190|                 }
+1191|             }
+1192| 
+1193|             // 1. Code postal + Ville
+1194|             if (data.postalCode && data.city) {
+1195|                 addOption(`${data.postalCode} ${data.city}`, 'location_city');
+1196|             }
+1197| 
+1198|             // 2. Code postal + Commune
+1199|             if (data.postalCode && data.commune) {
+1200|                 addOption(`${data.postalCode} ${data.commune}`, 'location_commune');
+1201|             }
+1202| 
+1203|             // 3. Ville seule
+1204|             if (data.city) {
+1205|                 addOption(data.city, 'location_city');
+1206|             }
+1207| 
+1208|             // 4. Commune seule
+1209|             if (data.commune) {
+1210|                 addOption(data.commune, 'location_commune');
+1211|             }
+1212| 
+1213|             // 5. Code postal seul
+1214|             if (data.postalCode) {
+1215|                 addOption(data.postalCode, 'location_postal_code');
+1216|             }
+1217| 
+1218|             // 6. Toutes les localités du code postal
+1219|             if (data.postcodeLocalities && data.postcodeLocalities.length > 0) {
+1220|                 data.postcodeLocalities.forEach(loc => {
+1221|                     if (data.postalCode) {
+1222|                         addOption(`${data.postalCode} ${loc}`, 'location_postcode_localities');
+1223|                     } else {
+1224|                         addOption(loc, 'location_postcode_localities');
+1225|                     }
+1226|                 });
+1227|             }
+1228| 
+1229|             // 7. Sous-localités (niveaux 1 à 4)
+1230|             const sublocalityLevels = [
+1231|                 { value: data.sublocalityLevel1, type: 'sublocality_level_1' },
+1232|                 { value: data.sublocalityLevel2, type: 'sublocality_level_2' },
+1233|                 { value: data.sublocalityLevel3, type: 'sublocality_level_3' },
+1234|                 { value: data.sublocalityLevel4, type: 'sublocality_level_4' }
+1235|             ];
+1236| 
+1237|             sublocalityLevels.forEach(({ value, type }) => {
+1238|                 if (value) {
+1239|                     addOption(value, type);
+1240|                     if (data.postalCode) {
+1241|                         addOption(`${data.postalCode} ${value}`, type);
+1242|                     }
+1243|                 }
+1244|             });
+1245| 
+1246|             // 8. Province (TOUJOURS ajoutée)
+1247|             if (data.province) {
+1248|                 addOption(data.province, 'location_province');
+1249|             }
+1250| 
+1251|             // 9. Région (TOUJOURS ajoutée)
+1252|             if (data.region) {
+1253|                 addOption(data.region, 'location_region');
+1254|             }
+1255| 
+1256|             // 10. Niveau administratif 3 (TOUJOURS ajouté)
+1257|             if (data.adminLevel3) {
+1258|                 addOption(data.adminLevel3, 'admin_level_3');
+1259|             }
+1260| 
+1261|             // 11. Niveau administratif 4 (TOUJOURS ajouté)
+1262|             if (data.adminLevel4) {
+1263|                 addOption(data.adminLevel4, 'admin_level_4');
+1264|             }
+1265| 
+1266|             // 12. Quartier (TOUJOURS ajouté)
+1267|             if (data.neighborhood) {
+1268|                 addOption(data.neighborhood, 'neighborhood');
+1269|             }
+1270| 
+1271|             // 13. Pays (TOUJOURS ajouté)
+1272|             if (data.country) {
+1273|                 addOption(data.country, 'country');
+1274|             }
+1275| 
+1276|             return options;
+1277|         }
+1278| 
+1279|         // ===== AFFICHER LES OPTIONS (PHASE 1 + PHASE 2) =====
+1280|         function afficherOptionsManuelles(options, query) {
+1281|             let html = `
+1282|             <div style="background: #f0f8f0; padding: 15px; border-radius: 8px; border: 2px solid #4CAF50;">
+1283|                 <p style="font-weight: bold; color: #2e7d32;">📍 Résultats pour "${query}"</p>
+1284|                 <p>Choisissez votre localité :</p>
+1285|                 <div style="margin: 10px 0; display: flex; flex-direction: column; gap: 8px;">
+1286|             `;
+1287| 
+1288|             options.forEach((option, index) => {
+1289|                 const displayText = option.display || option.text;
+1290|                 html += `
+1291|                 <label style="display: flex; align-items: center; gap: 10px; font-size: 0.95em; cursor: pointer; padding: 8px 12px; border-radius: 8px; border: 1px solid #e0e0e0; transition: background 0.2s;" 
+1292|                        onmouseover="this.style.background='#e8f5e9'" 
+1293|                        onmouseout="this.style.background='white'">
+1294|                     <input type="radio" name="manualLocationChoice" value="${index}">
+1295|                     <span>${displayText}</span>
+1296|                 </label>
+1297|             `;
+1298|             });
+1299| 
+1300|             html += `
+1301|                 </div>
+1302|                 <div style="margin-top: 10px; display: flex; gap: 10px;">
+1303|                     <button type="button" id="manualLocationConfirm" disabled style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 50px; cursor: pointer;">✅ Confirmer</button>
+1304|                     <button type="button" id="manualLocationCancel" style="padding: 10px 20px; background: #f44336; color: white; border: none; border-radius: 50px; cursor: pointer;">🔄 Annuler</button>
+1305|                 </div>
+1306|             </div>
+1307|             `;
+1308| 
+1309|             manualResults.innerHTML = html;
+1310|             manualResults.style.display = 'block';
+1311| 
+1312|             const confirmBtn = document.getElementById('manualLocationConfirm');
+1313|             const cancelBtn = document.getElementById('manualLocationCancel');
+1314|             const radios = document.querySelectorAll('input[name="manualLocationChoice"]');
 1315| 
-1316|             // 2. Code postal + Commune
-1317|             if (data.postalCode && data.commune) {
-1318|                 addOption(`${data.postalCode} ${data.commune}`, 'location_commune');
-1319|             }
-1320| 
-1321|             // 3. Ville seule
-1322|             if (data.city) {
-1323|                 addOption(data.city, 'location_city');
-1324|             }
-1325| 
-1326|             // 4. Commune seule
-1327|             if (data.commune) {
-1328|                 addOption(data.commune, 'location_commune');
-1329|             }
-1330| 
-1331|             // 5. Code postal seul
-1332|             if (data.postalCode) {
-1333|                 addOption(data.postalCode, 'location_postal_code');
-1334|             }
-1335| 
-1336|             // 6. Toutes les localités du code postal
-1337|             if (data.postcodeLocalities && data.postcodeLocalities.length > 0) {
-1338|                 data.postcodeLocalities.forEach(loc => {
-1339|                     if (data.postalCode) {
-1340|                         addOption(`${data.postalCode} ${loc}`, 'location_postcode_localities');
-1341|                     } else {
-1342|                         addOption(loc, 'location_postcode_localities');
-1343|                     }
-1344|                 });
-1345|             }
-1346| 
-1347|             // 7. Sous-localités (niveaux 1 à 4)
-1348|             const sublocalityLevels = [
-1349|                 { value: data.sublocalityLevel1, type: 'sublocality_level_1' },
-1350|                 { value: data.sublocalityLevel2, type: 'sublocality_level_2' },
-1351|                 { value: data.sublocalityLevel3, type: 'sublocality_level_3' },
-1352|                 { value: data.sublocalityLevel4, type: 'sublocality_level_4' }
-1353|             ];
-1354| 
-1355|             sublocalityLevels.forEach(({ value, type }) => {
-1356|                 if (value) {
-1357|                     addOption(value, type);
-1358|                     if (data.postalCode) {
-1359|                         addOption(`${data.postalCode} ${value}`, type);
-1360|                     }
-1361|                 }
-1362|             });
+1316|             function updateConfirmButton() {
+1317|                 const radioSelected = document.querySelector('input[name="manualLocationChoice"]:checked') !== null;
+1318|                 if (confirmBtn) {
+1319|                     confirmBtn.disabled = !radioSelected;
+1320|                 }
+1321|             }
+1322| 
+1323|             radios.forEach(radio => {
+1324|                 radio.addEventListener('change', updateConfirmButton);
+1325|             });
+1326| 
+1327|             // Activer le bouton par défaut
+1328|             updateConfirmButton();
+1329| 
+1330|             if (confirmBtn) {
+1331|                 confirmBtn.addEventListener('click', function () {
+1332|                     const selectedChoice = document.querySelector('input[name="manualLocationChoice"]:checked');
+1333|                     if (!selectedChoice) {
+1334|                         alert('Veuillez choisir une option.');
+1335|                         return;
+1336|                     }
+1337| 
+1338|                     const index = parseInt(selectedChoice.value);
+1339|                     const selectedOption = options[index];
+1340|                     const selected = selectedOption.text;
+1341| 
+1342|                     // Récupérer les données stockées
+1343|                     const locationData = window._currentLocationData || {};
+1344| 
+1345|                     // Extraire les informations de l'option choisie
+1346|                     let ville = selected;
+1347|                     let commune = locationData.commune || null;
+1348|                     let postalCode = locationData.postalCode || null;
+1349|                     let province = locationData.province || null;
+1350|                     let region = locationData.region || null;
+1351|                     let postcodeLocalities = locationData.postcodeLocalities || [];
+1352|                     let sublocalityLevel1 = locationData.sublocalityLevel1 || null;
+1353|                     let sublocalityLevel2 = locationData.sublocalityLevel2 || null;
+1354|                     let sublocalityLevel3 = locationData.sublocalityLevel3 || null;
+1355|                     let sublocalityLevel4 = locationData.sublocalityLevel4 || null;
+1356| 
+1357|                     // Extraire le code postal si présent
+1358|                     const postalMatch = selected.match(/^([0-9]{4})\s/);
+1359|                     if (postalMatch) {
+1360|                         postalCode = postalMatch[1];
+1361|                         ville = selected.replace(/^[0-9]{4}\s/, '');
+1362|                     }
 1363| 
-1364|             // 8. Province (TOUJOURS ajoutée)
-1365|             if (data.province) {
-1366|                 addOption(data.province, 'location_province');
-1367|             }
-1368| 
-1369|             // 9. Région (TOUJOURS ajoutée)
-1370|             if (data.region) {
-1371|                 addOption(data.region, 'location_region');
-1372|             }
-1373| 
-1374|             // 10. Niveau administratif 3 (TOUJOURS ajouté)
-1375|             if (data.adminLevel3) {
-1376|                 addOption(data.adminLevel3, 'admin_level_3');
-1377|             }
-1378| 
-1379|             // 11. Niveau administratif 4 (TOUJOURS ajouté)
-1380|             if (data.adminLevel4) {
-1381|                 addOption(data.adminLevel4, 'admin_level_4');
-1382|             }
-1383| 
-1384|             // 12. Quartier (TOUJOURS ajouté)
-1385|             if (data.neighborhood) {
-1386|                 addOption(data.neighborhood, 'neighborhood');
-1387|             }
-1388| 
-1389|             // 13. Pays (TOUJOURS ajouté)
-1390|             if (data.country) {
-1391|                 addOption(data.country, 'country');
-1392|             }
-1393| 
-1394|             return options;
-1395|         }
+1364|                     // Extraire la commune si virgule
+1365|                     if (selected.includes(',')) {
+1366|                         const parts = selected.split(', ');
+1367|                         commune = parts[0];
+1368|                         if (commune === ville) commune = null;
+1369|                         if (parts.length >= 3) province = parts[2];
+1370|                         if (parts.length >= 4) region = parts[3];
+1371|                     }
+1372| 
+1373|                     // Extraire la commune si virgule
+1374|                     if (selected.includes(',')) {
+1375|                         const parts = selected.split(', ');
+1376|                         commune = parts[0];
+1377|                         if (commune === ville) commune = null;
+1378|                         if (parts.length >= 3) province = parts[2];
+1379|                         if (parts.length >= 4) region = parts[3];
+1380|                     }
+1381| 
+1382|                     // Stocker les données pour la phase 2
+1383|                     window._selectedLocationData = {
+1384|                         ville: ville,
+1385|                         commune: commune,
+1386|                         province: province,
+1387|                         region: region,
+1388|                         postalCode: postalCode,
+1389|                         postcodeLocalities: postcodeLocalities,
+1390|                         sublocalityLevel1: sublocalityLevel1,
+1391|                         sublocalityLevel2: sublocalityLevel2,
+1392|                         sublocalityLevel3: sublocalityLevel3,
+1393|                         sublocalityLevel4: sublocalityLevel4,
+1394|                         locationData: locationData
+1395|                     };
 1396| 
-1397|         // ===== AFFICHER LES OPTIONS (PHASE 1 + PHASE 2) =====
-1398|         function afficherOptionsManuelles(options, query) {
-1399|             let html = `
-1400|             <div style="background: #f0f8f0; padding: 15px; border-radius: 8px; border: 2px solid #4CAF50;">
-1401|                 <p style="font-weight: bold; color: #2e7d32;">📍 Résultats pour "${query}"</p>
-1402|                 <p>Choisissez votre localité :</p>
-1403|                 <div style="margin: 10px 0; display: flex; flex-direction: column; gap: 8px;">
-1404|             `;
-1405| 
-1406|             options.forEach((option, index) => {
-1407|                 const displayText = option.display || option.text;
-1408|                 html += `
-1409|                 <label style="display: flex; align-items: center; gap: 10px; font-size: 0.95em; cursor: pointer; padding: 8px 12px; border-radius: 8px; border: 1px solid #e0e0e0; transition: background 0.2s;" 
-1410|                        onmouseover="this.style.background='#e8f5e9'" 
-1411|                        onmouseout="this.style.background='white'">
-1412|                     <input type="radio" name="manualLocationChoice" value="${index}">
-1413|                     <span>${displayText}</span>
-1414|                 </label>
-1415|             `;
-1416|             });
-1417| 
-1418|             html += `
-1419|                 </div>
-1420|                 <div style="margin-top: 10px; display: flex; gap: 10px;">
-1421|                     <button type="button" id="manualLocationConfirm" disabled style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 50px; cursor: pointer;">✅ Confirmer</button>
-1422|                     <button type="button" id="manualLocationCancel" style="padding: 10px 20px; background: #f44336; color: white; border: none; border-radius: 50px; cursor: pointer;">🔄 Annuler</button>
-1423|                 </div>
-1424|             </div>
-1425|             `;
-1426| 
-1427|             manualResults.innerHTML = html;
-1428|             manualResults.style.display = 'block';
-1429| 
-1430|             const confirmBtn = document.getElementById('manualLocationConfirm');
-1431|             const cancelBtn = document.getElementById('manualLocationCancel');
-1432|             const radios = document.querySelectorAll('input[name="manualLocationChoice"]');
-1433| 
-1434|             function updateConfirmButton() {
-1435|                 const radioSelected = document.querySelector('input[name="manualLocationChoice"]:checked') !== null;
-1436|                 if (confirmBtn) {
-1437|                     confirmBtn.disabled = !radioSelected;
-1438|                 }
-1439|             }
-1440| 
-1441|             radios.forEach(radio => {
-1442|                 radio.addEventListener('change', updateConfirmButton);
-1443|             });
-1444| 
-1445|             // Activer le bouton par défaut
-1446|             updateConfirmButton();
-1447| 
-1448|             if (confirmBtn) {
-1449|                 confirmBtn.addEventListener('click', function () {
-1450|                     const selectedChoice = document.querySelector('input[name="manualLocationChoice"]:checked');
-1451|                     if (!selectedChoice) {
-1452|                         alert('Veuillez choisir une option.');
-1453|                         return;
-1454|                     }
-1455| 
-1456|                     const index = parseInt(selectedChoice.value);
-1457|                     const selectedOption = options[index];
-1458|                     const selected = selectedOption.text;
-1459| 
-1460|                     // Récupérer les données stockées
-1461|                     const locationData = window._currentLocationData || {};
-1462| 
-1463|                     // Extraire les informations de l'option choisie
-1464|                     let ville = selected;
-1465|                     let commune = locationData.commune || null;
-1466|                     let postalCode = locationData.postalCode || null;
-1467|                     let province = locationData.province || null;
-1468|                     let region = locationData.region || null;
-1469|                     let postcodeLocalities = locationData.postcodeLocalities || [];
-1470|                     let sublocalityLevel1 = locationData.sublocalityLevel1 || null;
-1471|                     let sublocalityLevel2 = locationData.sublocalityLevel2 || null;
-1472|                     let sublocalityLevel3 = locationData.sublocalityLevel3 || null;
-1473|                     let sublocalityLevel4 = locationData.sublocalityLevel4 || null;
-1474| 
-1475|                     // Extraire le code postal si présent
-1476|                     const postalMatch = selected.match(/^([0-9]{4})\s/);
-1477|                     if (postalMatch) {
-1478|                         postalCode = postalMatch[1];
-1479|                         ville = selected.replace(/^[0-9]{4}\s/, '');
+1397|                     // Afficher la phase 2
+1398|                     afficherChoixFormat();
+1399|                 });
+1400|             }
+1401| 
+1402|             if (cancelBtn) {
+1403|                 cancelBtn.addEventListener('click', function () {
+1404|                     manualResults.style.display = 'none';
+1405|                     manualSearchZone.style.display = 'none';
+1406|                     document.getElementById('switchToManualBtn').style.display = 'inline-block';
+1407|                     document.getElementById('gpsResult').style.display = 'block';
+1408|                 });
+1409|             }
+1410|         }
+1411| 
+1412|         // ===== PHASE 2 : CHOIX DU FORMAT D'AFFICHAGE =====
+1413|         function afficherChoixFormat() {
+1414|             const data = window._selectedLocationData;
+1415|             if (!data) return;
+1416| 
+1417|             const ville = data.ville;
+1418|             const commune = data.commune;
+1419| 
+1420|             // Construire les exemples dynamiquement
+1421|             let exempleVilleSeule = ville;
+1422|             let exempleCommuneVille = commune && commune !== ville ? `${commune} - ${ville}` : ville;
+1423| 
+1424|             const html = `
+1425|             <div style="background: #f0f8f0; padding: 15px; border-radius: 8px; border: 2px solid #4CAF50;">
+1426|                 <p style="font-weight: bold; color: #2e7d32;">📌 Comment voulez-vous afficher votre localité ?</p>
+1427|                 <div style="margin: 15px 0; display: flex; flex-direction: column; gap: 10px;">
+1428|                     <label style="display: flex; align-items: center; gap: 10px; font-size: 1em; cursor: pointer; padding: 10px 12px; border-radius: 8px; border: 1px solid #e0e0e0; background: #fafafa;">
+1429|                         <input type="radio" name="displayFormat" value="city_only" checked>
+1430|                         <span>📍 <strong>${exempleVilleSeule}</strong></span>
+1431|                     </label>
+1432|                     <label style="display: flex; align-items: center; gap: 10px; font-size: 1em; cursor: pointer; padding: 10px 12px; border-radius: 8px; border: 1px solid #e0e0e0; background: #fafafa;">
+1433|                         <input type="radio" name="displayFormat" value="commune_city">
+1434|                         <span>📍 <strong>${exempleCommuneVille}</strong></span>
+1435|                     </label>
+1436|                 </div>
+1437|                 <div style="margin-top: 10px;">
+1438|                     <label style="display: flex; align-items: center; gap: 8px; font-size: 0.9em;">
+1439|                         <input type="checkbox" id="finalConsent">
+1440|                         J'accepte que ma localité soit utilisée dans mon profil
+1441|                     </label>
+1442|                 </div>
+1443|                 <div style="margin-top: 10px; display: flex; gap: 10px;">
+1444|                     <button type="button" id="finalConfirm" disabled style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 50px; cursor: pointer;">✅ Confirmer</button>
+1445|                     <button type="button" id="finalCancel" style="padding: 10px 20px; background: #f44336; color: white; border: none; border-radius: 50px; cursor: pointer;">🔄 Retour</button>
+1446|                 </div>
+1447|             </div>
+1448|             `;
+1449| 
+1450|             manualResults.innerHTML = html;
+1451|             manualResults.style.display = 'block';
+1452| 
+1453|             const consent = document.getElementById('finalConsent');
+1454|             const confirmBtn = document.getElementById('finalConfirm');
+1455|             const cancelBtn = document.getElementById('finalCancel');
+1456|             const radios = document.querySelectorAll('input[name="displayFormat"]');
+1457| 
+1458|             function updateButton() {
+1459|                 const consentChecked = consent?.checked || false;
+1460|                 const radioSelected = document.querySelector('input[name="displayFormat"]:checked') !== null;
+1461|                 confirmBtn.disabled = !(consentChecked && radioSelected);
+1462|             }
+1463| 
+1464|             consent?.addEventListener('change', updateButton);
+1465|             radios.forEach(r => r.addEventListener('change', updateButton));
+1466| 
+1467|             // Confirmer le format
+1468|             confirmBtn?.addEventListener('click', function () {
+1469|                 const format = document.querySelector('input[name="displayFormat"]:checked')?.value || 'city_only';
+1470|                 const data = window._selectedLocationData;
+1471| 
+1472|                 // Construire le texte final
+1473|                 let displayText = '';
+1474|                 if (format === 'city_only') {
+1475|                     displayText = data.ville;
+1476|                 } else {
+1477|                     let parts = [];
+1478|                     if (data.commune && data.commune !== data.ville) {
+1479|                         parts.push(data.commune);
 1480|                     }
-1481| 
-1482|                     // Extraire la commune si virgule
-1483|                     if (selected.includes(',')) {
-1484|                         const parts = selected.split(', ');
-1485|                         commune = parts[0];
-1486|                         if (commune === ville) commune = null;
-1487|                         if (parts.length >= 3) province = parts[2];
-1488|                         if (parts.length >= 4) region = parts[3];
-1489|                     }
-1490| 
-1491|                     // Extraire la commune si virgule
-1492|                     if (selected.includes(',')) {
-1493|                         const parts = selected.split(', ');
-1494|                         commune = parts[0];
-1495|                         if (commune === ville) commune = null;
-1496|                         if (parts.length >= 3) province = parts[2];
-1497|                         if (parts.length >= 4) region = parts[3];
-1498|                     }
-1499| 
-1500|                     // Stocker les données pour la phase 2
-1501|                     window._selectedLocationData = {
-1502|                         ville: ville,
-1503|                         commune: commune,
-1504|                         province: province,
-1505|                         region: region,
-1506|                         postalCode: postalCode,
-1507|                         postcodeLocalities: postcodeLocalities,
-1508|                         sublocalityLevel1: sublocalityLevel1,
-1509|                         sublocalityLevel2: sublocalityLevel2,
-1510|                         sublocalityLevel3: sublocalityLevel3,
-1511|                         sublocalityLevel4: sublocalityLevel4,
-1512|                         locationData: locationData
-1513|                     };
-1514| 
-1515|                     // Afficher la phase 2
-1516|                     afficherChoixFormat();
-1517|                 });
-1518|             }
-1519| 
-1520|             if (cancelBtn) {
-1521|                 cancelBtn.addEventListener('click', function () {
-1522|                     manualResults.style.display = 'none';
-1523|                     manualSearchZone.style.display = 'none';
-1524|                     document.getElementById('switchToManualBtn').style.display = 'inline-block';
-1525|                     document.getElementById('gpsResult').style.display = 'block';
-1526|                 });
-1527|             }
-1528|         }
-1529| 
-1530|         // ===== PHASE 2 : CHOIX DU FORMAT D'AFFICHAGE =====
-1531|         function afficherChoixFormat() {
-1532|             const data = window._selectedLocationData;
-1533|             if (!data) return;
-1534| 
-1535|             const ville = data.ville;
-1536|             const commune = data.commune;
-1537| 
-1538|             // Construire les exemples dynamiquement
-1539|             let exempleVilleSeule = ville;
-1540|             let exempleCommuneVille = commune && commune !== ville ? `${commune} - ${ville}` : ville;
+1481|                     parts.push(data.ville);
+1482|                     displayText = parts.join(' - ');
+1483|                 }
+1484| 
+1485|                 // 🔥 STOCKER DANS LES CHAMPS CACHÉS
+1486|                 function setHidden(id, value) {
+1487|                     let el = document.getElementById(id);
+1488|                     if (!el) {
+1489|                         el = document.createElement('input');
+1490|                         el.type = 'hidden';
+1491|                         el.id = id;
+1492|                         el.name = id.replace('_hidden', '');
+1493|                         document.getElementById('loginForm').appendChild(el);
+1494|                     }
+1495|                     el.value = (value !== null && value !== undefined && value !== '') ? value : '';
+1496|                 }
+1497| 
+1498|                 setHidden('location_city_hidden', data.ville);
+1499|                 setHidden('location_commune_hidden', data.commune || null);
+1500|                 setHidden('location_postal_code_hidden', data.postalCode || null);
+1501|                 setHidden('location_province_hidden', data.province || null);
+1502|                 setHidden('location_region_hidden', data.region || null);
+1503|                 setHidden('location_precise_hidden', displayText);
+1504|                 setHidden('location_display_format_hidden', format);
+1505| 
+1506|                 // 🔥 STOCKER TOUTES LES DONNÉES
+1507|                 setHidden('location_sublocality_level_1_hidden', data.sublocalityLevel1 || null);
+1508|                 setHidden('location_sublocality_level_2_hidden', data.sublocalityLevel2 || null);
+1509|                 setHidden('location_sublocality_level_3_hidden', data.sublocalityLevel3 || null);
+1510|                 setHidden('location_sublocality_level_4_hidden', data.sublocalityLevel4 || null);
+1511|                 setHidden('location_admin_level_3_hidden', data.adminLevel3 || null);
+1512|                 setHidden('location_admin_level_4_hidden', data.adminLevel4 || null);
+1513|                 setHidden('location_neighborhood_hidden', data.neighborhood || null);
+1514|                 setHidden('location_country_hidden', data.country || null);
+1515|                 setHidden('location_lat_hidden', data.lat || null);
+1516|                 setHidden('location_lng_hidden', data.lng || null);
+1517| 
+1518|                 // Stocker les localités du code postal
+1519|                 if (data.postcodeLocalities && data.postcodeLocalities.length > 0) {
+1520|                     setHidden('location_postcode_localities_hidden', data.postcodeLocalities.join(', '));
+1521|                 } else {
+1522|                     setHidden('location_postcode_localities_hidden', null);
+1523|                 }
+1524| 
+1525|                 // Mettre à jour le select
+1526|                 const locationSelect = document.getElementById('location');
+1527|                 let optionExists = false;
+1528|                 for (let opt of locationSelect.options) {
+1529|                     if (opt.value === data.ville) {
+1530|                         optionExists = true;
+1531|                         break;
+1532|                     }
+1533|                 }
+1534|                 if (!optionExists) {
+1535|                     const newOption = document.createElement('option');
+1536|                     newOption.value = data.ville;
+1537|                     newOption.textContent = data.ville;
+1538|                     locationSelect.appendChild(newOption);
+1539|                 }
+1540|                 locationSelect.value = data.ville;
 1541| 
-1542|             const html = `
-1543|             <div style="background: #f0f8f0; padding: 15px; border-radius: 8px; border: 2px solid #4CAF50;">
-1544|                 <p style="font-weight: bold; color: #2e7d32;">📌 Comment voulez-vous afficher votre localité ?</p>
-1545|                 <div style="margin: 15px 0; display: flex; flex-direction: column; gap: 10px;">
-1546|                     <label style="display: flex; align-items: center; gap: 10px; font-size: 1em; cursor: pointer; padding: 10px 12px; border-radius: 8px; border: 1px solid #e0e0e0; background: #fafafa;">
-1547|                         <input type="radio" name="displayFormat" value="city_only" checked>
-1548|                         <span>📍 <strong>${exempleVilleSeule}</strong></span>
-1549|                     </label>
-1550|                     <label style="display: flex; align-items: center; gap: 10px; font-size: 1em; cursor: pointer; padding: 10px 12px; border-radius: 8px; border: 1px solid #e0e0e0; background: #fafafa;">
-1551|                         <input type="radio" name="displayFormat" value="commune_city">
-1552|                         <span>📍 <strong>${exempleCommuneVille}</strong></span>
-1553|                     </label>
-1554|                 </div>
-1555|                 <div style="margin-top: 10px;">
-1556|                     <label style="display: flex; align-items: center; gap: 8px; font-size: 0.9em;">
-1557|                         <input type="checkbox" id="finalConsent">
-1558|                         J'accepte que ma localité soit utilisée dans mon profil
-1559|                     </label>
-1560|                 </div>
-1561|                 <div style="margin-top: 10px; display: flex; gap: 10px;">
-1562|                     <button type="button" id="finalConfirm" disabled style="padding: 10px 20px; background: #4CAF50; color: white; border: none; border-radius: 50px; cursor: pointer;">✅ Confirmer</button>
-1563|                     <button type="button" id="finalCancel" style="padding: 10px 20px; background: #f44336; color: white; border: none; border-radius: 50px; cursor: pointer;">🔄 Retour</button>
-1564|                 </div>
-1565|             </div>
-1566|             `;
-1567| 
-1568|             manualResults.innerHTML = html;
-1569|             manualResults.style.display = 'block';
-1570| 
-1571|             const consent = document.getElementById('finalConsent');
-1572|             const confirmBtn = document.getElementById('finalConfirm');
-1573|             const cancelBtn = document.getElementById('finalCancel');
-1574|             const radios = document.querySelectorAll('input[name="displayFormat"]');
-1575| 
-1576|             function updateButton() {
-1577|                 const consentChecked = consent?.checked || false;
-1578|                 const radioSelected = document.querySelector('input[name="displayFormat"]:checked') !== null;
-1579|                 confirmBtn.disabled = !(consentChecked && radioSelected);
-1580|             }
-1581| 
-1582|             consent?.addEventListener('change', updateButton);
-1583|             radios.forEach(r => r.addEventListener('change', updateButton));
-1584| 
-1585|             // Confirmer le format
-1586|             confirmBtn?.addEventListener('click', function () {
-1587|                 const format = document.querySelector('input[name="displayFormat"]:checked')?.value || 'city_only';
-1588|                 const data = window._selectedLocationData;
-1589| 
-1590|                 // Construire le texte final
-1591|                 let displayText = '';
-1592|                 if (format === 'city_only') {
-1593|                     displayText = data.ville;
-1594|                 } else {
-1595|                     let parts = [];
-1596|                     if (data.commune && data.commune !== data.ville) {
-1597|                         parts.push(data.commune);
-1598|                     }
-1599|                     parts.push(data.ville);
-1600|                     displayText = parts.join(' - ');
-1601|                 }
-1602| 
-1603|                 // 🔥 STOCKER DANS LES CHAMPS CACHÉS
-1604|                 function setHidden(id, value) {
-1605|                     let el = document.getElementById(id);
-1606|                     if (!el) {
-1607|                         el = document.createElement('input');
-1608|                         el.type = 'hidden';
-1609|                         el.id = id;
-1610|                         el.name = id.replace('_hidden', '');
-1611|                         document.getElementById('loginForm').appendChild(el);
-1612|                     }
-1613|                     el.value = (value !== null && value !== undefined && value !== '') ? value : '';
-1614|                 }
-1615| 
-1616|                 setHidden('location_city_hidden', data.ville);
-1617|                 setHidden('location_commune_hidden', data.commune || null);
-1618|                 setHidden('location_postal_code_hidden', data.postalCode || null);
-1619|                 setHidden('location_province_hidden', data.province || null);
-1620|                 setHidden('location_region_hidden', data.region || null);
-1621|                 setHidden('location_precise_hidden', displayText);
-1622|                 setHidden('location_display_format_hidden', format);
-1623| 
-1624|                 // 🔥 STOCKER TOUTES LES DONNÉES
-1625|                 setHidden('location_sublocality_level_1_hidden', data.sublocalityLevel1 || null);
-1626|                 setHidden('location_sublocality_level_2_hidden', data.sublocalityLevel2 || null);
-1627|                 setHidden('location_sublocality_level_3_hidden', data.sublocalityLevel3 || null);
-1628|                 setHidden('location_sublocality_level_4_hidden', data.sublocalityLevel4 || null);
-1629|                 setHidden('location_admin_level_3_hidden', data.adminLevel3 || null);
-1630|                 setHidden('location_admin_level_4_hidden', data.adminLevel4 || null);
-1631|                 setHidden('location_neighborhood_hidden', data.neighborhood || null);
-1632|                 setHidden('location_country_hidden', data.country || null);
-1633|                 setHidden('location_lat_hidden', data.lat || null);
-1634|                 setHidden('location_lng_hidden', data.lng || null);
-1635| 
-1636|                 // Stocker les localités du code postal
-1637|                 if (data.postcodeLocalities && data.postcodeLocalities.length > 0) {
-1638|                     setHidden('location_postcode_localities_hidden', data.postcodeLocalities.join(', '));
-1639|                 } else {
-1640|                     setHidden('location_postcode_localities_hidden', null);
-1641|                 }
-1642| 
-1643|                 // Mettre à jour le select
-1644|                 const locationSelect = document.getElementById('location');
-1645|                 let optionExists = false;
-1646|                 for (let opt of locationSelect.options) {
-1647|                     if (opt.value === data.ville) {
-1648|                         optionExists = true;
-1649|                         break;
-1650|                     }
-1651|                 }
-1652|                 if (!optionExists) {
-1653|                     const newOption = document.createElement('option');
-1654|                     newOption.value = data.ville;
-1655|                     newOption.textContent = data.ville;
-1656|                     locationSelect.appendChild(newOption);
-1657|                 }
-1658|                 locationSelect.value = data.ville;
-1659| 
-1660|                 // Afficher la confirmation finale
-1661|                 document.getElementById('gpsZone').innerHTML = `
-1662|                     <div style="padding: 10px; background: #e8f5e9; border-radius: 5px; color: #2e7d32;">
-1663|                         ✅ Localisation confirmée : <strong>${displayText}</strong>
-1664|                         <br><small>Votre profil affichera : ${displayText}</small>
-1665|                     </div>
-1666|                 `;
-1667| 
-1668|                 manualResults.style.display = 'none';
-1669|                 manualSearchZone.style.display = 'none';
-1670|                 document.getElementById('switchToManualBtn').style.display = 'inline-block';
-1671|             });
-1672| 
-1673|             // Retour à la phase 1
-1674|             cancelBtn?.addEventListener('click', function () {
-1675|                 const originalOptions = window._originalOptions || [];
-1676|                 const originalQuery = window._originalQuery || '';
-1677|                 if (originalOptions.length > 0) {
-1678|                     afficherOptionsManuelles(originalOptions, originalQuery);
-1679|                 }
-1680|             });
-1681|         }
-1682|     });
-1683| 
-1684| })();
+1542|                 // Afficher la confirmation finale
+1543|                 document.getElementById('gpsZone').innerHTML = `
+1544|                     <div style="padding: 10px; background: #e8f5e9; border-radius: 5px; color: #2e7d32;">
+1545|                         ✅ Localisation confirmée : <strong>${displayText}</strong>
+1546|                         <br><small>Votre profil affichera : ${displayText}</small>
+1547|                     </div>
+1548|                 `;
+1549| 
+1550|                 manualResults.style.display = 'none';
+1551|                 manualSearchZone.style.display = 'none';
+1552|                 document.getElementById('switchToManualBtn').style.display = 'inline-block';
+1553|             });
+1554| 
+1555|             // Retour à la phase 1
+1556|             cancelBtn?.addEventListener('click', function () {
+1557|                 const originalOptions = window._originalOptions || [];
+1558|                 const originalQuery = window._originalQuery || '';
+1559|                 if (originalOptions.length > 0) {
+1560|                     afficherOptionsManuelles(originalOptions, originalQuery);
+1561|                 }
+1562|             });
+1563|         }
+1564|     });
+1565| 
+1566| })();
 
 # FILE: /var/www/meetgay/public/js/fingerprint-source.js
 
