@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET
-# Généré le 2026-07-09 11:24:41
+# Généré le 2026-07-09 11:50:29
 # 8 fichier(s) inclus
 
 # ========== SOMMAIRE ==========
@@ -674,20 +674,24 @@
 379|             }
 380|         });
 381| 
-382|         socket.on('disconnect', () => {
+382|         socket.on('disconnect', async () => {
 383|             console.log("🔥 DISCONNECT DÉCLENCHÉ pour socket:", socket.id);
-384| 
-385|             // Utiliser sessionManager pour gérer la déconnexion
-386|             const pseudo = sessionManager.handleDisconnect(socket.id);
-387|             if (pseudo) {
-388|                 console.log(`🔌 Déconnexion traitée: ${pseudo}`);
-389|             }
-390|         });
-391| 
-392|     });
-393| 
-394| 
-395| };
+384|             try {
+385|                 const pseudo = await sessionManager.handleDisconnect(socket.id);
+386|                 if (pseudo) {
+387|                     console.log(`🔌 Déconnexion traitée: ${pseudo}`);
+388|                 } else {
+389|                     console.log(`🔌 Déconnexion socket ${socket.id} : aucun pseudo trouvé`);
+390|                 }
+391|             } catch (err) {
+392|                 console.error('❌ Erreur lors de la déconnexion:', err.message);
+393|             }
+394|         });
+395| 
+396|     });
+397| 
+398| 
+399| };
 
 # ============================================
 # FILE: server.js
@@ -724,7 +728,7 @@
 29| 
 30| 
 31| // Modules internes
-32| const { startCleanup, startInactivityWatch, cleanOldData } = require('./modules/cleanup.js');
+32| const { cleanOldData } = require('./modules/cleanup.js');
 33| const contactRoutes = require('./modules/routes/api-contact.js');
 34| const pool = require('./modules/postgresql.js');
 35| const htmlRoutes = require('./modules/routes/html.js');
@@ -739,412 +743,370 @@
 44| 
 45| 
 46| // ==========  VARIABLES GLOBALES ==========
-47| const users = {};
-48| const TEST_MODE = false;  // ← Désactive le fingerprint si true
-49| 
-50| // JWT_SECRET pour les utilisateurs normaux
-51| const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
-52| 
-53| // PARAMÈTRES DE MODÉRATION
-54| const REPORTS_THRESHOLD = 2;        // Nombre de signalements (personnes différentes) avant auto-ban
-55| const REPORTS_WINDOW_MINUTES = 60;  // Fenêtre de temps en minutes
-56| const TEMP_BAN_MINUTES = 10;        // Durée du bannissement temporaire
-57| 
-58| // PARAMÈTRES DE NETTOYAGE AUTO
-59| const LOGS_RETENTION_DAYS = 30;     // Garder 30 jours de journal
-60| const REPORTS_RETENTION_DAYS = 60;  // Garder 60 jours de signalements
-61| const AUTO_CLEANUP_ENABLED = true;   // Activer/désactiver le nettoyage auto 1H
-62| const VISITOR_CLEANUP_ENABLED = true; // Nettoyage visiteurs déconnectés (1 minute)
-63| const INACTIVITY_MINUTES = 10;      // Déconnexion après X minutes sans activité
-64| const CLEANUP_INTERVAL_MINUTES = 1; // Nettoyage des absents toutes les X minutes
-65| 
-66| // DESACTIVE LE CACHE SERVEUR
-67| const DEV_MODE = true;
+47| const TEST_MODE = false;  // ← Désactive le fingerprint si true
+48| 
+49| // JWT_SECRET pour les utilisateurs normaux
+50| const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
+51| 
+52| // PARAMÈTRES DE MODÉRATION
+53| const REPORTS_THRESHOLD = 2;        // Nombre de signalements (personnes différentes) avant auto-ban
+54| const REPORTS_WINDOW_MINUTES = 60;  // Fenêtre de temps en minutes
+55| const TEMP_BAN_MINUTES = 10;        // Durée du bannissement temporaire
+56| 
+57| // PARAMÈTRES DE NETTOYAGE AUTO
+58| const LOGS_RETENTION_DAYS = 30;     // Garder 30 jours de journal
+59| const REPORTS_RETENTION_DAYS = 60;  // Garder 60 jours de signalements
+60| const AUTO_CLEANUP_ENABLED = true;   // Activer/désactiver le nettoyage auto 1H
+61| const VISITOR_CLEANUP_ENABLED = true; // Nettoyage visiteurs déconnectés (1 minute)
+62| const INACTIVITY_MINUTES = 10;      // Déconnexion après X minutes sans activité
+63| const CLEANUP_INTERVAL_MINUTES = 1; // Nettoyage des absents toutes les X minutes
+64| 
+65| // DESACTIVE LE CACHE SERVEUR
+66| const DEV_MODE = true;
+67| 
 68| 
 69| 
 70| 
 71| 
-72| 
-73| // ==========  CONFIGURATION EXPRESS ==========
-74| const app = express();
-75| const server = http.createServer(app);
-76| 
-77| console.log('🔍 DB_USER:', process.env.DB_USER);
-78| console.log('🔍 DB_PASSWORD:', process.env.DB_PASSWORD ? '******' : 'MISSING');
-79| 
-80| // Compression
-81| app.use(compression({
-82|     level: 6,
-83|     threshold: 1024,
-84|     filter: (req, res) => {
-85|         if (req.path === '/socket.io/') return false;
-86|         return compression.filter(req, res);
-87|     }
-88| }));
-89| 
-90| app.use(express.json());
-91| 
-92| app.use(session({
-93|     store: new pgSession({
-94|         pool: pool,
-95|         tableName: 'session',
-96|         createTableIfMissing: false,
-97|         pruneSessionInterval: 60
-98|     }),
-99|     secret: 'un-super-secret-change-moi',
-100|     resave: false,
-101|     saveUninitialized: false,
-102|     cookie: {
-103|         httpOnly: true,
-104|         secure: false,
-105|         maxAge: 30 * 24 * 60 * 60 * 1000 // 30 jours
-106|     }
-107| }));
+72| // ==========  CONFIGURATION EXPRESS ==========
+73| const app = express();
+74| const server = http.createServer(app);
+75| 
+76| console.log('🔍 DB_USER:', process.env.DB_USER);
+77| console.log('🔍 DB_PASSWORD:', process.env.DB_PASSWORD ? '******' : 'MISSING');
+78| 
+79| // Compression
+80| app.use(compression({
+81|     level: 6,
+82|     threshold: 1024,
+83|     filter: (req, res) => {
+84|         if (req.path === '/socket.io/') return false;
+85|         return compression.filter(req, res);
+86|     }
+87| }));
+88| 
+89| app.use(express.json());
+90| 
+91| app.use(session({
+92|     store: new pgSession({
+93|         pool: pool,
+94|         tableName: 'session',
+95|         createTableIfMissing: false,
+96|         pruneSessionInterval: 60
+97|     }),
+98|     secret: 'un-super-secret-change-moi',
+99|     resave: false,
+100|     saveUninitialized: false,
+101|     cookie: {
+102|         httpOnly: true,
+103|         secure: false,
+104|         maxAge: 30 * 24 * 60 * 60 * 1000 // 30 jours
+105|     }
+106| }));
+107| 
 108| 
-109| 
-110| app.use(maintenanceMiddleware(pool));
-111| contactRoutes(app);
-112| htmlRoutes(app, pool);
-113| messagesRoutes(app, pool);
-114| authRoutes(app, pool);
-115| geocodeRoutes(app);
-116| require('./modules/routes/api-block')(app, pool);
-117| 
-118| // ========== CONFIGURATION DES FICHIERS STATIQUES ==========
-119| 
-120| // 🔥 Détermine les options selon le mode
-121| const staticOptions = {
-122|     setHeaders: function (res, path) {
-123|         if (path.endsWith('.css')) {
-124|             res.setHeader('Content-Type', 'text/css');
-125|         }
-126|     }
-127| };
-128| 
-129| // 🔥 Si DEV_MODE est activé, désactive le cache
-130| if (DEV_MODE === true) {
-131|     staticOptions.etag = false;           // Désactive ETag
-132|     staticOptions.maxAge = 0;             // Pas de mise en cache
-133|     staticOptions.lastModified = false;   // Désactive Last-Modified
-134| 
-135|     // Ajoute des headers anti-cache
-136|     staticOptions.setHeaders = function (res, path) {
-137|         if (path.endsWith('.css')) {
-138|             res.setHeader('Content-Type', 'text/css');
-139|         }
-140|         // 🔥 Headers anti-cache pour TOUS les fichiers
-141|         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
-142|         res.setHeader('Pragma', 'no-cache');
-143|         res.setHeader('Expires', '0');
-144|     };
-145| 
-146|     console.log('🔥 MODE DÉVELOPPEMENT ACTIF - Cache désactivé');
-147| } else {
-148|     console.log('✅ MODE PRODUCTION - Cache activé');
-149| }
-150| 
-151| // Applique la configuration
-152| app.use(express.static('/var/www/meetgay/public', staticOptions));
-153| 
-154| app.use(express.json());
-155| 
-156| // 🔥 Middleware anti-cache (seulement en développement)
-157| if (DEV_MODE === true) {
-158|     app.use((req, res, next) => {
-159|         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
-160|         res.setHeader('Pragma', 'no-cache');
-161|         res.setHeader('Expires', '0');
-162|         next();
-163|     });
-164|     console.log('🔥 Middleware anti-cache activé');
-165| }
-166| 
-167| // ========== SOCKET.IO ==========
-168| const io = socketIo(server, {
-169|     cors: {
-170|         origin: "*",
-171|         methods: ["GET", "POST"],
-172|         credentials: true,
-173|         allowedHeaders: ["*"]
-174|     },
-175|     transports: ['websocket', 'polling'],
-176|     allowEIO3: true,
-177|     pingTimeout: 120000,    // ← 2 minutes (au lieu de 10)
-178|     pingInterval: 30000     // ← 30 secondes (au lieu de 1 minute)
-179| });
-180| 
-181| const sessionManager = require('./modules/session-manager.js')(io, pool, users, {
-182|     CLEANUP_INTERVAL: CLEANUP_INTERVAL_MINUTES * 60 * 1000,
-183|     INACTIVITY_THRESHOLD: INACTIVITY_MINUTES * 60 * 1000,
-184|     MARKED_DELETION_THRESHOLD: 3000
-185| });
+109| app.use(maintenanceMiddleware(pool));
+110| contactRoutes(app);
+111| htmlRoutes(app, pool);
+112| messagesRoutes(app, pool);
+113| authRoutes(app, pool);
+114| geocodeRoutes(app);
+115| require('./modules/routes/api-block')(app, pool);
+116| 
+117| // ========== CONFIGURATION DES FICHIERS STATIQUES ==========
+118| 
+119| // 🔥 Détermine les options selon le mode
+120| const staticOptions = {
+121|     setHeaders: function (res, path) {
+122|         if (path.endsWith('.css')) {
+123|             res.setHeader('Content-Type', 'text/css');
+124|         }
+125|     }
+126| };
+127| 
+128| // 🔥 Si DEV_MODE est activé, désactive le cache
+129| if (DEV_MODE === true) {
+130|     staticOptions.etag = false;           // Désactive ETag
+131|     staticOptions.maxAge = 0;             // Pas de mise en cache
+132|     staticOptions.lastModified = false;   // Désactive Last-Modified
+133| 
+134|     // Ajoute des headers anti-cache
+135|     staticOptions.setHeaders = function (res, path) {
+136|         if (path.endsWith('.css')) {
+137|             res.setHeader('Content-Type', 'text/css');
+138|         }
+139|         // 🔥 Headers anti-cache pour TOUS les fichiers
+140|         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
+141|         res.setHeader('Pragma', 'no-cache');
+142|         res.setHeader('Expires', '0');
+143|     };
+144| 
+145|     console.log('🔥 MODE DÉVELOPPEMENT ACTIF - Cache désactivé');
+146| } else {
+147|     console.log('✅ MODE PRODUCTION - Cache activé');
+148| }
+149| 
+150| // Applique la configuration
+151| app.use(express.static('/var/www/meetgay/public', staticOptions));
+152| 
+153| app.use(express.json());
+154| 
+155| // 🔥 Middleware anti-cache (seulement en développement)
+156| if (DEV_MODE === true) {
+157|     app.use((req, res, next) => {
+158|         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
+159|         res.setHeader('Pragma', 'no-cache');
+160|         res.setHeader('Expires', '0');
+161|         next();
+162|     });
+163|     console.log('🔥 Middleware anti-cache activé');
+164| }
+165| 
+166| // ========== SOCKET.IO ==========
+167| const io = socketIo(server, {
+168|     cors: {
+169|         origin: "*",
+170|         methods: ["GET", "POST"],
+171|         credentials: true,
+172|         allowedHeaders: ["*"]
+173|     },
+174|     transports: ['websocket', 'polling'],
+175|     allowEIO3: true,
+176|     pingTimeout: 120000,    // ← 2 minutes (au lieu de 10)
+177|     pingInterval: 30000     // ← 30 secondes (au lieu de 1 minute)
+178| });
+179| 
+180| const sessionManager = require('./modules/session-manager.js')(io, pool, {
+181|     CLEANUP_INTERVAL: CLEANUP_INTERVAL_MINUTES * 60 * 1000,
+182|     INACTIVITY_THRESHOLD: INACTIVITY_MINUTES * 60 * 1000
+183| });
+184| 
+185| adminRoutes(app, pool, io);
 186| 
-187| adminRoutes(app, pool, io, users);
-188| 
-189| // Gestion d'erreur (port déjà utilisé)
-190| server.on('error', (err) => {
-191|     if (err.code === 'EADDRINUSE') {
-192|         console.error(`❌ Port déjà utilisé. Tue l'autre processus et redémarre.`);
-193|         process.exit(1);
-194|     }
-195| });
-196| 
-197| // Initialiser la surveillance d’inactivité (5 minutes sans activité)
-198| const updateActivity = sessionManager.updateActivity;
-199| 
-200| // ========== LANCEMENT DES HANDLERS SOCKET (APRÈS io, users, constants) ==========
-201| socketHandlers(io, pool, users, sessionManager, updateActivity, REPORTS_THRESHOLD, REPORTS_WINDOW_MINUTES, TEMP_BAN_MINUTES);
-202| 
-203| // ========== NETTOYAGE AUTOMATIQUE ==========
-204| // Nettoyage des utilisateurs inactifs
-205| if (VISITOR_CLEANUP_ENABLED) {
-206|     sessionManager.startCleanup();
-207| } else {
-208|     console.log('🧹 Nettoyage des visiteurs déconnectés DÉSACTIVÉ');
-209| }
-210| 
-211| // Nettoyage auto du journal et signalements (toutes les 24h)
-212| if (AUTO_CLEANUP_ENABLED) {
-213|     setInterval(async () => {
-214|         await cleanOldData(pool, LOGS_RETENTION_DAYS, REPORTS_RETENTION_DAYS);
-215|     }, 24 * 60 * 60 * 1000);
-216|     console.log(`🧹 Nettoyage auto activé: journal ${LOGS_RETENTION_DAYS} jours, signalements ${REPORTS_RETENTION_DAYS} jours`);
-217| } else {
-218|     console.log(`🧹 Nettoyage auto DÉSACTIVÉ`);
-219| }
-220| 
-221| // ========== DÉMARRAGE ==========
-222| const PORT = process.env.PORT || 3005;
-223| server.listen(PORT, '0.0.0.0', () => {
-224|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
-225| });
+187| // Gestion d'erreur (port déjà utilisé)
+188| server.on('error', (err) => {
+189|     if (err.code === 'EADDRINUSE') {
+190|         console.error(`❌ Port déjà utilisé. Tue l'autre processus et redémarre.`);
+191|         process.exit(1);
+192|     }
+193| });
+194| 
+195| // Initialiser la surveillance d’inactivité (5 minutes sans activité)
+196| const updateActivity = sessionManager.updateActivity;
+197| 
+198| // ========== LANCEMENT DES HANDLERS SOCKET (APRÈS io, users, constants) ==========
+199| socketHandlers(io, pool, sessionManager, updateActivity, REPORTS_THRESHOLD, REPORTS_WINDOW_MINUTES, TEMP_BAN_MINUTES);
+200| 
+201| // ========== NETTOYAGE AUTOMATIQUE ==========
+202| // Nettoyage des utilisateurs inactifs
+203| if (VISITOR_CLEANUP_ENABLED) {
+204|     sessionManager.startCleanup();
+205| } else {
+206|     console.log('🧹 Nettoyage des visiteurs déconnectés DÉSACTIVÉ');
+207| }
+208| 
+209| // Nettoyage auto du journal et signalements (toutes les 24h)
+210| if (AUTO_CLEANUP_ENABLED) {
+211|     setInterval(async () => {
+212|         await cleanOldData(pool, LOGS_RETENTION_DAYS, REPORTS_RETENTION_DAYS);
+213|     }, 24 * 60 * 60 * 1000);
+214|     console.log(`🧹 Nettoyage auto activé: journal ${LOGS_RETENTION_DAYS} jours, signalements ${REPORTS_RETENTION_DAYS} jours`);
+215| } else {
+216|     console.log(`🧹 Nettoyage auto DÉSACTIVÉ`);
+217| }
+218| 
+219| // ========== DÉMARRAGE ==========
+220| const PORT = process.env.PORT || 3005;
+221| server.listen(PORT, '0.0.0.0', () => {
+222|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+223| });
 
 # ============================================
 # FILE: modules\session-manager.js
 # ============================================
 
 1| // modules/session-manager.js
-2| // Système centralisé de gestion des sessions et nettoyage
+2| // Système centralisé de gestion des sessions et nettoyage (version BASE DE DONNÉES)
 3| 
-4| /**
-5|  * Ce module fusionne TOUS les systèmes de nettoyage/suppression :
-6|  * - Nettoyage périodique (ancien startCleanup)
-7|  * - Surveillance d'inactivité (ancien startInactivityWatch)
-8|  * - Fermeture de page (pagehide)
-9|  * - Retour arrière (pageshow)
-10|  * - Déconnexion Socket.IO (disconnect)
-11|  * - Déconnexion volontaire (logoutBtn)
-12|  */
+4| module.exports = function (io, pool, config = {}) {
+5|     const CLEANUP_INTERVAL = config.CLEANUP_INTERVAL || 60000;
+6|     const INACTIVITY_THRESHOLD = config.INACTIVITY_THRESHOLD || 600000;
+7| 
+8|     // ============================================================
+9|     // 1. NETTOYAGE PÉRIODIQUE (cœur du système - version base)
+10|     // ============================================================
+11|     function startCleanup() {
+12|         console.log(`🧹 Session Manager: nettoyage toutes les ${CLEANUP_INTERVAL / 1000}s (base de données)`);
 13| 
-14| module.exports = function (io, pool, users, config = {}) {
-15|     const CLEANUP_INTERVAL = config.CLEANUP_INTERVAL || 60000;
-16|     const INACTIVITY_THRESHOLD = config.INACTIVITY_THRESHOLD || 600000;
-17|     const MARKED_DELETION_THRESHOLD = config.MARKED_DELETION_THRESHOLD || 3000;
-18| 
-19|     // ============================================================
-20|     // 1. NETTOYAGE PÉRIODIQUE (cœur du système)
-21|     // ============================================================
-22|     function startCleanup() {
-23|         console.log(`🧹 Session Manager: nettoyage toutes les ${CLEANUP_INTERVAL / 1000}s`);
-24| 
-25|         setInterval(async () => {
-26|             try {
-27|                 const now = Date.now();
-28|                 const toDelete = [];
-29| 
-30|                 // Parcourir les utilisateurs en mémoire
-31|                 for (const [socketId, user] of Object.entries(users)) {
-32|                     const pseudo = user.pseudo;
-33|                     if (!pseudo) continue;
-34| 
-35|                     // Cas 1 : L'utilisateur est marqué pour suppression
-36|                     if (user.markedForDeletion) {
-37|                         const markTime = user.markedForDeletionTime || 0;
-38|                         if (now - markTime > MARKED_DELETION_THRESHOLD) {
-39|                             toDelete.push(pseudo);
-40|                             console.log(`📌 Suppression programmée: ${pseudo} (marqué)`);
-41|                         }
-42|                         continue;
-43|                     }
-44| 
-45|                     // Cas 2 : L'utilisateur est inactif (heartbeat trop vieux)
-46|                     const lastSeen = user.lastSeen || user.connectedAt || 0;
-47|                     if (now - lastSeen > INACTIVITY_THRESHOLD) {
-48|                         toDelete.push(pseudo);
-49|                         console.log(`⏰ Suppression programmée: ${pseudo} (inactif)`);
-50|                     }
-51|                 }
-52| 
-53|                 // Supprimer les utilisateurs de la base
-54|                 // Supprimer les utilisateurs
-55|                 if (toDelete.length > 0) {
-56|                     // 1. Récupérer les socketIds
-57|                     const socketsToNotify = [];
-58|                     for (const pseudo of toDelete) {
-59|                         for (const [id, user] of Object.entries(users)) {
-60|                             if (user.pseudo === pseudo) {
-61|                                 socketsToNotify.push({ pseudo, socketId: id });
-62|                                 break;
-63|                             }
-64|                         }
-65|                     }
-66| 
-67|                     // 2. Envoyer force logout
-68|                     for (const { pseudo, socketId } of socketsToNotify) {
-69|                         io.to(socketId).emit('force logout', {
-70|                             reason: 'Vous avez été déconnecté pour inactivité.'
-71|                         });
-72|                     }
-73| 
-74|                     // 3. Supprimer de la base
-75|                     const placeholders = toDelete.map((_, i) => `$${i + 1}`).join(',');
-76|                     await pool.query(
-77|                         `DELETE FROM users WHERE pseudo IN (${placeholders}) AND (is_member = false OR is_member IS NULL)`,
-78|                         toDelete
-79|                     );
-80| 
-81|                     // 4. Supprimer de la mémoire (users)
-82|                     for (const pseudo of toDelete) {
-83|                         for (const [id, user] of Object.entries(users)) {
-84|                             if (user.pseudo === pseudo) {
-85|                                 delete users[id];
-86|                                 break;
-87|                             }
-88|                         }
-89|                     }
-90| 
-91|                     console.log(`🧹 ${toDelete.length} utilisateur(s) supprimé(s)`);
-92|                 }
+14|         setInterval(async () => {
+15|             try {
+16|                 // 🔥 Récupérer les utilisateurs inactifs directement depuis la base
+17|                 const result = await pool.query(`
+18|                     SELECT pseudo, socket_id 
+19|                     FROM users 
+20|                     WHERE last_seen < NOW() - INTERVAL '${INACTIVITY_THRESHOLD / 60000} minutes'
+21|                     AND socket_id IS NOT NULL
+22|                 `);
+23| 
+24|                 if (result.rows.length === 0) return;
+25| 
+26|                 const toDelete = result.rows;
+27| 
+28|                 // 1. Envoyer force logout à chaque utilisateur concerné
+29|                 for (const row of toDelete) {
+30|                     if (row.socket_id) {
+31|                         const socket = io.sockets.sockets.get(row.socket_id);
+32|                         if (socket) {
+33|                             socket.emit('force logout', {
+34|                                 reason: 'Inactivité prolongée, vous avez été déconnecté.'
+35|                             });
+36|                             console.log(`🚪 Force logout envoyé à ${row.pseudo} (inactif)`);
+37|                         }
+38|                     }
+39|                 }
+40| 
+41|                 // 2. Supprimer les utilisateurs de la base
+42|                 const placeholders = toDelete.map((_, i) => `$${i + 1}`).join(',');
+43|                 const pseudos = toDelete.map(row => row.pseudo);
+44|                 await pool.query(
+45|                     `DELETE FROM users WHERE pseudo IN (${placeholders})`,
+46|                     pseudos
+47|                 );
+48| 
+49|                 console.log(`🧹 ${toDelete.length} utilisateur(s) supprimé(s) pour inactivité`);
+50| 
+51|             } catch (err) {
+52|                 console.error('❌ Erreur nettoyage:', err.message);
+53|             }
+54|         }, CLEANUP_INTERVAL);
+55|     }
+56| 
+57|     // ============================================================
+58|     // 2. MARQUER UN UTILISATEUR POUR SUPPRESSION (pagehide)
+59|     // ============================================================
+60|     function markForDeletion(pseudo) {
+61|         if (!pseudo) return false;
+62| 
+63|         // On met last_seen à une date ancienne pour que le nettoyeur le supprime
+64|         pool.query(
+65|             `UPDATE users SET last_seen = NOW() - INTERVAL '15 minutes' WHERE pseudo = $1`,
+66|             [pseudo]
+67|         ).then(result => {
+68|             if (result.rowCount > 0) {
+69|                 console.log(`📌 Utilisateur marqué pour suppression: ${pseudo}`);
+70|             }
+71|         }).catch(err => {
+72|             console.error('❌ Erreur marquage:', err.message);
+73|         });
+74| 
+75|         return true;
+76|     }
+77| 
+78|     // ============================================================
+79|     // 3. SUPPRESSION IMMÉDIATE (logoutBtn, déconnexion volontaire)
+80|     // ============================================================
+81|     async function deleteUser(pseudo) {
+82|         if (!pseudo) return false;
+83| 
+84|         try {
+85|             await pool.query('DELETE FROM users WHERE pseudo = $1', [pseudo]);
+86|             console.log(`🗑️ Utilisateur supprimé volontairement: ${pseudo}`);
+87|             return true;
+88|         } catch (err) {
+89|             console.error('❌ Erreur suppression volontaire:', err.message);
+90|             return false;
+91|         }
+92|     }
 93| 
-94|             } catch (err) {
-95|                 console.error('❌ Erreur nettoyage:', err.message);
-96|             }
-97|         }, CLEANUP_INTERVAL);
-98|     }
+94|     // ============================================================
+95|     // 4. ENVOYER UN FORCE LOGOUT À UN UTILISATEUR
+96|     // ============================================================
+97|     async function forceLogout(pseudo, reason = 'Vous avez été déconnecté.') {
+98|         if (!pseudo) return false;
 99| 
-100|     // ============================================================
-101|     // 2. MARQUER UN UTILISATEUR POUR SUPPRESSION (pagehide, pageshow)
-102|     // ============================================================
-103|     function markForDeletion(pseudo) {
-104|         if (!pseudo) return false;
-105| 
-106|         let found = false;
-107|         for (const [id, user] of Object.entries(users)) {
-108|             if (user.pseudo === pseudo) {
-109|                 user.markedForDeletion = true;
-110|                 user.markedForDeletionTime = Date.now();
-111|                 found = true;
-112|                 console.log(`📌 Utilisateur marqué pour suppression: ${pseudo}`);
-113|                 break;
-114|             }
-115|         }
-116| 
-117|         // Si l'utilisateur n'est pas dans users, on le supprime directement de la base
-118|         if (!found) {
-119|             pool.query(
-120|                 'DELETE FROM users WHERE pseudo = $1 AND (is_member = false OR is_member IS NULL)',
-121|                 [pseudo]
-122|             ).then(result => {
-123|                 if (result.rowCount > 0) {
-124|                     console.log(`🧹 Utilisateur supprimé directement (hors mémoire): ${pseudo}`);
-125|                 }
-126|             }).catch(err => {
-127|                 console.error('❌ Erreur suppression directe:', err.message);
-128|             });
-129|         }
-130| 
-131|         return true;
-132|     }
-133| 
-134|     // ============================================================
-135|     // 3. SUPPRESSION IMMÉDIATE (logoutBtn, déconnexion volontaire)
-136|     // ============================================================
-137|     async function deleteUser(pseudo) {
-138|         if (!pseudo) return false;
-139| 
-140|         try {
-141|             // Supprimer de la base
-142|             await pool.query('DELETE FROM users WHERE pseudo = $1', [pseudo]);
-143|             // Supprimer de la mémoire
-144|             for (const [id, user] of Object.entries(users)) {
-145|                 if (user.pseudo === pseudo) {
-146|                     delete users[id];
-147|                     break;
-148|                 }
-149|             }
-150|             console.log(`🗑️ Utilisateur supprimé volontairement: ${pseudo}`);
-151|             return true;
-152|         } catch (err) {
-153|             console.error('❌ Erreur suppression volontaire:', err.message);
-154|             return false;
-155|         }
-156|     }
-157| 
-158|     // ============================================================
-159|     // 4. ENVOYER UN FORCE LOGOUT À UN UTILISATEUR
-160|     // ============================================================
-161|     function forceLogout(pseudo, reason = 'Vous avez été déconnecté.') {
-162|         if (!pseudo) return false;
-163| 
-164|         let socketId = null;
-165|         for (const [id, user] of Object.entries(users)) {
-166|             if (user.pseudo === pseudo) {
-167|                 socketId = id;
-168|                 break;
-169|             }
-170|         }
-171| 
-172|         if (socketId) {
-173|             io.to(socketId).emit('force logout', { reason: reason });
-174|             console.log(`🚪 Force logout envoyé à ${pseudo}`);
-175|             return true;
-176|         } else {
-177|             console.log(`⚠️ Utilisateur ${pseudo} non trouvé pour force logout`);
-178|             return false;
-179|         }
-180|     }
-181| 
-182|     // ============================================================
-183|     // 4. GESTION DÉCONNEXION SOCKET.IO (disconnect)
-184|     // ============================================================
-185|     function handleDisconnect(socketId) {
-186|         const user = users[socketId];
-187|         if (user && user.pseudo) {
-188|             // Marquer l'utilisateur comme inactif (le nettoyeur le supprimera)
-189|             user.lastSeen = Date.now() - INACTIVITY_THRESHOLD - 1000;
-190|             console.log(`🔌 Déconnexion détectée: ${user.pseudo}, marqué comme inactif`);
-191|             return user.pseudo;
-192|         }
-193|         return null;
-194|     }
-195| 
-196|     // ============================================================
-197|     // 5. HEARTBEAT (mise à jour de l'activité)
-198|     // ============================================================
-199|     function updateActivity(socketId) {
-200|         if (users[socketId]) {
-201|             users[socketId].lastSeen = Date.now();
-202|             // Si l'utilisateur était marqué, on annule le marquage
-203|             if (users[socketId].markedForDeletion) {
-204|                 delete users[socketId].markedForDeletion;
-205|                 delete users[socketId].markedForDeletionTime;
-206|             }
-207|             return true;
-208|         }
-209|         return false;
-210|     }
-211| 
-212|     // ============================================================
-213|     // 6. EXPORT DES FONCTIONS
-214|     // ============================================================
-215|     return {
-216|         startCleanup,
-217|         markForDeletion,
-218|         deleteUser,
-219|         handleDisconnect,
-220|         updateActivity
-221|     };
-222| };
+100|         try {
+101|             // Récupérer le socket_id depuis la base
+102|             const result = await pool.query(
+103|                 'SELECT socket_id FROM users WHERE pseudo = $1 AND socket_id IS NOT NULL',
+104|                 [pseudo]
+105|             );
+106| 
+107|             if (result.rows.length > 0) {
+108|                 const socketId = result.rows[0].socket_id;
+109|                 const socket = io.sockets.sockets.get(socketId);
+110|                 if (socket) {
+111|                     socket.emit('force logout', { reason: reason });
+112|                     console.log(`🚪 Force logout envoyé à ${pseudo}`);
+113|                     return true;
+114|                 }
+115|             }
+116|             console.log(`⚠️ Utilisateur ${pseudo} non trouvé pour force logout`);
+117|             return false;
+118|         } catch (err) {
+119|             console.error('❌ Erreur force logout:', err.message);
+120|             return false;
+121|         }
+122|     }
+123| 
+124|     // ============================================================
+125|     // 5. GESTION DÉCONNEXION SOCKET.IO (disconnect)
+126|     // ============================================================
+127|     async function handleDisconnect(socketId) {
+128|         try {
+129|             // Récupérer le pseudo depuis la base
+130|             const result = await pool.query(
+131|                 'SELECT pseudo FROM users WHERE socket_id = $1',
+132|                 [socketId]
+133|             );
+134| 
+135|             if (result.rows.length > 0) {
+136|                 const pseudo = result.rows[0].pseudo;
+137|                 // Mettre last_seen à une date ancienne pour que le nettoyeur le supprime
+138|                 await pool.query(
+139|                     `UPDATE users SET last_seen = NOW() - INTERVAL '15 minutes', socket_id = NULL WHERE socket_id = $1`,
+140|                     [socketId]
+141|                 );
+142|                 console.log(`🔌 Déconnexion détectée: ${pseudo}, marqué comme inactif`);
+143|                 return pseudo;
+144|             }
+145|             return null;
+146|         } catch (err) {
+147|             console.error('❌ Erreur handleDisconnect:', err.message);
+148|             return null;
+149|         }
+150|     }
+151| 
+152|     // ============================================================
+153|     // 6. HEARTBEAT (mise à jour de l'activité)
+154|     // ============================================================
+155|     async function updateActivity(socketId) {
+156|         try {
+157|             const result = await pool.query(
+158|                 `UPDATE users SET last_seen = NOW() WHERE socket_id = $1 RETURNING pseudo`,
+159|                 [socketId]
+160|             );
+161|             if (result.rows.length > 0) {
+162|                 return true;
+163|             }
+164|             return false;
+165|         } catch (err) {
+166|             console.error('❌ Erreur updateActivity:', err.message);
+167|             return false;
+168|         }
+169|     }
+170| 
+171|     // ============================================================
+172|     // 7. EXPORT DES FONCTIONS
+173|     // ============================================================
+174|     return {
+175|         startCleanup,
+176|         markForDeletion,
+177|         deleteUser,
+178|         handleDisconnect,
+179|         updateActivity,
+180|         forceLogout
+181|     };
+182| };
 
 # ============================================
 # FILE: modules\cleanup.js
