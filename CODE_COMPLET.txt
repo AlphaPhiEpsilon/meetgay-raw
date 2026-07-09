@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET
-# Généré le 2026-07-09 23:10:24
+# Généré le 2026-07-09 23:32:22
 # 7 fichier(s) inclus
 
 # ========== SOMMAIRE ==========
@@ -296,238 +296,280 @@
 278|             }
 279|         });
 280| 
-281| 
-282|         socket.on('private message', async (data) => {
-283|             const { toSocketId, message, fromPseudo } = data;
-284| 
-285|             try {
-286|                 // 1. Vérifier si le destinataire a un socket_id
-287|                 const result = await pool.query(
-288|                     'SELECT socket_id FROM users WHERE pseudo = $1',
-289|                     [toSocketId]
-290|                 );
-291| 
-292|                 if (result.rows.length === 0) {
-293|                     socket.emit('error', { message: 'Utilisateur non trouvé' });
-294|                     return;
-295|                 }
-296| 
-297|                 const targetSocketId = result.rows[0].socket_id;
-298| 
-299|                 // 2. VÉRIFIER SI LE SOCKET EST VRAIMENT ACTIF
-300|                 let socketActive = false;
-301|                 if (targetSocketId) {
-302|                     const targetSocket = io.sockets.sockets.get(targetSocketId);
-303|                     socketActive = !!targetSocket; // true si le socket existe vraiment
-304|                 }
-305| 
-306|                 if (socketActive) {
-307|                     // ✅ DESTINATAIRE CONNECTÉ → ENVOI IMMÉDIAT
-308|                     io.to(targetSocketId).emit('private message received', {
-309|                         fromPseudo: fromPseudo,
-310|                         fromSocketId: socket.id,
-311|                         message: message,
-312|                         timestamp: new Date(),
-313|                         isPending: false // Flag : message normal
-314|                     });
-315| 
-316|                     socket.emit('message sent confirmation', {
-317|                         message: message,
-318|                         toPseudo: toSocketId,
-319|                         timestamp: new Date()
-320|                     });
-321| 
-322|                     console.log(`💬 Message de ${fromPseudo} à ${toSocketId} envoyé immédiatement`);
-323|                 } else {
-324|                     // ❌ DESTINATAIRE EN VEILLE OU DÉCONNECTÉ → STOCKER EN PENDING
-325|                     await pool.query(
-326|                         'INSERT INTO pending_messages (from_pseudo, to_pseudo, message) VALUES ($1, $2, $3)',
-327|                         [fromPseudo, toSocketId, message]
-328|                     );
-329| 
-330|                     console.log(`📦 Message de ${fromPseudo} à ${toSocketId} stocké en pending (veille)`);
-331| 
-332|                     socket.emit('message sent confirmation', {
-333|                         message: message,
-334|                         toPseudo: toSocketId,
-335|                         timestamp: new Date(),
-336|                         pending: true
-337|                     });
-338|                 }
-339|             } catch (err) {
-340|                 console.error('❌ Erreur message privé:', err.message);
-341|                 socket.emit('error', { message: 'Erreur lors de l\'envoi du message' });
-342|             }
-343|         });
-344| 
-345| 
-346| 
-347|         /*socket.on('get users list', () => {
-348|             const usersList = Object.values(users).sort((a, b) => (b.firstConnectedAt || 0) - (a.firstConnectedAt || 0)).map(u => ({
-349|                 pseudo: u.pseudo,
-350|                 age: u.age,
-351|                 origine: (u.origine && u.origine !== 'undefined' && u.origine !== 'null') ? u.origine : 'NC',
-352|                 tendencies: u.tendencies,
-353|                 gender: u.gender,
-354|                 purpose: u.purpose,
-355|                 bio: u.bio || 'Aucune présentation',
-356|                 locationCity: u.locationCity || null,
-357|                 locationCommune: u.locationCommune || null,
-358|                 locationPostalCode: u.locationPostalCode || null,
-359|                 locationProvince: u.locationProvince || null,
-360|                 locationRegion: u.locationRegion || null,
-361|                 locationCountry: u.locationCountry || null,
-362|                 locationNeighborhood: u.locationNeighborhood || null,
-363|                 locationPostcodeLocalities: u.locationPostcodeLocalities || null,
-364|                 locationSublocalityLevel1: u.locationSublocalityLevel1 || null,
-365|                 locationSublocalityLevel2: u.locationSublocalityLevel2 || null,
-366|                 locationSublocalityLevel3: u.locationSublocalityLevel3 || null,
-367|                 locationSublocalityLevel4: u.locationSublocalityLevel4 || null,
-368|                 locationSublocalityLevel5: u.locationSublocalityLevel5 || null,
-369|                 locationAdminLevel3: u.locationAdminLevel3 || null,
-370|                 locationAdminLevel4: u.locationAdminLevel4 || null,
-371|                 locationAdminLevel5: u.locationAdminLevel5 || null,
-372|                 locationAdminLevel6: u.locationAdminLevel6 || null,
-373|                 locationAdminLevel7: u.locationAdminLevel7 || null,
-374|                 locationColloquialArea: u.locationColloquialArea || null,
-375|                 locationIntersection: u.locationIntersection || null,
-376|                 locationLat: u.locationLat || null,
-377|                 locationLng: u.locationLng || null,
-378|                 socketId: u.socketId,
-379|                 connectedAt: u.connectedAt || 0
-380|             }));
-381|             socket.emit('update users', usersList);
-382|         });*/
-383| 
-384|         // Gestion des signalements utilisateur
-385|         socket.on('report user', async (data) => {
-386|             const { targetPseudo } = data;
+281|         // ========== RÉCUPÉRATION MANUELLE DES MESSAGES EN ATTENTE ==========
+282|         socket.on('check-pending', async (data) => {
+283|             const { pseudo } = data;
+284|             if (!pseudo) {
+285|                 console.log('❌ check-pending sans pseudo');
+286|                 return;
+287|             }
+288| 
+289|             try {
+290|                 const pendingResult = await pool.query(
+291|                     'SELECT from_pseudo, message, created_at FROM pending_messages WHERE to_pseudo = $1 ORDER BY created_at ASC',
+292|                     [pseudo]
+293|                 );
+294| 
+295|                 if (pendingResult.rows.length > 0) {
+296|                     console.log(`📨 ${pendingResult.rows.length} message(s) en attente pour ${pseudo}`);
+297| 
+298|                     for (const msg of pendingResult.rows) {
+299|                         socket.emit('private message received', {
+300|                             fromPseudo: msg.from_pseudo,
+301|                             message: msg.message,
+302|                             timestamp: msg.created_at,
+303|                             isPending: true
+304|                         });
+305|                     }
+306| 
+307|                     // 🔔 ALERTE PENDING (son + enveloppe)
+308|                     socket.emit('pending_alert', {
+309|                         count: pendingResult.rows.length
+310|                     });
+311| 
+312|                     await pool.query(
+313|                         'DELETE FROM pending_messages WHERE to_pseudo = $1',
+314|                         [pseudo]
+315|                     );
+316| 
+317|                     console.log(`🗑️ Messages en attente supprimés pour ${pseudo}`);
+318|                 }
+319|             } catch (err) {
+320|                 console.error('❌ Erreur check-pending:', err.message);
+321|             }
+322|         });
+323| 
+324|         socket.on('private message', async (data) => {
+325|             const { toSocketId, message, fromPseudo } = data;
+326| 
+327|             try {
+328|                 // 1. Vérifier si le destinataire a un socket_id
+329|                 const result = await pool.query(
+330|                     'SELECT socket_id FROM users WHERE pseudo = $1',
+331|                     [toSocketId]
+332|                 );
+333| 
+334|                 if (result.rows.length === 0) {
+335|                     socket.emit('error', { message: 'Utilisateur non trouvé' });
+336|                     return;
+337|                 }
+338| 
+339|                 const targetSocketId = result.rows[0].socket_id;
+340| 
+341|                 // 2. VÉRIFIER SI LE SOCKET EST VRAIMENT ACTIF
+342|                 let socketActive = false;
+343|                 if (targetSocketId) {
+344|                     const targetSocket = io.sockets.sockets.get(targetSocketId);
+345|                     socketActive = !!targetSocket; // true si le socket existe vraiment
+346|                 }
+347| 
+348|                 if (socketActive) {
+349|                     // ✅ DESTINATAIRE CONNECTÉ → ENVOI IMMÉDIAT
+350|                     io.to(targetSocketId).emit('private message received', {
+351|                         fromPseudo: fromPseudo,
+352|                         fromSocketId: socket.id,
+353|                         message: message,
+354|                         timestamp: new Date(),
+355|                         isPending: false // Flag : message normal
+356|                     });
+357| 
+358|                     socket.emit('message sent confirmation', {
+359|                         message: message,
+360|                         toPseudo: toSocketId,
+361|                         timestamp: new Date()
+362|                     });
+363| 
+364|                     console.log(`💬 Message de ${fromPseudo} à ${toSocketId} envoyé immédiatement`);
+365|                 } else {
+366|                     // ❌ DESTINATAIRE EN VEILLE OU DÉCONNECTÉ → STOCKER EN PENDING
+367|                     await pool.query(
+368|                         'INSERT INTO pending_messages (from_pseudo, to_pseudo, message) VALUES ($1, $2, $3)',
+369|                         [fromPseudo, toSocketId, message]
+370|                     );
+371| 
+372|                     console.log(`📦 Message de ${fromPseudo} à ${toSocketId} stocké en pending (veille)`);
+373| 
+374|                     socket.emit('message sent confirmation', {
+375|                         message: message,
+376|                         toPseudo: toSocketId,
+377|                         timestamp: new Date(),
+378|                         pending: true
+379|                     });
+380|                 }
+381|             } catch (err) {
+382|                 console.error('❌ Erreur message privé:', err.message);
+383|                 socket.emit('error', { message: 'Erreur lors de l\'envoi du message' });
+384|             }
+385|         });
+386| 
 387| 
-388|             // Récupérer le pseudo du signaleur depuis users[socket.id]
-389|             // Récupérer le pseudo du signaleur depuis la base
-390|             let reporterPseudo;
-391|             try {
-392|                 const result = await pool.query(
-393|                     'SELECT pseudo FROM users WHERE socket_id = $1',
-394|                     [socket.id]
-395|                 );
-396|                 if (result.rows.length === 0) {
-397|                     socket.emit('report_error', { error: 'Utilisateur non identifié' });
-398|                     return;
-399|                 }
-400|                 reporterPseudo = result.rows[0].pseudo;
-401|             } catch (err) {
-402|                 console.error('❌ Erreur récupération reporter:', err.message);
-403|                 socket.emit('report_error', { error: 'Erreur serveur' });
-404|                 return;
-405|             }
-406| 
-407|             if (!targetPseudo || targetPseudo === reporterPseudo) {
-408|                 socket.emit('report_error', { error: 'Signalement invalide' });
-409|                 return;
-410|             }
-411| 
-412|             try {
-413|                 // 1. Insérer le signalement
-414|                 await pool.query(
-415|                     'INSERT INTO reports (reporter_pseudo, target_pseudo) VALUES ($1, $2)',
-416|                     [reporterPseudo, targetPseudo]
-417|                 );
-418| 
-419|                 // 2. Utiliser les constantes de server.js
-420|                 const threshold = REPORTS_THRESHOLD;
-421| 
-422|                 // 3. Récupérer la date de fin du dernier ban (si existe)
-423|                 const lastBan = await pool.query(
-424|                     `SELECT expires_at FROM temp_bans 
-425|                     WHERE user_pseudo = $1 
-426|                     ORDER BY expires_at DESC LIMIT 1`,
-427|                     [targetPseudo]
-428|                 );
+388| 
+389|         /*socket.on('get users list', () => {
+390|             const usersList = Object.values(users).sort((a, b) => (b.firstConnectedAt || 0) - (a.firstConnectedAt || 0)).map(u => ({
+391|                 pseudo: u.pseudo,
+392|                 age: u.age,
+393|                 origine: (u.origine && u.origine !== 'undefined' && u.origine !== 'null') ? u.origine : 'NC',
+394|                 tendencies: u.tendencies,
+395|                 gender: u.gender,
+396|                 purpose: u.purpose,
+397|                 bio: u.bio || 'Aucune présentation',
+398|                 locationCity: u.locationCity || null,
+399|                 locationCommune: u.locationCommune || null,
+400|                 locationPostalCode: u.locationPostalCode || null,
+401|                 locationProvince: u.locationProvince || null,
+402|                 locationRegion: u.locationRegion || null,
+403|                 locationCountry: u.locationCountry || null,
+404|                 locationNeighborhood: u.locationNeighborhood || null,
+405|                 locationPostcodeLocalities: u.locationPostcodeLocalities || null,
+406|                 locationSublocalityLevel1: u.locationSublocalityLevel1 || null,
+407|                 locationSublocalityLevel2: u.locationSublocalityLevel2 || null,
+408|                 locationSublocalityLevel3: u.locationSublocalityLevel3 || null,
+409|                 locationSublocalityLevel4: u.locationSublocalityLevel4 || null,
+410|                 locationSublocalityLevel5: u.locationSublocalityLevel5 || null,
+411|                 locationAdminLevel3: u.locationAdminLevel3 || null,
+412|                 locationAdminLevel4: u.locationAdminLevel4 || null,
+413|                 locationAdminLevel5: u.locationAdminLevel5 || null,
+414|                 locationAdminLevel6: u.locationAdminLevel6 || null,
+415|                 locationAdminLevel7: u.locationAdminLevel7 || null,
+416|                 locationColloquialArea: u.locationColloquialArea || null,
+417|                 locationIntersection: u.locationIntersection || null,
+418|                 locationLat: u.locationLat || null,
+419|                 locationLng: u.locationLng || null,
+420|                 socketId: u.socketId,
+421|                 connectedAt: u.connectedAt || 0
+422|             }));
+423|             socket.emit('update users', usersList);
+424|         });*/
+425| 
+426|         // Gestion des signalements utilisateur
+427|         socket.on('report user', async (data) => {
+428|             const { targetPseudo } = data;
 429| 
-430|                 let sinceDate = `NOW() - INTERVAL '${REPORTS_WINDOW_MINUTES} minutes'`;
-431|                 if (lastBan.rows.length > 0) {
-432|                     const lastBanExpiry = lastBan.rows[0].expires_at;
-433|                     // Prendre la date la plus récente entre la fin du dernier ban et la fenêtre
-434|                     sinceDate = `GREATEST(NOW() - INTERVAL '${REPORTS_WINDOW_MINUTES} minutes', '${lastBanExpiry.toISOString()}')`;
-435|                 }
-436| 
-437|                 const countRes = await pool.query(
-438|                     `SELECT COUNT(DISTINCT reporter_pseudo) FROM reports 
-439|                     WHERE target_pseudo = $1 
-440|                     AND created_at > ${sinceDate}`,
-441|                     [targetPseudo]
-442|                 );
-443|                 const reportCount = parseInt(countRes.rows[0].count);
-444| 
-445|                 // 4. Confirmation au signaleur
-446|                 socket.emit('report_confirmation', {
-447|                     targetPseudo,
-448|                     reportCount,
-449|                     threshold,
-450|                     willTrigger: reportCount >= threshold
-451|                 });
-452| 
-453|                 // 5. Si seuil atteint, déclencher temp_ban (10 minutes)
-454|                 if (reportCount >= threshold) {
-455|                     const expiresAt = new Date(Date.now() + TEMP_BAN_MINUTES * 60 * 1000);
-456| 
-457|                     await pool.query(
-458|                         `INSERT INTO temp_bans (user_pseudo, expires_at, reason) 
-459|                          VALUES ($1, $2, $3)
-460|                          ON CONFLICT (user_pseudo) DO UPDATE 
-461|                          SET expires_at = EXCLUDED.expires_at, reason = EXCLUDED.reason`,
-462|                         [targetPseudo, expiresAt, `${reportCount} signalements reçus`]
-463|                     );
-464| 
-465|                     // Journaliser l'action
-466|                     await pool.query(
-467|                         `INSERT INTO moderation_actions (admin_pseudo, action_type, target_pseudo, duration_minutes, reason)
-468|                          VALUES ('SYSTEM', 'temp_ban', $1, 10, $2)`,
-469|                         [targetPseudo, `Ban auto après ${reportCount} signalements`]
-470|                     );
+430|             // Récupérer le pseudo du signaleur depuis users[socket.id]
+431|             // Récupérer le pseudo du signaleur depuis la base
+432|             let reporterPseudo;
+433|             try {
+434|                 const result = await pool.query(
+435|                     'SELECT pseudo FROM users WHERE socket_id = $1',
+436|                     [socket.id]
+437|                 );
+438|                 if (result.rows.length === 0) {
+439|                     socket.emit('report_error', { error: 'Utilisateur non identifié' });
+440|                     return;
+441|                 }
+442|                 reporterPseudo = result.rows[0].pseudo;
+443|             } catch (err) {
+444|                 console.error('❌ Erreur récupération reporter:', err.message);
+445|                 socket.emit('report_error', { error: 'Erreur serveur' });
+446|                 return;
+447|             }
+448| 
+449|             if (!targetPseudo || targetPseudo === reporterPseudo) {
+450|                 socket.emit('report_error', { error: 'Signalement invalide' });
+451|                 return;
+452|             }
+453| 
+454|             try {
+455|                 // 1. Insérer le signalement
+456|                 await pool.query(
+457|                     'INSERT INTO reports (reporter_pseudo, target_pseudo) VALUES ($1, $2)',
+458|                     [reporterPseudo, targetPseudo]
+459|                 );
+460| 
+461|                 // 2. Utiliser les constantes de server.js
+462|                 const threshold = REPORTS_THRESHOLD;
+463| 
+464|                 // 3. Récupérer la date de fin du dernier ban (si existe)
+465|                 const lastBan = await pool.query(
+466|                     `SELECT expires_at FROM temp_bans 
+467|                     WHERE user_pseudo = $1 
+468|                     ORDER BY expires_at DESC LIMIT 1`,
+469|                     [targetPseudo]
+470|                 );
 471| 
-472|                     // Déconnecter l'utilisateur cible s'il est connecté
-473|                     let targetSocketId = null;
-474|                     try {
-475|                         const targetResult = await pool.query(
-476|                             'SELECT socket_id FROM users WHERE pseudo = $1 AND socket_id IS NOT NULL',
-477|                             [targetPseudo]
-478|                         );
-479|                         if (targetResult.rows.length > 0) {
-480|                             targetSocketId = targetResult.rows[0].socket_id;
-481|                             io.to(targetSocketId).emit('force logout', {
-482|                                 reason: `Vous avez été banni temporairement (10 minutes) pour comportement abusif.`
-483|                             });
-484|                         }
-485|                     } catch (err) {
-486|                         console.error('❌ Erreur récupération socket cible:', err.message);
-487|                     }
-488| 
-489|                     // Notifier tous les admins connectés (optionnel)
-490|                     io.emit('new_report_auto_ban', {
-491|                         targetPseudo,
-492|                         reportCount,
-493|                         duration: 10
-494|                     });
-495| 
-496|                     console.log(`🔨 Auto-ban: ${targetPseudo} banni 10 min (${reportCount} signalements)`);
-497|                 }
-498|             } catch (err) {
-499|                 console.error('Erreur lors du signalement:', err);
-500|                 socket.emit('report_error', { error: 'Erreur serveur' });
-501|             }
-502|         });
-503| 
-504|         socket.on('disconnect', () => {
-505|             console.log(`🔌 Déconnexion socket ${socket.id} (ignorée, l'utilisateur reste connecté en base)`);
-506|             // NE RIEN FAIRE - on laisse le socket_id en base
-507|         });
-508| 
-509|     });
-510| 
-511| 
-512| };
+472|                 let sinceDate = `NOW() - INTERVAL '${REPORTS_WINDOW_MINUTES} minutes'`;
+473|                 if (lastBan.rows.length > 0) {
+474|                     const lastBanExpiry = lastBan.rows[0].expires_at;
+475|                     // Prendre la date la plus récente entre la fin du dernier ban et la fenêtre
+476|                     sinceDate = `GREATEST(NOW() - INTERVAL '${REPORTS_WINDOW_MINUTES} minutes', '${lastBanExpiry.toISOString()}')`;
+477|                 }
+478| 
+479|                 const countRes = await pool.query(
+480|                     `SELECT COUNT(DISTINCT reporter_pseudo) FROM reports 
+481|                     WHERE target_pseudo = $1 
+482|                     AND created_at > ${sinceDate}`,
+483|                     [targetPseudo]
+484|                 );
+485|                 const reportCount = parseInt(countRes.rows[0].count);
+486| 
+487|                 // 4. Confirmation au signaleur
+488|                 socket.emit('report_confirmation', {
+489|                     targetPseudo,
+490|                     reportCount,
+491|                     threshold,
+492|                     willTrigger: reportCount >= threshold
+493|                 });
+494| 
+495|                 // 5. Si seuil atteint, déclencher temp_ban (10 minutes)
+496|                 if (reportCount >= threshold) {
+497|                     const expiresAt = new Date(Date.now() + TEMP_BAN_MINUTES * 60 * 1000);
+498| 
+499|                     await pool.query(
+500|                         `INSERT INTO temp_bans (user_pseudo, expires_at, reason) 
+501|                          VALUES ($1, $2, $3)
+502|                          ON CONFLICT (user_pseudo) DO UPDATE 
+503|                          SET expires_at = EXCLUDED.expires_at, reason = EXCLUDED.reason`,
+504|                         [targetPseudo, expiresAt, `${reportCount} signalements reçus`]
+505|                     );
+506| 
+507|                     // Journaliser l'action
+508|                     await pool.query(
+509|                         `INSERT INTO moderation_actions (admin_pseudo, action_type, target_pseudo, duration_minutes, reason)
+510|                          VALUES ('SYSTEM', 'temp_ban', $1, 10, $2)`,
+511|                         [targetPseudo, `Ban auto après ${reportCount} signalements`]
+512|                     );
+513| 
+514|                     // Déconnecter l'utilisateur cible s'il est connecté
+515|                     let targetSocketId = null;
+516|                     try {
+517|                         const targetResult = await pool.query(
+518|                             'SELECT socket_id FROM users WHERE pseudo = $1 AND socket_id IS NOT NULL',
+519|                             [targetPseudo]
+520|                         );
+521|                         if (targetResult.rows.length > 0) {
+522|                             targetSocketId = targetResult.rows[0].socket_id;
+523|                             io.to(targetSocketId).emit('force logout', {
+524|                                 reason: `Vous avez été banni temporairement (10 minutes) pour comportement abusif.`
+525|                             });
+526|                         }
+527|                     } catch (err) {
+528|                         console.error('❌ Erreur récupération socket cible:', err.message);
+529|                     }
+530| 
+531|                     // Notifier tous les admins connectés (optionnel)
+532|                     io.emit('new_report_auto_ban', {
+533|                         targetPseudo,
+534|                         reportCount,
+535|                         duration: 10
+536|                     });
+537| 
+538|                     console.log(`🔨 Auto-ban: ${targetPseudo} banni 10 min (${reportCount} signalements)`);
+539|                 }
+540|             } catch (err) {
+541|                 console.error('Erreur lors du signalement:', err);
+542|                 socket.emit('report_error', { error: 'Erreur serveur' });
+543|             }
+544|         });
+545| 
+546|         socket.on('disconnect', () => {
+547|             console.log(`🔌 Déconnexion socket ${socket.id} (ignorée, l'utilisateur reste connecté en base)`);
+548|             // NE RIEN FAIRE - on laisse le socket_id en base
+549|         });
+550| 
+551|     });
+552| 
+553| 
+554| };
 
 # ============================================
 # FILE: public\js\chat.js
@@ -553,1261 +595,1288 @@
 18|     audio.play().catch(() => { });
 19| }
 20| 
-21| // ========== FONCTION POUR FAIRE CLIGNOTER L'ENVELOPPE ==========
-22| function triggerEnvelopeAnimation() {
-23|     const envelope = document.getElementById('envelope');
-24|     if (envelope) {
-25|         envelope.classList.add('blink');
-26|         // Si cliqué, arrêter le clignotement
-27|         envelope.onclick = function () {
-28|             this.classList.remove('blink');
-29|             // Ouvrir le chat si nécessaire
-30|             if (typeof openChat === 'function') {
-31|                 openChat();
-32|             }
-33|         };
-34|     } else {
-35|         console.log('⚠️ Enveloppe non trouvée');
+21| 
+22| // Mettre à jour l'icône du son dans le header
+23| function updateSoundIcon() {
+24|     const soundEnabled = localStorage.getItem('messageSoundEnabled') !== 'false';
+25|     const icon = document.getElementById('soundStatusIcon');
+26|     if (!icon) {
+27|         // Créer l'icône si elle n'existe pas
+28|         const settingsBtn = document.getElementById('settingsBtn');
+29|         if (settingsBtn) {
+30|             const soundIcon = document.createElement('span');
+31|             soundIcon.id = 'soundStatusIcon';
+32|             soundIcon.style.fontSize = '0.7rem';
+33|             soundIcon.style.marginLeft = '2px';
+34|             settingsBtn.appendChild(soundIcon);
+35|         }
 36|     }
-37| }
-38| 
-39| 
-40| 
-41| // Mettre à jour l'icône du son dans le header
-42| function updateSoundIcon() {
-43|     const soundEnabled = localStorage.getItem('messageSoundEnabled') !== 'false';
-44|     const icon = document.getElementById('soundStatusIcon');
-45|     if (!icon) {
-46|         // Créer l'icône si elle n'existe pas
-47|         const settingsBtn = document.getElementById('settingsBtn');
-48|         if (settingsBtn) {
-49|             const soundIcon = document.createElement('span');
-50|             soundIcon.id = 'soundStatusIcon';
-51|             soundIcon.style.fontSize = '0.7rem';
-52|             soundIcon.style.marginLeft = '2px';
-53|             settingsBtn.appendChild(soundIcon);
-54|         }
-55|     }
-56|     const iconEl = document.getElementById('soundStatusIcon');
-57|     if (iconEl) {
-58|         iconEl.textContent = soundEnabled ? ' 🔊' : ' 🔇';
-59|     }
-60| }
-61| 
-62| // ========== GESTION DES BLOCAGES (BASE DE DONNÉES) ==========
-63| 
-64| // Mettre à jour la liste des bloqués dans le panel
-65| function updateBlockedList() {
-66|     const list = document.getElementById('blockedList');
-67|     const count = document.getElementById('blockedCount');
-68|     if (!list) return;
-69| 
-70|     const blocked = window.blockedUsers || [];
-71|     if (count) count.textContent = blocked.length;
-72| 
-73|     if (blocked.length === 0) {
-74|         list.innerHTML = 'Aucun utilisateur bloqué';
-75|         return;
-76|     }
-77| 
-78|     list.innerHTML = blocked.map(pseudo => `
-79|         <div style="display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid #333;">
-80|             <span>${escapeHtml(pseudo)}</span>
-81|             <span style="color: #ff6b6b; cursor: pointer;" onclick="unblockUser('${pseudo}')">Débloquer</span>
-82|         </div>
-83|     `).join('');
-84| }
-85| 
-86| // Charger la liste des bloqués depuis la base
-87| async function loadBlockedUsers() {
-88|     console.log('🔍 loadBlockedUsers appelée, user.pseudo =', user?.pseudo);  // ← LOG
-89|     try {
-90|         const response = await fetch('/api/blocked-list', {
-91|             method: 'POST',
-92|             headers: { 'Content-Type': 'application/json' },
-93|             body: JSON.stringify({ pseudo: user.pseudo })
-94|         });
-95|         const data = await response.json();
-96|         console.log('📥 Réponse de /api/blocked-list:', data);  // ← LOG
-97|         if (data.success) {
-98|             window.blockedUsers = data.blocked || [];
-99|             console.log('🔒 Bloques chargés depuis la base:', window.blockedUsers);
-100|             updateBlockedList();
-101|             window.fetchActiveUsers();
-102|         }
-103|     } catch (err) {
-104|         console.error('❌ Erreur chargement bloqués:', err);
-105|         window.blockedUsers = [];
-106|     }
-107| }
-108| 
-109| // Bloquer un utilisateur
-110| window.blockUser = async function (pseudo) {
-111|     console.log('🔥 blockUser appelée pour', pseudo);
-112| 
-113|     if (pseudo === user.pseudo) {
-114|         alert('Vous ne pouvez pas vous bloquer vous-même.');
-115|         return;
-116|     }
-117| 
-118|     if (window.blockedUsers.includes(pseudo)) {
-119|         alert(`${pseudo} est déjà bloqué.`);
-120|         return;
-121|     }
-122| 
-123|     try {
-124|         console.log('📤 Appel à /api/block avec:', { blocker: user.pseudo, blocked: pseudo });
-125|         const response = await fetch('/api/block', {
-126|             method: 'POST',
-127|             headers: { 'Content-Type': 'application/json' },
-128|             body: JSON.stringify({ blocker: user.pseudo, blocked: pseudo })
-129|         });
-130|         const data = await response.json();
-131|         console.log('📥 Réponse de /api/block:', data);
-132| 
-133|         if (data.success) {
-134|             window.blockedUsers.push(pseudo);
-135|             updateBlockedList();
-136|             if (currentTargetName === pseudo) {
-137|                 messageInput.disabled = true;
-138|                 sendBtn.disabled = true;
-139|                 messageInput.placeholder = `🔇 ${pseudo} est bloqué. Débloquez-le dans les réglages.`;
+37|     const iconEl = document.getElementById('soundStatusIcon');
+38|     if (iconEl) {
+39|         iconEl.textContent = soundEnabled ? ' 🔊' : ' 🔇';
+40|     }
+41| }
+42| 
+43| // ========== GESTION DES BLOCAGES (BASE DE DONNÉES) ==========
+44| 
+45| // Mettre à jour la liste des bloqués dans le panel
+46| function updateBlockedList() {
+47|     const list = document.getElementById('blockedList');
+48|     const count = document.getElementById('blockedCount');
+49|     if (!list) return;
+50| 
+51|     const blocked = window.blockedUsers || [];
+52|     if (count) count.textContent = blocked.length;
+53| 
+54|     if (blocked.length === 0) {
+55|         list.innerHTML = 'Aucun utilisateur bloqué';
+56|         return;
+57|     }
+58| 
+59|     list.innerHTML = blocked.map(pseudo => `
+60|         <div style="display: flex; justify-content: space-between; padding: 3px 0; border-bottom: 1px solid #333;">
+61|             <span>${escapeHtml(pseudo)}</span>
+62|             <span style="color: #ff6b6b; cursor: pointer;" onclick="unblockUser('${pseudo}')">Débloquer</span>
+63|         </div>
+64|     `).join('');
+65| }
+66| 
+67| // Charger la liste des bloqués depuis la base
+68| async function loadBlockedUsers() {
+69|     console.log('🔍 loadBlockedUsers appelée, user.pseudo =', user?.pseudo);  // ← LOG
+70|     try {
+71|         const response = await fetch('/api/blocked-list', {
+72|             method: 'POST',
+73|             headers: { 'Content-Type': 'application/json' },
+74|             body: JSON.stringify({ pseudo: user.pseudo })
+75|         });
+76|         const data = await response.json();
+77|         console.log('📥 Réponse de /api/blocked-list:', data);  // ← LOG
+78|         if (data.success) {
+79|             window.blockedUsers = data.blocked || [];
+80|             console.log('🔒 Bloques chargés depuis la base:', window.blockedUsers);
+81|             updateBlockedList();
+82|             window.fetchActiveUsers();
+83|         }
+84|     } catch (err) {
+85|         console.error('❌ Erreur chargement bloqués:', err);
+86|         window.blockedUsers = [];
+87|     }
+88| }
+89| 
+90| // Bloquer un utilisateur
+91| window.blockUser = async function (pseudo) {
+92|     console.log('🔥 blockUser appelée pour', pseudo);
+93| 
+94|     if (pseudo === user.pseudo) {
+95|         alert('Vous ne pouvez pas vous bloquer vous-même.');
+96|         return;
+97|     }
+98| 
+99|     if (window.blockedUsers.includes(pseudo)) {
+100|         alert(`${pseudo} est déjà bloqué.`);
+101|         return;
+102|     }
+103| 
+104|     try {
+105|         console.log('📤 Appel à /api/block avec:', { blocker: user.pseudo, blocked: pseudo });
+106|         const response = await fetch('/api/block', {
+107|             method: 'POST',
+108|             headers: { 'Content-Type': 'application/json' },
+109|             body: JSON.stringify({ blocker: user.pseudo, blocked: pseudo })
+110|         });
+111|         const data = await response.json();
+112|         console.log('📥 Réponse de /api/block:', data);
+113| 
+114|         if (data.success) {
+115|             window.blockedUsers.push(pseudo);
+116|             updateBlockedList();
+117|             if (currentTargetName === pseudo) {
+118|                 messageInput.disabled = true;
+119|                 sendBtn.disabled = true;
+120|                 messageInput.placeholder = `🔇 ${pseudo} est bloqué. Débloquez-le dans les réglages.`;
+121|             }
+122|             window.fetchActiveUsers();
+123|             console.log(`🔒 ${pseudo} bloqué`);
+124|         } else {
+125|             // 🔥 NOUVEAU : Même si l'API retourne une erreur "Déjà bloqué", on met à jour l'interface
+126|             if (data.error === 'Déjà bloqué') {
+127|                 if (!window.blockedUsers.includes(pseudo)) {
+128|                     window.blockedUsers.push(pseudo);
+129|                     updateBlockedList();
+130|                     if (currentTargetName === pseudo) {
+131|                         messageInput.disabled = true;
+132|                         sendBtn.disabled = true;
+133|                         messageInput.placeholder = `🔇 ${pseudo} est bloqué. Débloquez-le dans les réglages.`;
+134|                     }
+135|                     window.fetchActiveUsers();
+136|                     console.log(`🔒 ${pseudo} déjà bloqué (interface synchronisée)`);
+137|                 }
+138|             } else {
+139|                 alert(data.error || 'Erreur lors du blocage');
 140|             }
-141|             window.fetchActiveUsers();
-142|             console.log(`🔒 ${pseudo} bloqué`);
-143|         } else {
-144|             // 🔥 NOUVEAU : Même si l'API retourne une erreur "Déjà bloqué", on met à jour l'interface
-145|             if (data.error === 'Déjà bloqué') {
-146|                 if (!window.blockedUsers.includes(pseudo)) {
-147|                     window.blockedUsers.push(pseudo);
-148|                     updateBlockedList();
-149|                     if (currentTargetName === pseudo) {
-150|                         messageInput.disabled = true;
-151|                         sendBtn.disabled = true;
-152|                         messageInput.placeholder = `🔇 ${pseudo} est bloqué. Débloquez-le dans les réglages.`;
-153|                     }
-154|                     window.fetchActiveUsers();
-155|                     console.log(`🔒 ${pseudo} déjà bloqué (interface synchronisée)`);
-156|                 }
-157|             } else {
-158|                 alert(data.error || 'Erreur lors du blocage');
-159|             }
-160|         }
-161|     } catch (err) {
-162|         console.error('❌ Erreur blocage:', err);
-163|         alert('Erreur lors du blocage');
-164|     }
-165| };
-166| 
-167| // Débloquer un utilisateur
-168| window.unblockUser = async function (pseudo) {
-169|     console.log('🔥 unblockUser appelée pour', pseudo);
-170|     try {
-171|         const response = await fetch('/api/unblock', {
-172|             method: 'POST',
-173|             headers: { 'Content-Type': 'application/json' },
-174|             body: JSON.stringify({ blocker: user.pseudo, blocked: pseudo })
-175|         });
-176|         const data = await response.json();
-177|         if (data.success) {
-178|             const index = window.blockedUsers.indexOf(pseudo);
-179|             if (index > -1) {
-180|                 window.blockedUsers.splice(index, 1);
-181|             }
-182|             updateBlockedList();
-183|             // Si c'était le contact actuel, réactiver l'envoi
-184|             if (currentTargetName === pseudo) {
-185|                 messageInput.disabled = false;
-186|                 sendBtn.disabled = false;
-187|                 messageInput.placeholder = `Message pour ${pseudo}...`;
-188|             }
-189|             // Rafraîchir la liste des utilisateurs
-190|             window.fetchActiveUsers();
-191|             console.log(`🔓 ${pseudo} débloqué`);
-192|         } else {
-193|             alert(data.error || 'Erreur lors du déblocage');
-194|         }
-195|     } catch (err) {
-196|         console.error('Erreur déblocage:', err);
-197|         alert('Erreur lors du déblocage');
-198|     }
-199| };
-200| 
-201| // ========== SYSTÈME DE MODAL (remplace MGp......) ==========
-202| (function () {
-203|     function createModalStructure() {
-204|         if (document.getElementById('mg-modal-container')) return;
-205| 
-206|         const modalHTML = `
-207| <div id="mg-modal-container" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 10000; justify-content: center; align-items: center;">
-208|     <div id="mg-modal-box" style="background: #1e1e2e; border-radius: 16px; padding: 24px; max-width: 380px; width: 85%; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.3); border: 1px solid #333; font-family: system-ui, -apple-system, sans-serif; transform: translateY(-50px); opacity: 0; transition: all 0.3s ease;">
-209|         <h3 id="mg-modal-title" style="margin: 0 0 12px 0; color: #ff6b6b; font-size: 1.3rem;">⚠️ Attention</h3>
-210|         <p id="mg-modal-message" style="margin: 0 0 20px 0; color: #ccc; font-size: 1rem; line-height: 1.5;">Message par défaut</p>
-211|         <div style="display: flex; gap: 12px; justify-content: center;">
-212|             <button id="mg-modal-cancel" style="background: #3a3a4a; border: none; padding: 10px 20px; border-radius: 8px; color: #ccc; cursor: pointer; font-size: 0.9rem;">Annuler</button>
-213|             <button id="mg-modal-confirm" style="background: #ff6b6b; border: none; padding: 10px 20px; border-radius: 8px; color: white; cursor: pointer; font-size: 0.9rem;">OK</button>
-214|         </div>
-215|     </div>
-216| </div>
-217| `;
-218| 
-219|         document.body.insertAdjacentHTML('beforeend', modalHTML);
-220|     }
-221| 
-222|     function setupButtons(onConfirm, onCancel) {
-223|         const confirmBtn = document.getElementById('mg-modal-confirm');
-224|         const cancelBtn = document.getElementById('mg-modal-cancel');
-225|         const container = document.getElementById('mg-modal-container');
-226| 
-227|         if (confirmBtn) {
-228|             const newConfirm = confirmBtn.cloneNode(true);
-229|             confirmBtn.parentNode.replaceChild(newConfirm, confirmBtn);
-230|             newConfirm.onclick = () => {
-231|                 container.style.display = 'none';
-232|                 if (onConfirm) onConfirm();
-233|             };
-234|         }
-235| 
-236|         if (cancelBtn) {
-237|             const newCancel = cancelBtn.cloneNode(true);
-238|             cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
-239|             newCancel.onclick = () => {
-240|                 container.style.display = 'none';
-241|                 if (onCancel) onCancel();
-242|             };
-243|         }
-244| 
-245|         container.onclick = (e) => {
-246|             if (e.target === container) {
-247|                 container.style.display = 'none';
-248|                 if (onCancel) onCancel();
-249|             }
-250|         };
-251|     }
-252| 
-253|     window.MGModal = {
-254|         show: function (options) {
-255|             createModalStructure();
-256| 
-257|             const container = document.getElementById('mg-modal-container');
-258|             const box = document.getElementById('mg-modal-box');
-259|             const titleEl = document.getElementById('mg-modal-title');
-260|             const messageEl = document.getElementById('mg-modal-message');
-261| 
-262|             titleEl.textContent = options.title || '⚠️ Attention';
-263|             messageEl.textContent = options.message || 'Message par défaut';
+141|         }
+142|     } catch (err) {
+143|         console.error('❌ Erreur blocage:', err);
+144|         alert('Erreur lors du blocage');
+145|     }
+146| };
+147| 
+148| // Débloquer un utilisateur
+149| window.unblockUser = async function (pseudo) {
+150|     console.log('🔥 unblockUser appelée pour', pseudo);
+151|     try {
+152|         const response = await fetch('/api/unblock', {
+153|             method: 'POST',
+154|             headers: { 'Content-Type': 'application/json' },
+155|             body: JSON.stringify({ blocker: user.pseudo, blocked: pseudo })
+156|         });
+157|         const data = await response.json();
+158|         if (data.success) {
+159|             const index = window.blockedUsers.indexOf(pseudo);
+160|             if (index > -1) {
+161|                 window.blockedUsers.splice(index, 1);
+162|             }
+163|             updateBlockedList();
+164|             // Si c'était le contact actuel, réactiver l'envoi
+165|             if (currentTargetName === pseudo) {
+166|                 messageInput.disabled = false;
+167|                 sendBtn.disabled = false;
+168|                 messageInput.placeholder = `Message pour ${pseudo}...`;
+169|             }
+170|             // Rafraîchir la liste des utilisateurs
+171|             window.fetchActiveUsers();
+172|             console.log(`🔓 ${pseudo} débloqué`);
+173|         } else {
+174|             alert(data.error || 'Erreur lors du déblocage');
+175|         }
+176|     } catch (err) {
+177|         console.error('Erreur déblocage:', err);
+178|         alert('Erreur lors du déblocage');
+179|     }
+180| };
+181| 
+182| // ========== SYSTÈME DE MODAL (remplace MGp......) ==========
+183| (function () {
+184|     function createModalStructure() {
+185|         if (document.getElementById('mg-modal-container')) return;
+186| 
+187|         const modalHTML = `
+188| <div id="mg-modal-container" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 10000; justify-content: center; align-items: center;">
+189|     <div id="mg-modal-box" style="background: #1e1e2e; border-radius: 16px; padding: 24px; max-width: 380px; width: 85%; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.3); border: 1px solid #333; font-family: system-ui, -apple-system, sans-serif; transform: translateY(-50px); opacity: 0; transition: all 0.3s ease;">
+190|         <h3 id="mg-modal-title" style="margin: 0 0 12px 0; color: #ff6b6b; font-size: 1.3rem;">⚠️ Attention</h3>
+191|         <p id="mg-modal-message" style="margin: 0 0 20px 0; color: #ccc; font-size: 1rem; line-height: 1.5;">Message par défaut</p>
+192|         <div style="display: flex; gap: 12px; justify-content: center;">
+193|             <button id="mg-modal-cancel" style="background: #3a3a4a; border: none; padding: 10px 20px; border-radius: 8px; color: #ccc; cursor: pointer; font-size: 0.9rem;">Annuler</button>
+194|             <button id="mg-modal-confirm" style="background: #ff6b6b; border: none; padding: 10px 20px; border-radius: 8px; color: white; cursor: pointer; font-size: 0.9rem;">OK</button>
+195|         </div>
+196|     </div>
+197| </div>
+198| `;
+199| 
+200|         document.body.insertAdjacentHTML('beforeend', modalHTML);
+201|     }
+202| 
+203|     function setupButtons(onConfirm, onCancel) {
+204|         const confirmBtn = document.getElementById('mg-modal-confirm');
+205|         const cancelBtn = document.getElementById('mg-modal-cancel');
+206|         const container = document.getElementById('mg-modal-container');
+207| 
+208|         if (confirmBtn) {
+209|             const newConfirm = confirmBtn.cloneNode(true);
+210|             confirmBtn.parentNode.replaceChild(newConfirm, confirmBtn);
+211|             newConfirm.onclick = () => {
+212|                 container.style.display = 'none';
+213|                 if (onConfirm) onConfirm();
+214|             };
+215|         }
+216| 
+217|         if (cancelBtn) {
+218|             const newCancel = cancelBtn.cloneNode(true);
+219|             cancelBtn.parentNode.replaceChild(newCancel, cancelBtn);
+220|             newCancel.onclick = () => {
+221|                 container.style.display = 'none';
+222|                 if (onCancel) onCancel();
+223|             };
+224|         }
+225| 
+226|         container.onclick = (e) => {
+227|             if (e.target === container) {
+228|                 container.style.display = 'none';
+229|                 if (onCancel) onCancel();
+230|             }
+231|         };
+232|     }
+233| 
+234|     window.MGModal = {
+235|         show: function (options) {
+236|             createModalStructure();
+237| 
+238|             const container = document.getElementById('mg-modal-container');
+239|             const box = document.getElementById('mg-modal-box');
+240|             const titleEl = document.getElementById('mg-modal-title');
+241|             const messageEl = document.getElementById('mg-modal-message');
+242| 
+243|             titleEl.textContent = options.title || '⚠️ Attention';
+244|             messageEl.textContent = options.message || 'Message par défaut';
+245| 
+246|             setupButtons(options.onConfirm, options.onCancel);
+247| 
+248|             container.style.display = 'flex';
+249| 
+250|             setTimeout(() => {
+251|                 if (box) {
+252|                     box.style.transform = 'translateY(0)';
+253|                     box.style.opacity = '1';
+254|                 }
+255|             }, 10);
+256|         },
+257| 
+258|         hide: function () {
+259|             const container = document.getElementById('mg-modal-container');
+260|             if (container) container.style.display = 'none';
+261|         }
+262|     };
+263| })();
 264| 
-265|             setupButtons(options.onConfirm, options.onCancel);
+265| // *****************************************************************************************
 266| 
-267|             container.style.display = 'flex';
-268| 
-269|             setTimeout(() => {
-270|                 if (box) {
-271|                     box.style.transform = 'translateY(0)';
-272|                     box.style.opacity = '1';
-273|                 }
-274|             }, 10);
-275|         },
-276| 
-277|         hide: function () {
-278|             const container = document.getElementById('mg-modal-container');
-279|             if (container) container.style.display = 'none';
-280|         }
-281|     };
-282| })();
-283| 
-284| // *****************************************************************************************
-285| 
-286| // 1. D'abord le token dans son propre bloc
-287| {
-288|     let token = localStorage.getItem('meetgay_token');
-289|     if (!token) {
-290|         window.location.href = '/login.html';
-291|     }
-292| }
-293| 
-294| // 2. Ensuite socket dans un autre bloc
-295| const socket = io();
-296| // Les fonctions UI sont déjà définies dans ui.js et history.js
-297| // Pas besoin de les redéclarer ici
-298| 
-299| /*// Envoyer un heartbeat toutes les 5 secondes
-300| setInterval(() => {
-301|     if (socket && socket.connected) {
-302|         socket.emit('heartbeat');
-303|     }
-304| }, 5000);*/
-305| 
-306| let reconnectAttempts = 0;
-307| const MAX_RECONNECT_ATTEMPTS = 10;
-308| const RECONNECT_DELAYS = [500, 1000, 2000, 4000, 8000, 16000, 30000, 30000, 30000, 30000];
-309| 
-310| function reconnect() {
-311|     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) return;
-312|     const delay = RECONNECT_DELAYS[reconnectAttempts] || 30000;
-313|     reconnectAttempts++;
-314|     setTimeout(() => {
-315|         socket.connect();
-316|     }, delay);
-317| }
+267| // 1. D'abord le token dans son propre bloc
+268| {
+269|     let token = localStorage.getItem('meetgay_token');
+270|     if (!token) {
+271|         window.location.href = '/login.html';
+272|     }
+273| }
+274| 
+275| // 2. Ensuite socket dans un autre bloc
+276| const socket = io();
+277| // Les fonctions UI sont déjà définies dans ui.js et history.js
+278| // Pas besoin de les redéclarer ici
+279| 
+280| /*// Envoyer un heartbeat toutes les 5 secondes
+281| setInterval(() => {
+282|     if (socket && socket.connected) {
+283|         socket.emit('heartbeat');
+284|     }
+285| }, 5000);*/
+286| 
+287| let reconnectAttempts = 0;
+288| const MAX_RECONNECT_ATTEMPTS = 10;
+289| const RECONNECT_DELAYS = [500, 1000, 2000, 4000, 8000, 16000, 30000, 30000, 30000, 30000];
+290| 
+291| function reconnect() {
+292|     if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) return;
+293|     const delay = RECONNECT_DELAYS[reconnectAttempts] || 30000;
+294|     reconnectAttempts++;
+295|     setTimeout(() => {
+296|         socket.connect();
+297|     }, delay);
+298| }
+299| 
+300| socket.on('disconnect', () => {
+301|     reconnect();
+302| });
+303| 
+304| socket.on('connect', () => {
+305|     reconnectAttempts = 0;
+306| });
+307| 
+308| // ========== GESTION DE LA RECONNEXION APRÈS VEILLE ==========
+309| function checkAndReconnect() {
+310|     if (socket && !socket.connected) {
+311|         console.log('🔄 Socket déconnecté, reconnexion...');
+312|         socket.connect();
+313|     }
+314| }
+315| 
+316| // Vérifier toutes les 5 secondes si le socket est connecté
+317| setInterval(checkAndReconnect, 5000);
 318| 
-319| socket.on('disconnect', () => {
-320|     reconnect();
-321| });
-322| 
-323| socket.on('connect', () => {
-324|     reconnectAttempts = 0;
-325| });
-326| 
-327| 
-328| // Surcharge après chargement de ui.js
-329| setTimeout(() => {
-330|     if (typeof window.clearMessageArea === 'function') clearMessageArea = window.clearMessageArea;
-331|     if (typeof window.showContactInfo === 'function') showContactInfo = window.showContactInfo;
-332|     // ... etc
-333| }, 100);
-334| 
-335| // ========== RÉCUPÉRATION DES INFOS UTILISATEUR DEPUIS LA BASE ==========00000
-336| let user = null;
-337| let currentTargetName = null;
-338| const storedUser = JSON.parse(localStorage.getItem('meetgay_user'));
+319| // Détecter la sortie de veille (Page Visibility API)
+320| document.addEventListener('visibilitychange', () => {
+321|     if (!document.hidden) {
+322|         console.log('👁️ Page visible après veille');
+323|         checkAndReconnect();
+324|         const pseudo = getCurrentPseudo();
+325|         if (pseudo && socket && socket.connected) {
+326|             socket.emit('check-pending', { pseudo: pseudo });
+327|         }
+328|     }
+329| });
+330| 
+331| // Écouter la reconnexion Socket.IO
+332| socket.on('reconnect', () => {
+333|     console.log('🔄 Socket reconnecté');
+334|     const pseudo = getCurrentPseudo();
+335|     if (pseudo) {
+336|         socket.emit('check-pending', { pseudo: pseudo });
+337|     }
+338| });
 339| 
-340| async function initUser() {
-341|     console.log('1. Début initUser');
-342|     if (!storedUser || !storedUser.pseudo) {
-343|         console.log('2. Pas de storedUser');
-344|         window.location.href = '/login.html';
-345|         return;
-346|     }
-347| 
-348|     try {
-349|         console.log('3. Appel fetch pour pseudo:', storedUser.pseudo);
-350|         const response = await fetch('/api/get-user', {
-351|             method: 'POST',
-352|             headers: { 'Content-Type': 'application/json' },
-353|             body: JSON.stringify({ pseudo: storedUser.pseudo })
-354|         });
-355|         console.log('4. Réponse reçue, status:', response.status);
-356|         const data = await response.json();
-357|         console.log('5. Data reçue:', data);
-358|         if (data.success) {
-359|             user = data.user;
-360|             currentUserPseudo = user.pseudo;
-361|             localStorage.setItem('meetgay_user_full', JSON.stringify(user));
-362|             console.log('6. Utilisateur chargé, démarrage chat');
-363|             startChat();
-364|         } else {
-365|             console.log('7. Pas de success');
-366|             window.location.href = '/login.html';
-367|         }
-368|     } catch (err) {
-369|         console.error('Erreur:', err);
-370|         window.location.href = '/login.html';
-371|     }
-372| }
-373| 
-374| // ========== DÉMARRAGE DU CHAT (après récupération des infos) ==========
-375| function startChat() {
-376| 
-377| 
-378|     if ('serviceWorker' in navigator) {
-379|         navigator.serviceWorker.register('/sw.js').then(reg => {
-380|             console.log('SW enregistré');
-381|             if (reg.active) {
-382|                 reg.active.postMessage({ action: 'userConnected', connected: true });
-383|             } else {
-384|                 reg.installing?.postMessage({ action: 'userConnected', connected: true });
-385|             }
-386|         });
-387|     }
-388|     // Charger l'historique des messages pour une conversation
-389|     async function loadHistory(withPseudo) {
-390|         try {
-391|             const response = await fetch(`/api/messages/${encodeURIComponent(user.pseudo)}/${encodeURIComponent(withPseudo)}`);
-392|             const messages = await response.json();
+340| // Fonction utilitaire pour récupérer le pseudo
+341| function getCurrentPseudo() {
+342|     return user?.pseudo || null;
+343| }
+344| 
+345| // Surcharge après chargement de ui.js
+346| setTimeout(() => {
+347|     if (typeof window.clearMessageArea === 'function') clearMessageArea = window.clearMessageArea;
+348|     if (typeof window.showContactInfo === 'function') showContactInfo = window.showContactInfo;
+349|     // ... etc
+350| }, 100);
+351| 
+352| // ========== RÉCUPÉRATION DES INFOS UTILISATEUR DEPUIS LA BASE ==========00000
+353| let user = null;
+354| let currentTargetName = null;
+355| const storedUser = JSON.parse(localStorage.getItem('meetgay_user'));
+356| 
+357| async function initUser() {
+358|     console.log('1. Début initUser');
+359|     if (!storedUser || !storedUser.pseudo) {
+360|         console.log('2. Pas de storedUser');
+361|         window.location.href = '/login.html';
+362|         return;
+363|     }
+364| 
+365|     try {
+366|         console.log('3. Appel fetch pour pseudo:', storedUser.pseudo);
+367|         const response = await fetch('/api/get-user', {
+368|             method: 'POST',
+369|             headers: { 'Content-Type': 'application/json' },
+370|             body: JSON.stringify({ pseudo: storedUser.pseudo })
+371|         });
+372|         console.log('4. Réponse reçue, status:', response.status);
+373|         const data = await response.json();
+374|         console.log('5. Data reçue:', data);
+375|         if (data.success) {
+376|             user = data.user;
+377|             currentUserPseudo = user.pseudo;
+378|             localStorage.setItem('meetgay_user_full', JSON.stringify(user));
+379|             console.log('6. Utilisateur chargé, démarrage chat');
+380|             startChat();
+381|         } else {
+382|             console.log('7. Pas de success');
+383|             window.location.href = '/login.html';
+384|         }
+385|     } catch (err) {
+386|         console.error('Erreur:', err);
+387|         window.location.href = '/login.html';
+388|     }
+389| }
+390| 
+391| // ========== DÉMARRAGE DU CHAT (après récupération des infos) ==========
+392| function startChat() {
 393| 
-394|             // Nettoyer l'historique existant pour ce contact
-395|             if (!conversationHistory[withPseudo]) {
-396|                 conversationHistory[withPseudo] = [];
-397|             } else {
-398|                 conversationHistory[withPseudo] = [];
-399|             }
-400| 
-401|             // Ajouter les messages chargés
-402|             messages.forEach(msg => {
-403|                 const type = msg.from_pseudo === user.pseudo ? 'sent' : 'received';
-404|                 conversationHistory[withPseudo].push({
-405|                     text: msg.message,
-406|                     type: type,
-407|                     from: msg.from_pseudo,
-408|                     to: msg.to_pseudo,
-409|                     timestamp: new Date(msg.created_at)
-410|                 });
-411|             });
-412| 
-413|             updateHistoryDisplay();
-414|         } catch (err) {
-415|             console.error('Erreur chargement historique:', err);
-416|         }
-417|     }
-418| 
-419|     const usersDiv = document.getElementById('usersList');
-420|     const messageInput = document.getElementById('messageInput');
-421|     const sendBtn = document.getElementById('sendBtn');
-422|     const envelope = document.getElementById('envelope');
-423| 
-424| 
-425|     // --------------------------------------------------------------
-426|     // GESTION DE LA LISTE DES CONNECTÉS
-427|     // --------------------------------------------------------------
-428| 
-429|     window.fetchActiveUsers = async function () {
-430|         try {
-431|             const response = await fetch('/api/users/active');
-432|             const usersListData = await response.json();
-433| 
-434|             usersListData.sort((a, b) => (b.first_connected_at || 0) - (a.first_connected_at || 0));
-435|             usersList = usersListData;
-436| 
-437|             const onlineCount = document.getElementById('onlineCount');
-438|             if (onlineCount) {
-439|                 onlineCount.textContent = usersList.length;
-440|             }
+394| 
+395|     if ('serviceWorker' in navigator) {
+396|         navigator.serviceWorker.register('/sw.js').then(reg => {
+397|             console.log('SW enregistré');
+398|             if (reg.active) {
+399|                 reg.active.postMessage({ action: 'userConnected', connected: true });
+400|             } else {
+401|                 reg.installing?.postMessage({ action: 'userConnected', connected: true });
+402|             }
+403|         });
+404|     }
+405|     // Charger l'historique des messages pour une conversation
+406|     async function loadHistory(withPseudo) {
+407|         try {
+408|             const response = await fetch(`/api/messages/${encodeURIComponent(user.pseudo)}/${encodeURIComponent(withPseudo)}`);
+409|             const messages = await response.json();
+410| 
+411|             // Nettoyer l'historique existant pour ce contact
+412|             if (!conversationHistory[withPseudo]) {
+413|                 conversationHistory[withPseudo] = [];
+414|             } else {
+415|                 conversationHistory[withPseudo] = [];
+416|             }
+417| 
+418|             // Ajouter les messages chargés
+419|             messages.forEach(msg => {
+420|                 const type = msg.from_pseudo === user.pseudo ? 'sent' : 'received';
+421|                 conversationHistory[withPseudo].push({
+422|                     text: msg.message,
+423|                     type: type,
+424|                     from: msg.from_pseudo,
+425|                     to: msg.to_pseudo,
+426|                     timestamp: new Date(msg.created_at)
+427|                 });
+428|             });
+429| 
+430|             updateHistoryDisplay();
+431|         } catch (err) {
+432|             console.error('Erreur chargement historique:', err);
+433|         }
+434|     }
+435| 
+436|     const usersDiv = document.getElementById('usersList');
+437|     const messageInput = document.getElementById('messageInput');
+438|     const sendBtn = document.getElementById('sendBtn');
+439|     const envelope = document.getElementById('envelope');
+440| 
 441| 
-442|             if (usersList.length === 0) {
-443|                 usersDiv.innerHTML = '<em>Aucun connecté</em>';
-444|                 return;
-445|             }
-446| 
-447|             usersDiv.innerHTML = '';
-448| 
-449|             for (const fullUser of usersList) {
-450|                 const div = document.createElement('div');
-451|                 div.className = 'user-item';
-452|                 const orientationSymbol = getOrientationSymbol(fullUser.tendencies);
-453|                 const isBlocked = window.blockedUsers.includes(fullUser.pseudo);
-454|                 const locationDisplay = fullUser.location_city || fullUser.location_code || '?';
-455| 
-456|                 if (fullUser.pseudo === user.pseudo) {
-457|                     div.innerHTML = `<strong>${escapeHtml(fullUser.pseudo)}</strong> <span style="font-size:12px;">(${fullUser.age} ans, ${orientationSymbol} ${locationDisplay})</span>`;
-458|                     div.style.background = '#a8e3ee';
-459|                     div.style.fontStyle = 'italic';
-460|                 } else {
-461|                     div.innerHTML = `<strong>${escapeHtml(fullUser.pseudo)}</strong> <span style="font-size:12px;">(${fullUser.age} ans, ${orientationSymbol} ${locationDisplay})</span>`;
-462|                     if (isBlocked) {
-463|                         div.style.background = '#ffcccc';
-464|                     }
+442|     // --------------------------------------------------------------
+443|     // GESTION DE LA LISTE DES CONNECTÉS
+444|     // --------------------------------------------------------------
+445| 
+446|     window.fetchActiveUsers = async function () {
+447|         try {
+448|             const response = await fetch('/api/users/active');
+449|             const usersListData = await response.json();
+450| 
+451|             usersListData.sort((a, b) => (b.first_connected_at || 0) - (a.first_connected_at || 0));
+452|             usersList = usersListData;
+453| 
+454|             const onlineCount = document.getElementById('onlineCount');
+455|             if (onlineCount) {
+456|                 onlineCount.textContent = usersList.length;
+457|             }
+458| 
+459|             if (usersList.length === 0) {
+460|                 usersDiv.innerHTML = '<em>Aucun connecté</em>';
+461|                 return;
+462|             }
+463| 
+464|             usersDiv.innerHTML = '';
 465| 
-466|                     div.onclick = () => {
-467|                         sessionStorage.setItem('last_contact', fullUser.pseudo);
-468|                         document.querySelectorAll('.user-item').forEach(el => el.classList.remove('current-target'));
-469|                         div.classList.add('current-target');
-470| 
-471|                         currentTarget = fullUser.pseudo;
-472|                         currentTargetName = fullUser.pseudo;
-473| 
-474|                         if (window.blockedUsers.includes(fullUser.pseudo)) {
-475|                             messageInput.disabled = true;
-476|                             sendBtn.disabled = true;
-477|                             messageInput.placeholder = `🔇 ${fullUser.pseudo} est bloqué. Cliquez sur 🚫 pour débloquer.`;
-478|                         } else {
-479|                             messageInput.disabled = false;
-480|                             sendBtn.disabled = false;
-481|                             messageInput.placeholder = `Message pour ${fullUser.pseudo}...`;
-482|                         }
-483| 
-484|                         messageInput.focus();
-485|                         clearMessageArea();
-486|                         loadHistory(fullUser.pseudo);
+466|             for (const fullUser of usersList) {
+467|                 const div = document.createElement('div');
+468|                 div.className = 'user-item';
+469|                 const orientationSymbol = getOrientationSymbol(fullUser.tendencies);
+470|                 const isBlocked = window.blockedUsers.includes(fullUser.pseudo);
+471|                 const locationDisplay = fullUser.location_city || fullUser.location_code || '?';
+472| 
+473|                 if (fullUser.pseudo === user.pseudo) {
+474|                     div.innerHTML = `<strong>${escapeHtml(fullUser.pseudo)}</strong> <span style="font-size:12px;">(${fullUser.age} ans, ${orientationSymbol} ${locationDisplay})</span>`;
+475|                     div.style.background = '#a8e3ee';
+476|                     div.style.fontStyle = 'italic';
+477|                 } else {
+478|                     div.innerHTML = `<strong>${escapeHtml(fullUser.pseudo)}</strong> <span style="font-size:12px;">(${fullUser.age} ans, ${orientationSymbol} ${locationDisplay})</span>`;
+479|                     if (isBlocked) {
+480|                         div.style.background = '#ffcccc';
+481|                     }
+482| 
+483|                     div.onclick = () => {
+484|                         sessionStorage.setItem('last_contact', fullUser.pseudo);
+485|                         document.querySelectorAll('.user-item').forEach(el => el.classList.remove('current-target'));
+486|                         div.classList.add('current-target');
 487| 
-488|                         if (typeof window.showContactInfo === 'function') {
-489|                             window.showContactInfo(
-490|                                 fullUser.pseudo,
-491|                                 fullUser.age,
-492|                                 fullUser.origine,
-493|                                 fullUser.gender,
-494|                                 fullUser.tendencies,
-495|                                 fullUser,
-496|                                 fullUser.location_city || fullUser.location_code,
-497|                                 fullUser.location_commune || null,
-498|                                 fullUser.purpose,
-499|                                 fullUser.bio || 'Pas de présentation',
-500|                                 window.blockedUsers || []
-501|                             );
-502|                         }
-503|                     };
-504|                 }
-505|                 usersDiv.appendChild(div);
-506|             }
-507| 
-508|             const lastContact = sessionStorage.getItem('last_contact');
-509|             if (lastContact) {
-510|                 const userElements = document.querySelectorAll('.user-item');
-511|                 for (let el of userElements) {
-512|                     if (el.textContent.includes(lastContact) && !el.textContent.includes('(moi)') && el.style.background !== '#a8e3ee') {
-513|                         el.click();
-514|                         break;
-515|                     }
-516|                 }
-517|             }
-518| 
-519|         } catch (err) {
-520|             console.error('❌ Erreur chargement utilisateurs:', err);
-521|         }
-522|     };
-523| 
-524|     // Bouton déconnexion
-525|     const logoutBtn = document.getElementById('logoutBtn');
-526|     if (logoutBtn) {
-527|         logoutBtn.onclick = async () => {
-528|             // 🔥 VÉRIFICATION
-529|             if (!user || !user.pseudo || user.pseudo === '') {
-530|                 console.warn('⚠️ Pseudo invalide pour suppression');
-531|                 currentUserPseudo = null;
-532|                 localStorage.removeItem('meetgay_chat_history');
-533|                 localStorage.removeItem('meetgay_user_full');
-534|                 localStorage.removeItem('meetgay_token');
-535|                 localStorage.removeItem('meetgay_user');
-536|                 sessionStorage.removeItem('last_contact');
-537|                 sessionStorage.removeItem('conversationHistory');
-538|                 socket.disconnect();
-539|                 window.location.href = '/login.html';
-540|                 return;
-541|             }
-542|             try {
-543|                 // 1. Supprimer les messages de l'utilisateur
-544|                 await fetch('/api/messages/delete-user', {
-545|                     method: 'POST',
-546|                     headers: { 'Content-Type': 'application/json' },
-547|                     body: JSON.stringify({ pseudo: user.pseudo })
-548|                 });
-549| 
-550|                 // 2. Supprimer l'utilisateur
-551|                 await fetch('/api/delete-user', {
-552|                     method: 'POST',
-553|                     headers: { 'Content-Type': 'application/json' },
-554|                     body: JSON.stringify({ pseudo: user.pseudo })
-555|                 });
-556|             } catch (err) {
-557|                 console.error('Erreur suppression:', err);
+488|                         currentTarget = fullUser.pseudo;
+489|                         currentTargetName = fullUser.pseudo;
+490| 
+491|                         if (window.blockedUsers.includes(fullUser.pseudo)) {
+492|                             messageInput.disabled = true;
+493|                             sendBtn.disabled = true;
+494|                             messageInput.placeholder = `🔇 ${fullUser.pseudo} est bloqué. Cliquez sur 🚫 pour débloquer.`;
+495|                         } else {
+496|                             messageInput.disabled = false;
+497|                             sendBtn.disabled = false;
+498|                             messageInput.placeholder = `Message pour ${fullUser.pseudo}...`;
+499|                         }
+500| 
+501|                         messageInput.focus();
+502|                         clearMessageArea();
+503|                         loadHistory(fullUser.pseudo);
+504| 
+505|                         if (typeof window.showContactInfo === 'function') {
+506|                             window.showContactInfo(
+507|                                 fullUser.pseudo,
+508|                                 fullUser.age,
+509|                                 fullUser.origine,
+510|                                 fullUser.gender,
+511|                                 fullUser.tendencies,
+512|                                 fullUser,
+513|                                 fullUser.location_city || fullUser.location_code,
+514|                                 fullUser.location_commune || null,
+515|                                 fullUser.purpose,
+516|                                 fullUser.bio || 'Pas de présentation',
+517|                                 window.blockedUsers || []
+518|                             );
+519|                         }
+520|                     };
+521|                 }
+522|                 usersDiv.appendChild(div);
+523|             }
+524| 
+525|             const lastContact = sessionStorage.getItem('last_contact');
+526|             if (lastContact) {
+527|                 const userElements = document.querySelectorAll('.user-item');
+528|                 for (let el of userElements) {
+529|                     if (el.textContent.includes(lastContact) && !el.textContent.includes('(moi)') && el.style.background !== '#a8e3ee') {
+530|                         el.click();
+531|                         break;
+532|                     }
+533|                 }
+534|             }
+535| 
+536|         } catch (err) {
+537|             console.error('❌ Erreur chargement utilisateurs:', err);
+538|         }
+539|     };
+540| 
+541|     // Bouton déconnexion
+542|     const logoutBtn = document.getElementById('logoutBtn');
+543|     if (logoutBtn) {
+544|         logoutBtn.onclick = async () => {
+545|             // 🔥 VÉRIFICATION
+546|             if (!user || !user.pseudo || user.pseudo === '') {
+547|                 console.warn('⚠️ Pseudo invalide pour suppression');
+548|                 currentUserPseudo = null;
+549|                 localStorage.removeItem('meetgay_chat_history');
+550|                 localStorage.removeItem('meetgay_user_full');
+551|                 localStorage.removeItem('meetgay_token');
+552|                 localStorage.removeItem('meetgay_user');
+553|                 sessionStorage.removeItem('last_contact');
+554|                 sessionStorage.removeItem('conversationHistory');
+555|                 socket.disconnect();
+556|                 window.location.href = '/login.html';
+557|                 return;
 558|             }
-559| 
-560|             // 🔥 NETTOYER LE LOCALSTORAGE DU NAVIGATEUR
-561|             localStorage.removeItem('meetgay_chat_history');
-562|             localStorage.removeItem('meetgay_user_full');
-563|             localStorage.removeItem('meetgay_token');
-564|             localStorage.removeItem('meetgay_user');
-565| 
-566|             // 🔥 NETTOYER LE SESSIONSTORAGE
-567|             sessionStorage.removeItem('last_contact');
-568|             sessionStorage.removeItem('conversationHistory');
-569| 
-570|             socket.disconnect();
-571| 
-572|             // Envoie le message AVANT de quitter la page
-573|             navigator.serviceWorker.ready.then(reg => {
-574|                 if (reg.active) {
-575|                     reg.active.postMessage({ action: 'userConnected', connected: false });
-576|                 }
-577|                 window.location.href = '/login.html';
-578|             });
-579|         };
-580|     }  // ← cette accolade ferme if (logoutBtn)
-581| 
+559|             try {
+560|                 // 1. Supprimer les messages de l'utilisateur
+561|                 await fetch('/api/messages/delete-user', {
+562|                     method: 'POST',
+563|                     headers: { 'Content-Type': 'application/json' },
+564|                     body: JSON.stringify({ pseudo: user.pseudo })
+565|                 });
+566| 
+567|                 // 2. Supprimer l'utilisateur
+568|                 await fetch('/api/delete-user', {
+569|                     method: 'POST',
+570|                     headers: { 'Content-Type': 'application/json' },
+571|                     body: JSON.stringify({ pseudo: user.pseudo })
+572|                 });
+573|             } catch (err) {
+574|                 console.error('Erreur suppression:', err);
+575|             }
+576| 
+577|             // 🔥 NETTOYER LE LOCALSTORAGE DU NAVIGATEUR
+578|             localStorage.removeItem('meetgay_chat_history');
+579|             localStorage.removeItem('meetgay_user_full');
+580|             localStorage.removeItem('meetgay_token');
+581|             localStorage.removeItem('meetgay_user');
 582| 
-583|     // Variables d'état
-584|     let currentTarget = null;
-585|     let pendingMessages = [];
-586|     window.blockedUsers = [];
-587| 
+583|             // 🔥 NETTOYER LE SESSIONSTORAGE
+584|             sessionStorage.removeItem('last_contact');
+585|             sessionStorage.removeItem('conversationHistory');
+586| 
+587|             socket.disconnect();
 588| 
-589| 
-590| 
-591|     updateSoundIcon();
-592| 
-593|     console.log('🔍 BADGE - user.location_city:', user.location_city);
-594|     console.log('🔍 BADGE - user.location_commune:', user.location_commune);
-595|     console.log('🔍 BADGE - user.location_code:', user.location_code);
-596| 
-597|     function updateUserBadge(warnsCount = 0) {
-598|         const userBadge = document.getElementById('userBadge');
-599|         if (!userBadge) return;
-600| 
-601|         // 🔥 Utiliser les nouveaux noms de colonnes
-602|         let displayLocation = '?';
-603| 
+589|             // Envoie le message AVANT de quitter la page
+590|             navigator.serviceWorker.ready.then(reg => {
+591|                 if (reg.active) {
+592|                     reg.active.postMessage({ action: 'userConnected', connected: false });
+593|                 }
+594|                 window.location.href = '/login.html';
+595|             });
+596|         };
+597|     }  // ← cette accolade ferme if (logoutBtn)
+598| 
+599| 
+600|     // Variables d'état
+601|     let currentTarget = null;
+602|     let pendingMessages = [];
+603|     window.blockedUsers = [];
 604| 
-605|         if (user.location_city && user.location_city !== 'GPS' && user.location_city !== 'Me géolocaliser pour plus de précision') {
-606|             displayLocation = user.location_city;
-607|         } else {
-608|             displayLocation = user.location_code || '?';
-609|         }
-610| 
-611|         if (user.location_commune && user.location_commune !== 'null' &&
-612|             user.location_commune !== 'undefined' && user.location_commune !== user.location_city) {
-613|             displayLocation = `${user.location_commune} - ${displayLocation}`;
-614|         }
-615| 
-616|         // Si on a une commune précise ET une ville différente, on les combine
-617|         if (user.commune && user.commune !== 'null' &&
-618|             user.commune !== 'undefined' && user.commune !== user.city) {
-619|             displayLocation = `${user.commune} - ${displayLocation}`;
-620|         }
+605| 
+606| 
+607| 
+608|     updateSoundIcon();
+609| 
+610|     console.log('🔍 BADGE - user.location_city:', user.location_city);
+611|     console.log('🔍 BADGE - user.location_commune:', user.location_commune);
+612|     console.log('🔍 BADGE - user.location_code:', user.location_code);
+613| 
+614|     function updateUserBadge(warnsCount = 0) {
+615|         const userBadge = document.getElementById('userBadge');
+616|         if (!userBadge) return;
+617| 
+618|         // 🔥 Utiliser les nouveaux noms de colonnes
+619|         let displayLocation = '?';
+620| 
 621| 
-622|         // Afficher le triangle seulement si warnsCount > 0
-623|         if (warnsCount > 0) {
-624|             const triangleColor = getTriangleColor(warnsCount);
-625|             userBadge.innerHTML = `👤 ${escapeHtml(user.pseudo)} | ${escapeHtml(displayLocation)} <span style="color: ${triangleColor}; margin-left: 8px;">⚠️ ${warnsCount}</span>`;
-626|         } else {
-627|             userBadge.innerHTML = `👤 ${escapeHtml(user.pseudo)} | ${escapeHtml(displayLocation)}`;
-628|         }
-629|     }
-630| 
-631|     // ========== PANEL DE RÉGLAGES ==========
-632|     const settingsBtn = document.getElementById('settingsBtn');
-633|     const settingsPanel = document.getElementById('settingsPanel');
-634|     const settingsCloseBtn = document.getElementById('settingsCloseBtn');
-635|     const settingsSoundToggle = document.getElementById('settingsSoundToggle');
-636|     const settingsVolume = document.getElementById('settingsVolume');
-637|     const settingsVolumeDisplay = document.getElementById('settingsVolumeDisplay');
+622|         if (user.location_city && user.location_city !== 'GPS' && user.location_city !== 'Me géolocaliser pour plus de précision') {
+623|             displayLocation = user.location_city;
+624|         } else {
+625|             displayLocation = user.location_code || '?';
+626|         }
+627| 
+628|         if (user.location_commune && user.location_commune !== 'null' &&
+629|             user.location_commune !== 'undefined' && user.location_commune !== user.location_city) {
+630|             displayLocation = `${user.location_commune} - ${displayLocation}`;
+631|         }
+632| 
+633|         // Si on a une commune précise ET une ville différente, on les combine
+634|         if (user.commune && user.commune !== 'null' &&
+635|             user.commune !== 'undefined' && user.commune !== user.city) {
+636|             displayLocation = `${user.commune} - ${displayLocation}`;
+637|         }
 638| 
-639|     // Ouvrir le panel
-640|     if (settingsBtn) {
-641|         settingsBtn.addEventListener('click', function () {
-642|             // Mettre à jour les valeurs avant d'ouvrir
-643|             const soundEnabled = localStorage.getItem('messageSoundEnabled') !== 'false';
-644|             const volume = parseInt(localStorage.getItem('messageSoundVolume')) || 70;
-645| 
-646|             if (settingsSoundToggle) settingsSoundToggle.checked = soundEnabled;
-647|             if (settingsVolume) settingsVolume.value = volume;
-648|             if (settingsVolumeDisplay) settingsVolumeDisplay.textContent = volume + '%';
-649| 
-650|             // Mettre à jour la liste des bloqués
-651|             updateBlockedList();
-652| 
-653|             if (settingsPanel) settingsPanel.style.display = 'flex';
-654|         });
-655|     }
-656| 
-657|     // Fermer le panel
-658|     if (settingsCloseBtn) {
-659|         settingsCloseBtn.addEventListener('click', function () {
-660|             if (settingsPanel) settingsPanel.style.display = 'none';
-661|         });
-662|     }
-663| 
-664|     // Fermer en cliquant à l'extérieur
-665|     if (settingsPanel) {
-666|         settingsPanel.addEventListener('click', function (e) {
-667|             if (e.target === settingsPanel) {
-668|                 settingsPanel.style.display = 'none';
-669|             }
-670|         });
-671|     }
-672| 
-673|     // Gestion du son
-674|     if (settingsSoundToggle) {
-675|         settingsSoundToggle.addEventListener('change', function () {
-676|             localStorage.setItem('messageSoundEnabled', this.checked);
-677|             updateSoundIcon();
+639|         // Afficher le triangle seulement si warnsCount > 0
+640|         if (warnsCount > 0) {
+641|             const triangleColor = getTriangleColor(warnsCount);
+642|             userBadge.innerHTML = `👤 ${escapeHtml(user.pseudo)} | ${escapeHtml(displayLocation)} <span style="color: ${triangleColor}; margin-left: 8px;">⚠️ ${warnsCount}</span>`;
+643|         } else {
+644|             userBadge.innerHTML = `👤 ${escapeHtml(user.pseudo)} | ${escapeHtml(displayLocation)}`;
+645|         }
+646|     }
+647| 
+648|     // ========== PANEL DE RÉGLAGES ==========
+649|     const settingsBtn = document.getElementById('settingsBtn');
+650|     const settingsPanel = document.getElementById('settingsPanel');
+651|     const settingsCloseBtn = document.getElementById('settingsCloseBtn');
+652|     const settingsSoundToggle = document.getElementById('settingsSoundToggle');
+653|     const settingsVolume = document.getElementById('settingsVolume');
+654|     const settingsVolumeDisplay = document.getElementById('settingsVolumeDisplay');
+655| 
+656|     // Ouvrir le panel
+657|     if (settingsBtn) {
+658|         settingsBtn.addEventListener('click', function () {
+659|             // Mettre à jour les valeurs avant d'ouvrir
+660|             const soundEnabled = localStorage.getItem('messageSoundEnabled') !== 'false';
+661|             const volume = parseInt(localStorage.getItem('messageSoundVolume')) || 70;
+662| 
+663|             if (settingsSoundToggle) settingsSoundToggle.checked = soundEnabled;
+664|             if (settingsVolume) settingsVolume.value = volume;
+665|             if (settingsVolumeDisplay) settingsVolumeDisplay.textContent = volume + '%';
+666| 
+667|             // Mettre à jour la liste des bloqués
+668|             updateBlockedList();
+669| 
+670|             if (settingsPanel) settingsPanel.style.display = 'flex';
+671|         });
+672|     }
+673| 
+674|     // Fermer le panel
+675|     if (settingsCloseBtn) {
+676|         settingsCloseBtn.addEventListener('click', function () {
+677|             if (settingsPanel) settingsPanel.style.display = 'none';
 678|         });
 679|     }
 680| 
-681|     // Gestion du volume
-682|     if (settingsVolume) {
-683|         settingsVolume.addEventListener('input', function () {
-684|             const val = this.value;
-685|             if (settingsVolumeDisplay) settingsVolumeDisplay.textContent = val + '%';
-686|             localStorage.setItem('messageSoundVolume', val);
-687|             // Tester le son
-688|             if (settingsSoundToggle && settingsSoundToggle.checked) {
-689|                 playMessageSound();
-690|             }
-691|         });
-692|     }
-693| 
-694|     function getTriangleColor(warns) {
-695|         if (warns >= 3) return '#ff0000';      // rouge
-696|         if (warns === 2) return '#ff6600';     // orange foncé
-697|         if (warns === 1) return '#ffaa00';     // orange clair
-698|         return '#888888';                       // gris
-699|     }
-700| 
-701|     // Au démarrage, après avoir chargé user
-702|     updateUserBadge(user.warnings || 0);
-703| 
-704|     // Initialiser l'utilisateur sur le serveur (IMMÉDIATEMENT)
-705|     console.log('📤 Envoi user join avec:', {
-706|         pseudo: user.pseudo,
-707|         age: user.age,
-708|         tendencies: user.tendencies,
-709|         locationCode: user.locationCode,
-710|         locationName: user.locationCity,
-711|         bio: user.bio || 'Aucune présentation',
-712|         gender: user.gender,
-713|         purpose: user.purpose,
-714|         origine: user.origine,
-715|         language: localStorage.getItem('MeetGay_lang') || 'fr',
-716|         fingerprint: window.currentFingerprint
-717|     });
-718| 
-719|     socket.emit('user join', {
-720|         pseudo: user.pseudo,
-721|         age: user.age,
-722|         tendencies: user.tendencies,
-723|         locationCode: user.location_code,
-724|         locationName: user.location_city,
-725|         locationCity: user.location_city,
-726|         locationCommune: user.location_commune,
-727|         locationPostalCode: user.locationPostalCode || null,
-728|         locationProvince: user.locationProvince || null,
-729|         locationRegion: user.locationRegion || null,
-730|         locationNeighborhood: user.locationNeighborhood || null,
-731|         locationCountry: user.locationCountry || null,
-732|         bio: user.bio || 'Aucune présentation',
-733|         gender: user.gender,
-734|         purpose: user.purpose,
-735|         origine: user.origine,
-736|         language: localStorage.getItem('MeetGay_lang') || 'fr',
-737|         fingerprint: window.currentFingerprint
-738|     });
-739| 
-740|     // NE PAS APPELER loadBlockedUsers() ICI
-741| 
-742|     socket.on('join confirmed', (data) => {
-743|         console.log('✅ Join confirmé par le serveur:', data);
-744|         // 🔥 Charger les bloqués APRÈS confirmation
-745|         loadBlockedUsers();
-746|     });
-747| 
-748| 
-749|     socket.on('private message received', (data) => {
-750|         console.log(`📥 Message reçu de ${data.fromPseudo}: ${data.message}`);
-751| 
-752|         // Bloquer les messages des utilisateurs bloqués
-753|         if (window.blockedUsers && window.blockedUsers.includes(data.fromPseudo)) {
-754|             console.log(`🚫 Message ignoré de ${data.fromPseudo} (bloqué)`);
-755|             return;
-756|         }
-757| 
-758|         // Ajouter à l'historique
-759|         if (typeof addToHistory === 'function') {
-760|             addToHistory(data.fromPseudo, data.message, 'received', data.fromPseudo, user.pseudo);
-761|         }
-762| 
-763|         // Afficher dans le chat si c'est le contact actuel
-764|         if (currentTargetName === data.fromPseudo && typeof displayMessage === 'function') {
-765|             displayMessage(data.message, 'received', data.fromPseudo);
-766|         }
-767| 
-768|         // Mettre à jour l'historique
-769|         if (typeof updateHistoryDisplay === 'function') {
-770|             updateHistoryDisplay();
-771|         }
-772| 
-773|         // Ajouter à la liste des messages en attente
-774|         pendingMessages.push(data);
-775|         if (typeof updateEnvelope === 'function') {
-776|             updateEnvelope(pendingMessages.length);
-777|         }
-778|         if (typeof startBlinking === 'function') {
-779|             startBlinking();
-780|         }
-781| 
-782|         // 🔔 JOUER LE SON + ENVELOPPE
-783|         playMessageSound();
-784|         triggerEnvelopeAnimation();
-785| 
-786|         // ⚠️ NE PAS AFFICHER DE POP-UP ICI
-787|         // Les pop-ups sont UNIQUEMENT pour les messages en attente (via pending_alert)
-788|     });
+681|     // Fermer en cliquant à l'extérieur
+682|     if (settingsPanel) {
+683|         settingsPanel.addEventListener('click', function (e) {
+684|             if (e.target === settingsPanel) {
+685|                 settingsPanel.style.display = 'none';
+686|             }
+687|         });
+688|     }
+689| 
+690|     // Gestion du son
+691|     if (settingsSoundToggle) {
+692|         settingsSoundToggle.addEventListener('change', function () {
+693|             localStorage.setItem('messageSoundEnabled', this.checked);
+694|             updateSoundIcon();
+695|         });
+696|     }
+697| 
+698|     // Gestion du volume
+699|     if (settingsVolume) {
+700|         settingsVolume.addEventListener('input', function () {
+701|             const val = this.value;
+702|             if (settingsVolumeDisplay) settingsVolumeDisplay.textContent = val + '%';
+703|             localStorage.setItem('messageSoundVolume', val);
+704|             // Tester le son
+705|             if (settingsSoundToggle && settingsSoundToggle.checked) {
+706|                 playMessageSound();
+707|             }
+708|         });
+709|     }
+710| 
+711|     function getTriangleColor(warns) {
+712|         if (warns >= 3) return '#ff0000';      // rouge
+713|         if (warns === 2) return '#ff6600';     // orange foncé
+714|         if (warns === 1) return '#ffaa00';     // orange clair
+715|         return '#888888';                       // gris
+716|     }
+717| 
+718|     // Au démarrage, après avoir chargé user
+719|     updateUserBadge(user.warnings || 0);
+720| 
+721|     // Initialiser l'utilisateur sur le serveur (IMMÉDIATEMENT)
+722|     console.log('📤 Envoi user join avec:', {
+723|         pseudo: user.pseudo,
+724|         age: user.age,
+725|         tendencies: user.tendencies,
+726|         locationCode: user.locationCode,
+727|         locationName: user.locationCity,
+728|         bio: user.bio || 'Aucune présentation',
+729|         gender: user.gender,
+730|         purpose: user.purpose,
+731|         origine: user.origine,
+732|         language: localStorage.getItem('MeetGay_lang') || 'fr',
+733|         fingerprint: window.currentFingerprint
+734|     });
+735| 
+736|     socket.emit('user join', {
+737|         pseudo: user.pseudo,
+738|         age: user.age,
+739|         tendencies: user.tendencies,
+740|         locationCode: user.location_code,
+741|         locationName: user.location_city,
+742|         locationCity: user.location_city,
+743|         locationCommune: user.location_commune,
+744|         locationPostalCode: user.locationPostalCode || null,
+745|         locationProvince: user.locationProvince || null,
+746|         locationRegion: user.locationRegion || null,
+747|         locationNeighborhood: user.locationNeighborhood || null,
+748|         locationCountry: user.locationCountry || null,
+749|         bio: user.bio || 'Aucune présentation',
+750|         gender: user.gender,
+751|         purpose: user.purpose,
+752|         origine: user.origine,
+753|         language: localStorage.getItem('MeetGay_lang') || 'fr',
+754|         fingerprint: window.currentFingerprint
+755|     });
+756| 
+757|     // NE PAS APPELER loadBlockedUsers() ICI
+758| 
+759|     socket.on('join confirmed', (data) => {
+760|         console.log('✅ Join confirmé par le serveur:', data);
+761|         // 🔥 Charger les bloqués APRÈS confirmation
+762|         loadBlockedUsers();
+763|     });
+764| 
+765| 
+766|     socket.on('private message received', (data) => {
+767|         console.log(`📥 Message reçu de ${data.fromPseudo}: ${data.message}`);
+768| 
+769|         // Bloquer les messages des utilisateurs bloqués
+770|         if (window.blockedUsers && window.blockedUsers.includes(data.fromPseudo)) {
+771|             console.log(`🚫 Message ignoré de ${data.fromPseudo} (bloqué)`);
+772|             return;
+773|         }
+774| 
+775|         // Ajouter à l'historique
+776|         if (typeof addToHistory === 'function') {
+777|             addToHistory(data.fromPseudo, data.message, 'received', data.fromPseudo, user.pseudo);
+778|         }
+779| 
+780|         // Afficher dans le chat si c'est le contact actuel
+781|         if (currentTargetName === data.fromPseudo && typeof displayMessage === 'function') {
+782|             displayMessage(data.message, 'received', data.fromPseudo);
+783|         }
+784| 
+785|         // Mettre à jour l'historique
+786|         if (typeof updateHistoryDisplay === 'function') {
+787|             updateHistoryDisplay();
+788|         }
 789| 
-790|     // 🔔 ÉCOUTEUR POUR LES MESSAGES EN ATTENTE (UNIQUEMENT)
-791|     socket.on('pending_alert', (data) => {
-792|         const count = data.count;
-793|         console.log(`🔔 ${count} message(s) en attente récupéré(s)`);
-794| 
-795|         // 🎵 JOUER LE SON DE NOTIFICATION
-796|         playMessageSound();
-797| 
-798|         // 📩 FAIRE CLIGNOTER L'ENVELOPPE
-799|         triggerEnvelopeAnimation();
-800| 
-801|         // 💬 OPTIONNEL : PETIT MESSAGE DANS LA CONSOLE (pas de pop-up)
-802|         console.log(`📩 Vous avez reçu ${count} message(s) pendant votre absence`);
-803| 
-804|         // Mettre à jour le titre de la page (optionnel)
-805|         document.title = `📩 ${count} nouveau${count > 1 ? 'x' : ''} message${count > 1 ? 's' : ''} - MeetGay`;
-806|         setTimeout(() => {
-807|             document.title = 'MeetGay - Chat Gay';
-808|         }, 5000);
-809| 
-810|         // ⚠️ PAS DE POP-UP, JUSTE LE SON ET L'ENVELOPPE
-811|     });
-812| 
-813|     socket.on('join error', (error) => {
-814|         console.error('❌ Erreur join:', error);
-815|     });
+790|         // Ajouter à la liste des messages en attente
+791|         pendingMessages.push(data);
+792|         if (typeof updateEnvelope === 'function') {
+793|             updateEnvelope(pendingMessages.length);
+794|         }
+795|         if (typeof startBlinking === 'function') {
+796|             startBlinking();
+797|         }
+798| 
+799|         // 🔔 JOUER LE SON + ENVELOPPE
+800|         playMessageSound();
+801| 
+802| 
+803|         // ⚠️ NE PAS AFFICHER DE POP-UP ICI
+804|         // Les pop-ups sont UNIQUEMENT pour les messages en attente (via pending_alert)
+805|     });
+806| 
+807|     // 🔔 ÉCOUTEUR POUR LES MESSAGES EN ATTENTE (UNIQUEMENT)
+808|     socket.on('pending_alert', (data) => {
+809|         const count = data.count;
+810|         console.log(`🔔 ${count} message(s) en attente récupéré(s)`);
+811| 
+812|         // 🎵 JOUER LE SON DE NOTIFICATION
+813|         playMessageSound();
+814| 
+815| 
 816| 
-817| 
-818|     // Rafraîchir la liste des connectés toutes les 10 secondes
-819|     window.fetchActiveUsers();
-820|     setInterval(fetchActiveUsers, 10000);
-821| 
-822|     // Écouter l'événement 'kicked' pour les utilisateurs expulsés par l'admin
-823|     socket.on('kicked', (data) => {
-824|         alert(data.message || '🦵 Vous avez été expulsé par un administrateur.');
-825|         setTimeout(() => {
-826|             window.location.href = '/';
-827|         }, 1500);
-828|     });
-829| 
-830|     // --------------------------------------------------------------
-831|     // ENVOI ET RÉCEPTION DES MESSAGES
-832|     // --------------------------------------------------------------
-833|     socket.on('message sent confirmation', async (data) => {
-834|         displayMessage(data.message, 'sent', null, currentTargetName);
-835|         addToHistory(currentTargetName, data.message, 'sent', user.pseudo, currentTargetName);
-836| 
-837|         try {
-838|             await fetch('/api/messages/save', {
-839|                 method: 'POST',
-840|                 headers: { 'Content-Type': 'application/json' },
-841|                 body: JSON.stringify({
-842|                     from: user.pseudo,
-843|                     to: currentTargetName,
-844|                     message: data.message
-845|                 })
-846|             });
-847|         } catch (err) {
-848|             console.error('Erreur sauvegarde message:', err);
-849|         }
-850| 
-851|         messageInput.value = '';
-852|         messageInput.focus();
-853|     });
-854| 
-855|     socket.on('private message', async (data) => {
-856|         const { toSocketId, message, fromPseudo } = data;
-857| 
-858|         // Vérifier si le destinataire est connecté
-859|         let targetSocketId = null;
-860|         try {
-861|             const result = await pool.query(
-862|                 'SELECT socket_id FROM users WHERE pseudo = $1 AND socket_id IS NOT NULL',
-863|                 [toSocketId]
-864|             );
-865|             if (result.rows.length > 0) {
-866|                 targetSocketId = result.rows[0].socket_id;
-867|             }
-868|         } catch (err) {
-869|             console.error('❌ Erreur recherche destinataire:', err.message);
-870|             socket.emit('error', { message: 'Erreur lors de l\'envoi du message' });
-871|             return;
-872|         }
+817|         // 💬 OPTIONNEL : PETIT MESSAGE DANS LA CONSOLE (pas de pop-up)
+818|         console.log(`📩 Vous avez reçu ${count} message(s) pendant votre absence`);
+819| 
+820|         // Mettre à jour le titre de la page (optionnel)
+821|         document.title = `📩 ${count} nouveau${count > 1 ? 'x' : ''} message${count > 1 ? 's' : ''} - MeetGay`;
+822|         setTimeout(() => {
+823|             document.title = 'MeetGay - Chat Gay';
+824|         }, 5000);
+825| 
+826|         // ⚠️ PAS DE POP-UP, JUSTE LE SON ET L'ENVELOPPE
+827|     });
+828| 
+829|     socket.on('join error', (error) => {
+830|         console.error('❌ Erreur join:', error);
+831|     });
+832| 
+833| 
+834|     // Rafraîchir la liste des connectés toutes les 10 secondes
+835|     window.fetchActiveUsers();
+836|     setInterval(fetchActiveUsers, 10000);
+837| 
+838|     // Écouter l'événement 'kicked' pour les utilisateurs expulsés par l'admin
+839|     socket.on('kicked', (data) => {
+840|         alert(data.message || '🦵 Vous avez été expulsé par un administrateur.');
+841|         setTimeout(() => {
+842|             window.location.href = '/';
+843|         }, 1500);
+844|     });
+845| 
+846|     // --------------------------------------------------------------
+847|     // ENVOI ET RÉCEPTION DES MESSAGES
+848|     // --------------------------------------------------------------
+849|     socket.on('message sent confirmation', async (data) => {
+850|         displayMessage(data.message, 'sent', null, currentTargetName);
+851|         addToHistory(currentTargetName, data.message, 'sent', user.pseudo, currentTargetName);
+852| 
+853|         try {
+854|             await fetch('/api/messages/save', {
+855|                 method: 'POST',
+856|                 headers: { 'Content-Type': 'application/json' },
+857|                 body: JSON.stringify({
+858|                     from: user.pseudo,
+859|                     to: currentTargetName,
+860|                     message: data.message
+861|                 })
+862|             });
+863|         } catch (err) {
+864|             console.error('Erreur sauvegarde message:', err);
+865|         }
+866| 
+867|         messageInput.value = '';
+868|         messageInput.focus();
+869|     });
+870| 
+871|     socket.on('private message', async (data) => {
+872|         const { toSocketId, message, fromPseudo } = data;
 873| 
-874|         // Sauvegarder le message en base de données
-875|         try {
-876|             // 1. Vérifier si une conversation existe déjà entre les deux utilisateurs
-877|             const convResult = await pool.query(
-878|                 `SELECT id FROM conversations 
-879|              WHERE (user1_pseudo = $1 AND user2_pseudo = $2) 
-880|                 OR (user1_pseudo = $2 AND user2_pseudo = $1)`,
-881|                 [fromPseudo, toSocketId]
-882|             );
-883| 
-884|             let conversationId;
-885|             if (convResult.rows.length === 0) {
-886|                 // 2. Créer une nouvelle conversation
-887|                 const newConv = await pool.query(
-888|                     `INSERT INTO conversations (user1_pseudo, user2_pseudo, last_message, last_message_time) 
-889|                  VALUES ($1, $2, $3, NOW()) 
-890|                  RETURNING id`,
-891|                     [fromPseudo, toSocketId, message]
-892|                 );
-893|                 conversationId = newConv.rows[0].id;
-894|                 console.log(`📁 Nouvelle conversation ${conversationId} créée pour ${fromPseudo} ↔ ${toSocketId}`);
-895|             } else {
-896|                 conversationId = convResult.rows[0].id;
-897|                 // 3. Mettre à jour le dernier message
-898|                 await pool.query(
-899|                     `UPDATE conversations SET last_message = $1, last_message_time = NOW() WHERE id = $2`,
-900|                     [message, conversationId]
-901|                 );
-902|             }
-903| 
-904|             // 4. Insérer le message
-905|             await pool.query(
-906|                 `INSERT INTO messages (conversation_id, from_pseudo, to_pseudo, message, created_at) 
-907|              VALUES ($1, $2, $3, $4, NOW())`,
-908|                 [conversationId, fromPseudo, toSocketId, message]
-909|             );
-910|             console.log(`📦 Message sauvegardé dans la conversation ${conversationId}`);
-911| 
-912|         } catch (err) {
-913|             console.error('❌ Erreur sauvegarde message:', err.message);
-914|             // On continue même si la sauvegarde échoue, pour ne pas bloquer l'envoi
-915|         }
-916| 
-917|         // Si le destinataire est connecté, envoyer le message immédiatement
-918|         if (targetSocketId) {
-919|             io.to(targetSocketId).emit('private message received', {
-920|                 fromPseudo: fromPseudo,
-921|                 fromSocketId: socket.id,
-922|                 message: message,
-923|                 timestamp: new Date()
-924|             });
-925| 
-926|             // Confirmer à l'expéditeur
-927|             socket.emit('message sent confirmation', {
-928|                 message: message,
-929|                 toPseudo: toSocketId,
-930|                 timestamp: new Date()
-931|             });
+874|         // Vérifier si le destinataire est connecté
+875|         let targetSocketId = null;
+876|         try {
+877|             const result = await pool.query(
+878|                 'SELECT socket_id FROM users WHERE pseudo = $1 AND socket_id IS NOT NULL',
+879|                 [toSocketId]
+880|             );
+881|             if (result.rows.length > 0) {
+882|                 targetSocketId = result.rows[0].socket_id;
+883|             }
+884|         } catch (err) {
+885|             console.error('❌ Erreur recherche destinataire:', err.message);
+886|             socket.emit('error', { message: 'Erreur lors de l\'envoi du message' });
+887|             return;
+888|         }
+889| 
+890|         // Sauvegarder le message en base de données
+891|         try {
+892|             // 1. Vérifier si une conversation existe déjà entre les deux utilisateurs
+893|             const convResult = await pool.query(
+894|                 `SELECT id FROM conversations 
+895|              WHERE (user1_pseudo = $1 AND user2_pseudo = $2) 
+896|                 OR (user1_pseudo = $2 AND user2_pseudo = $1)`,
+897|                 [fromPseudo, toSocketId]
+898|             );
+899| 
+900|             let conversationId;
+901|             if (convResult.rows.length === 0) {
+902|                 // 2. Créer une nouvelle conversation
+903|                 const newConv = await pool.query(
+904|                     `INSERT INTO conversations (user1_pseudo, user2_pseudo, last_message, last_message_time) 
+905|                  VALUES ($1, $2, $3, NOW()) 
+906|                  RETURNING id`,
+907|                     [fromPseudo, toSocketId, message]
+908|                 );
+909|                 conversationId = newConv.rows[0].id;
+910|                 console.log(`📁 Nouvelle conversation ${conversationId} créée pour ${fromPseudo} ↔ ${toSocketId}`);
+911|             } else {
+912|                 conversationId = convResult.rows[0].id;
+913|                 // 3. Mettre à jour le dernier message
+914|                 await pool.query(
+915|                     `UPDATE conversations SET last_message = $1, last_message_time = NOW() WHERE id = $2`,
+916|                     [message, conversationId]
+917|                 );
+918|             }
+919| 
+920|             // 4. Insérer le message
+921|             await pool.query(
+922|                 `INSERT INTO messages (conversation_id, from_pseudo, to_pseudo, message, created_at) 
+923|              VALUES ($1, $2, $3, $4, NOW())`,
+924|                 [conversationId, fromPseudo, toSocketId, message]
+925|             );
+926|             console.log(`📦 Message sauvegardé dans la conversation ${conversationId}`);
+927| 
+928|         } catch (err) {
+929|             console.error('❌ Erreur sauvegarde message:', err.message);
+930|             // On continue même si la sauvegarde échoue, pour ne pas bloquer l'envoi
+931|         }
 932| 
-933|             console.log(`💬 Message de ${fromPseudo} à ${toSocketId}: ${message.substring(0, 30)}...`);
-934|         } else {
-935|             // Le destinataire n'est pas connecté, le message est déjà sauvegardé en base
-936|             console.log(`💤 Message de ${fromPseudo} à ${toSocketId} sauvegardé (destinataire déconnecté)`);
-937|             socket.emit('message sent confirmation', {
+933|         // Si le destinataire est connecté, envoyer le message immédiatement
+934|         if (targetSocketId) {
+935|             io.to(targetSocketId).emit('private message received', {
+936|                 fromPseudo: fromPseudo,
+937|                 fromSocketId: socket.id,
 938|                 message: message,
-939|                 toPseudo: toSocketId,
-940|                 timestamp: new Date(),
-941|                 pending: true
-942|             });
-943|         }
-944|     });
-945| 
-946|     socket.on('error', (msg) => {
-947|         console.error('Erreur:', msg);
-948|     });
-949| 
-950|     socket.on('force logout', (data) => {
-951|         console.log('🚪 Force logout reçu:', data.reason);
-952| 
-953|         if (typeof MGModal !== 'undefined') {
-954|             MGModal.show({
-955|                 title: '⛔ Déconnexion',
-956|                 message: data.reason || 'Vous avez été déconnecté.',
-957|                 onConfirm: () => {
-958|                     localStorage.removeItem('meetgay_token');
-959|                     localStorage.removeItem('meetgay_user');
-960|                     window.location.href = '/login.html';
-961|                 }
-962|             });
-963| 
-964|             // 🔥 Redirection automatique après 3 secondes (même sans cliquer)
-965|             setTimeout(() => {
-966|                 localStorage.removeItem('meetgay_token');
-967|                 localStorage.removeItem('meetgay_user');
-968|                 window.location.href = '/login.html';
-969|             }, 3000);
-970|         } else {
-971|             // Fallback si le modal n'existe pas
-972|             localStorage.removeItem('meetgay_token');
-973|             localStorage.removeItem('meetgay_user');
-974|             window.location.href = '/login.html';
-975|         }
-976|     });
-977| 
-978|     // --------------------------------------------------------------
-979|     // ENVELOPPE (messages reçus)
-980|     // --------------------------------------------------------------
-981|     envelope.onclick = async () => {
-982|         if (pendingMessages.length === 0) return;
-983| 
-984|         const msg = pendingMessages.shift();
-985|         displayMessage(msg.message, 'received', msg.fromPseudo);
-986|         addToHistory(msg.fromPseudo, msg.message, 'received', msg.fromPseudo, user.pseudo);
-987|         loadHistory(msg.fromPseudo);
-988| 
-989|         currentTarget = msg.fromPseudo;
-990|         currentTargetName = msg.fromPseudo;
-991|         messageInput.disabled = false;
-992|         sendBtn.disabled = false;
-993|         messageInput.placeholder = `Répondre à ${msg.fromPseudo}...`;
-994|         messageInput.focus();
-995| 
-996|         document.querySelectorAll('.user-item').forEach(el => {
-997|             if (el.textContent.includes(msg.fromPseudo) && !el.textContent.includes('(moi)')) {
-998|                 document.querySelectorAll('.user-item').forEach(e => e.classList.remove('current-target'));
-999|                 el.classList.add('current-target');
-1000|             }
-1001|         });
+939|                 timestamp: new Date()
+940|             });
+941| 
+942|             // Confirmer à l'expéditeur
+943|             socket.emit('message sent confirmation', {
+944|                 message: message,
+945|                 toPseudo: toSocketId,
+946|                 timestamp: new Date()
+947|             });
+948| 
+949|             console.log(`💬 Message de ${fromPseudo} à ${toSocketId}: ${message.substring(0, 30)}...`);
+950|         } else {
+951|             // Le destinataire n'est pas connecté, le message est déjà sauvegardé en base
+952|             console.log(`💤 Message de ${fromPseudo} à ${toSocketId} sauvegardé (destinataire déconnecté)`);
+953|             socket.emit('message sent confirmation', {
+954|                 message: message,
+955|                 toPseudo: toSocketId,
+956|                 timestamp: new Date(),
+957|                 pending: true
+958|             });
+959|         }
+960|     });
+961| 
+962|     socket.on('error', (msg) => {
+963|         console.error('Erreur:', msg);
+964|     });
+965| 
+966|     socket.on('force logout', (data) => {
+967|         console.log('🚪 Force logout reçu:', data.reason);
+968| 
+969|         if (typeof MGModal !== 'undefined') {
+970|             MGModal.show({
+971|                 title: '⛔ Déconnexion',
+972|                 message: data.reason || 'Vous avez été déconnecté.',
+973|                 onConfirm: () => {
+974|                     localStorage.removeItem('meetgay_token');
+975|                     localStorage.removeItem('meetgay_user');
+976|                     window.location.href = '/login.html';
+977|                 }
+978|             });
+979| 
+980|             // 🔥 Redirection automatique après 3 secondes (même sans cliquer)
+981|             setTimeout(() => {
+982|                 localStorage.removeItem('meetgay_token');
+983|                 localStorage.removeItem('meetgay_user');
+984|                 window.location.href = '/login.html';
+985|             }, 3000);
+986|         } else {
+987|             // Fallback si le modal n'existe pas
+988|             localStorage.removeItem('meetgay_token');
+989|             localStorage.removeItem('meetgay_user');
+990|             window.location.href = '/login.html';
+991|         }
+992|     });
+993| 
+994|     // --------------------------------------------------------------
+995|     // ENVELOPPE (messages reçus)
+996|     // --------------------------------------------------------------
+997|     envelope.onclick = async () => {
+998|         // 1️⃣ Si l'enveloppe clignote (nouveaux messages), arrêter le clignotement
+999|         if (envelope.classList.contains('blink')) {
+1000|             envelope.classList.remove('blink');
+1001|         }
 1002| 
-1003|         const senderInfo = usersList.find(u => u.pseudo === msg.fromPseudo);
-1004|         if (senderInfo) {
-1005|             let fullSender = senderInfo;
-1006|             if (typeof window.showContactInfo === 'function') {
-1007|                 window.showContactInfo(
-1008|                     fullSender.pseudo,
-1009|                     fullSender.age,
-1010|                     fullSender.origine,
-1011|                     fullSender.gender,
-1012|                     fullSender.tendencies,
-1013|                     fullSender,
-1014|                     fullSender.locationCity || fullSender.locationCode,
-1015|                     fullSender.locationCommune || null,
-1016|                     fullSender.purpose,
-1017|                     fullSender.bio || 'Pas de présentation',
-1018|                     window.blockedUsers || []
-1019|                 );
-1020|             } else {
-1021|                 console.error('❌ showContactInfo non disponible');
-1022|             }
-1023|         } else {
-1024|             if (typeof window.showContactInfo === 'function') {
-1025|                 window.showContactInfo(msg.fromPseudo, '?', '', '?', '?', {}, '?', null, '?', 'Bio non disponible', []);
-1026|             }
-1027|         }
-1028| 
-1029|         updateEnvelope(pendingMessages.length);
-1030|         if (pendingMessages.length === 0) {
-1031|             stopBlinking();
-1032|         }
-1033|     };
-1034| 
-1035|     // --------------------------------------------------------------
-1036|     // ENVOI DE MESSAGE
-1037|     // --------------------------------------------------------------
-1038|     sendBtn.onclick = () => {
-1039|         const text = messageInput.value.trim();
-1040|         if (!text || !currentTarget) return;
-1041| 
-1042|         if (currentTargetName && window.blockedUsers.includes(currentTargetName)) {
-1043|             if (typeof MGModal !== 'undefined') {
-1044|                 MGModal.show({
-1045|                     title: '🚫 Message bloqué',
-1046|                     message: `Vous avez bloqué ${currentTargetName}. Débloquez-le d'abord.`,
-1047|                     onConfirm: () => { }
-1048|                 });
-1049|             } else {
-1050|                 alert(`Vous avez bloqué ${currentTargetName}`);
-1051|             }
-1052|             return;
-1053|         }
-1054| 
-1055|         if (currentReceivedMessage !== null) {
-1056|             clearMessageArea();
-1057|         }
-1058| 
-1059|         socket.emit('private message', {
-1060|             toSocketId: currentTarget,
-1061|             message: text,
-1062|             fromPseudo: user.pseudo
-1063|         });
-1064|     };
-1065| 
-1066|     messageInput.addEventListener('keypress', (e) => {
-1067|         if (e.key === 'Enter') sendBtn.click();
-1068|     });
-1069| 
-1070|     // --------------------------------------------------------------
-1071|     // CHAT PRIVÉ (POPUP)
-1072|     // --------------------------------------------------------------
-1073|     let privateChatAvailable = {};
-1074| 
-1075|     socket.on('privateChatAvailable', (data) => {
-1076|         console.log(`🔔 Seuil atteint avec ${data.with}`);
-1077|         privateChatAvailable[data.with] = true;
-1078|         showPrivatePopup(data.with);
-1079|     });
-1080| 
-1081|     function showPrivatePopup(pseudo) {
-1082|         if (document.getElementById('privatePopup')) return;
-1083| 
-1084|         const chatPanel = document.querySelector('.chat-panel');
-1085|         if (!chatPanel) return;
-1086| 
-1087|         if (getComputedStyle(chatPanel).position !== 'relative') {
-1088|             chatPanel.style.position = 'relative';
-1089|         }
-1090| 
-1091|         const inputArea = document.querySelector('.input-area');
-1092|         if (!inputArea) return;
-1093| 
-1094|         const inputRect = inputArea.getBoundingClientRect();
-1095|         const chatRect = chatPanel.getBoundingClientRect();
-1096|         const topPosition = inputRect.bottom - chatRect.top;
-1097| 
-1098|         const popup = document.createElement('div');
-1099|         popup.id = 'privatePopup';
-1100|         popup.style.cssText = `
-1101|             position: absolute;
-1102|             top: ${topPosition + 5}px;
-1103|             left: 0;
-1104|             right: 0;
-1105|             background: #2c3e50;
-1106|             color: white;
-1107|             border-radius: 8px;
-1108|             padding: 10px 12px;
-1109|             z-index: 1000;
-1110|             font-family: 'Segoe UI', sans-serif;
-1111|             font-size: 12px;
-1112|             display: flex;
-1113|             justify-content: space-between;
-1114|             align-items: center;
-1115|             flex-wrap: wrap;
-1116|             gap: 8px;
-1117|             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-1118|             opacity: 0;
-1119|             transform: translateY(-10px);
-1120|             transition: opacity 0.2s ease, transform 0.2s ease;
-1121|         `;
-1122| 
-1123|         popup.innerHTML = `
-1124|             <span>💬 <strong>${pseudo}</strong> : 3 messages échangés. Passer en privé ?</span>
-1125|             <div style="display: flex; gap: 6px;">
-1126|                 <button id="popupAccept" style="background:#27ae60; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">✅ Oui</button>
-1127|                 <button id="popupDecline" style="background:#e74c3c; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">❌ Non</button>
-1128|             </div>
-1129|         `;
-1130| 
-1131|         chatPanel.appendChild(popup);
-1132| 
-1133|         setTimeout(() => {
-1134|             popup.style.opacity = '1';
-1135|             popup.style.transform = 'translateY(0)';
-1136|         }, 10);
-1137| 
-1138|         document.getElementById('popupAccept').onclick = () => {
-1139|             socket.emit('invitePrivate', { toPseudo: pseudo, fromPseudo: user.pseudo });
-1140|             popup.remove();
-1141|         };
-1142| 
-1143|         document.getElementById('popupDecline').onclick = () => {
-1144|             popup.remove();
-1145|         };
-1146|     }
-1147| 
-1148|     socket.on('privateInviteReceived', (data) => {
-1149|         if (document.getElementById('invitePopup')) return;
-1150| 
-1151|         const chatPanel = document.querySelector('.chat-panel');
-1152|         if (!chatPanel) return;
-1153| 
-1154|         if (getComputedStyle(chatPanel).position !== 'relative') {
-1155|             chatPanel.style.position = 'relative';
-1156|         }
+1003|         // 2️⃣ Si des messages sont en attente dans pendingMessages, les afficher
+1004|         if (pendingMessages.length > 0) {
+1005|             const msg = pendingMessages.shift();
+1006|             displayMessage(msg.message, 'received', msg.fromPseudo);
+1007|             addToHistory(msg.fromPseudo, msg.message, 'received', msg.fromPseudo, user.pseudo);
+1008|             loadHistory(msg.fromPseudo);
+1009| 
+1010|             currentTarget = msg.fromPseudo;
+1011|             currentTargetName = msg.fromPseudo;
+1012|             messageInput.disabled = false;
+1013|             sendBtn.disabled = false;
+1014|             messageInput.placeholder = `Répondre à ${msg.fromPseudo}...`;
+1015|             messageInput.focus();
+1016| 
+1017|             document.querySelectorAll('.user-item').forEach(el => {
+1018|                 if (el.textContent.includes(msg.fromPseudo) && !el.textContent.includes('(moi)')) {
+1019|                     document.querySelectorAll('.user-item').forEach(e => e.classList.remove('current-target'));
+1020|                     el.classList.add('current-target');
+1021|                 }
+1022|             });
+1023| 
+1024|             const senderInfo = usersList.find(u => u.pseudo === msg.fromPseudo);
+1025|             if (senderInfo) {
+1026|                 let fullSender = senderInfo;
+1027|                 if (typeof window.showContactInfo === 'function') {
+1028|                     window.showContactInfo(
+1029|                         fullSender.pseudo,
+1030|                         fullSender.age,
+1031|                         fullSender.origine,
+1032|                         fullSender.gender,
+1033|                         fullSender.tendencies,
+1034|                         fullSender,
+1035|                         fullSender.locationCity || fullSender.locationCode,
+1036|                         fullSender.locationCommune || null,
+1037|                         fullSender.purpose,
+1038|                         fullSender.bio || 'Pas de présentation',
+1039|                         window.blockedUsers || []
+1040|                     );
+1041|                 } else {
+1042|                     console.error('❌ showContactInfo non disponible');
+1043|                 }
+1044|             } else {
+1045|                 if (typeof window.showContactInfo === 'function') {
+1046|                     window.showContactInfo(msg.fromPseudo, '?', '', '?', '?', {}, '?', null, '?', 'Bio non disponible', []);
+1047|                 }
+1048|             }
+1049| 
+1050|             updateEnvelope(pendingMessages.length);
+1051|             if (pendingMessages.length === 0) {
+1052|                 stopBlinking();
+1053|             }
+1054|         } else {
+1055|             // 3️⃣ Sinon, ouvrir le chat normalement
+1056|             if (typeof openChat === 'function') {
+1057|                 openChat();
+1058|             }
+1059|         }
+1060|     };
+1061| 
+1062|     // --------------------------------------------------------------
+1063|     // ENVOI DE MESSAGE
+1064|     // --------------------------------------------------------------
+1065|     sendBtn.onclick = () => {
+1066|         const text = messageInput.value.trim();
+1067|         if (!text || !currentTarget) return;
+1068| 
+1069|         if (currentTargetName && window.blockedUsers.includes(currentTargetName)) {
+1070|             if (typeof MGModal !== 'undefined') {
+1071|                 MGModal.show({
+1072|                     title: '🚫 Message bloqué',
+1073|                     message: `Vous avez bloqué ${currentTargetName}. Débloquez-le d'abord.`,
+1074|                     onConfirm: () => { }
+1075|                 });
+1076|             } else {
+1077|                 alert(`Vous avez bloqué ${currentTargetName}`);
+1078|             }
+1079|             return;
+1080|         }
+1081| 
+1082|         if (currentReceivedMessage !== null) {
+1083|             clearMessageArea();
+1084|         }
+1085| 
+1086|         socket.emit('private message', {
+1087|             toSocketId: currentTarget,
+1088|             message: text,
+1089|             fromPseudo: user.pseudo
+1090|         });
+1091|     };
+1092| 
+1093|     messageInput.addEventListener('keypress', (e) => {
+1094|         if (e.key === 'Enter') sendBtn.click();
+1095|     });
+1096| 
+1097|     // --------------------------------------------------------------
+1098|     // CHAT PRIVÉ (POPUP)
+1099|     // --------------------------------------------------------------
+1100|     let privateChatAvailable = {};
+1101| 
+1102|     socket.on('privateChatAvailable', (data) => {
+1103|         console.log(`🔔 Seuil atteint avec ${data.with}`);
+1104|         privateChatAvailable[data.with] = true;
+1105|         showPrivatePopup(data.with);
+1106|     });
+1107| 
+1108|     function showPrivatePopup(pseudo) {
+1109|         if (document.getElementById('privatePopup')) return;
+1110| 
+1111|         const chatPanel = document.querySelector('.chat-panel');
+1112|         if (!chatPanel) return;
+1113| 
+1114|         if (getComputedStyle(chatPanel).position !== 'relative') {
+1115|             chatPanel.style.position = 'relative';
+1116|         }
+1117| 
+1118|         const inputArea = document.querySelector('.input-area');
+1119|         if (!inputArea) return;
+1120| 
+1121|         const inputRect = inputArea.getBoundingClientRect();
+1122|         const chatRect = chatPanel.getBoundingClientRect();
+1123|         const topPosition = inputRect.bottom - chatRect.top;
+1124| 
+1125|         const popup = document.createElement('div');
+1126|         popup.id = 'privatePopup';
+1127|         popup.style.cssText = `
+1128|             position: absolute;
+1129|             top: ${topPosition + 5}px;
+1130|             left: 0;
+1131|             right: 0;
+1132|             background: #2c3e50;
+1133|             color: white;
+1134|             border-radius: 8px;
+1135|             padding: 10px 12px;
+1136|             z-index: 1000;
+1137|             font-family: 'Segoe UI', sans-serif;
+1138|             font-size: 12px;
+1139|             display: flex;
+1140|             justify-content: space-between;
+1141|             align-items: center;
+1142|             flex-wrap: wrap;
+1143|             gap: 8px;
+1144|             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+1145|             opacity: 0;
+1146|             transform: translateY(-10px);
+1147|             transition: opacity 0.2s ease, transform 0.2s ease;
+1148|         `;
+1149| 
+1150|         popup.innerHTML = `
+1151|             <span>💬 <strong>${pseudo}</strong> : 3 messages échangés. Passer en privé ?</span>
+1152|             <div style="display: flex; gap: 6px;">
+1153|                 <button id="popupAccept" style="background:#27ae60; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">✅ Oui</button>
+1154|                 <button id="popupDecline" style="background:#e74c3c; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">❌ Non</button>
+1155|             </div>
+1156|         `;
 1157| 
-1158|         const inputArea = document.querySelector('.input-area');
-1159|         if (!inputArea) return;
-1160| 
-1161|         const inputRect = inputArea.getBoundingClientRect();
-1162|         const chatRect = chatPanel.getBoundingClientRect();
-1163|         const topPosition = inputRect.bottom - chatRect.top;
+1158|         chatPanel.appendChild(popup);
+1159| 
+1160|         setTimeout(() => {
+1161|             popup.style.opacity = '1';
+1162|             popup.style.transform = 'translateY(0)';
+1163|         }, 10);
 1164| 
-1165|         const popup = document.createElement('div');
-1166|         popup.id = 'invitePopup';
-1167|         popup.style.cssText = `
-1168|             position: absolute;
-1169|             top: ${topPosition + 5}px;
-1170|             left: 0;
-1171|             right: 0;
-1172|             background: #2c3e50;
-1173|             color: white;
-1174|             border-radius: 8px;
-1175|             padding: 10px 12px;
-1176|             z-index: 1000;
-1177|             font-family: 'Segoe UI', sans-serif;
-1178|             font-size: 12px;
-1179|             display: flex;
-1180|             justify-content: space-between;
-1181|             align-items: center;
-1182|             flex-wrap: wrap;
-1183|             gap: 8px;
-1184|             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-1185|             opacity: 0;
-1186|             transform: translateY(-10px);
-1187|             transition: opacity 0.2s ease, transform 0.2s ease;
-1188|         `;
-1189| 
-1190|         popup.innerHTML = `
-1191|             <span>🔔 <strong>${data.from}</strong> vous invite en chat privé.</span>
-1192|             <div style="display: flex; gap: 6px;">
-1193|                 <button id="inviteAccept" style="background:#27ae60; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">✅ Accepter</button>
-1194|                 <button id="inviteDecline" style="background:#e74c3c; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">❌ Refuser</button>
-1195|             </div>
-1196|         `;
-1197| 
-1198|         chatPanel.appendChild(popup);
-1199| 
-1200|         setTimeout(() => {
-1201|             popup.style.opacity = '1';
-1202|             popup.style.transform = 'translateY(0)';
-1203|         }, 10);
-1204| 
-1205|         document.getElementById('inviteAccept').onclick = () => {
-1206|             socket.emit('acceptPrivateInvite', { fromPseudo: data.from, toPseudo: user.pseudo });
-1207|             popup.remove();
-1208|             alert(`💬 Chat privé ouvert avec ${data.from} !`);
-1209|         };
-1210| 
-1211|         document.getElementById('inviteDecline').onclick = () => {
-1212|             socket.emit('declinePrivateInvite', { fromPseudo: user.pseudo, toPseudo: data.from });
-1213|             popup.remove();
-1214|         };
-1215|     });
+1165|         document.getElementById('popupAccept').onclick = () => {
+1166|             socket.emit('invitePrivate', { toPseudo: pseudo, fromPseudo: user.pseudo });
+1167|             popup.remove();
+1168|         };
+1169| 
+1170|         document.getElementById('popupDecline').onclick = () => {
+1171|             popup.remove();
+1172|         };
+1173|     }
+1174| 
+1175|     socket.on('privateInviteReceived', (data) => {
+1176|         if (document.getElementById('invitePopup')) return;
+1177| 
+1178|         const chatPanel = document.querySelector('.chat-panel');
+1179|         if (!chatPanel) return;
+1180| 
+1181|         if (getComputedStyle(chatPanel).position !== 'relative') {
+1182|             chatPanel.style.position = 'relative';
+1183|         }
+1184| 
+1185|         const inputArea = document.querySelector('.input-area');
+1186|         if (!inputArea) return;
+1187| 
+1188|         const inputRect = inputArea.getBoundingClientRect();
+1189|         const chatRect = chatPanel.getBoundingClientRect();
+1190|         const topPosition = inputRect.bottom - chatRect.top;
+1191| 
+1192|         const popup = document.createElement('div');
+1193|         popup.id = 'invitePopup';
+1194|         popup.style.cssText = `
+1195|             position: absolute;
+1196|             top: ${topPosition + 5}px;
+1197|             left: 0;
+1198|             right: 0;
+1199|             background: #2c3e50;
+1200|             color: white;
+1201|             border-radius: 8px;
+1202|             padding: 10px 12px;
+1203|             z-index: 1000;
+1204|             font-family: 'Segoe UI', sans-serif;
+1205|             font-size: 12px;
+1206|             display: flex;
+1207|             justify-content: space-between;
+1208|             align-items: center;
+1209|             flex-wrap: wrap;
+1210|             gap: 8px;
+1211|             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+1212|             opacity: 0;
+1213|             transform: translateY(-10px);
+1214|             transition: opacity 0.2s ease, transform 0.2s ease;
+1215|         `;
 1216| 
-1217|     // ========== POPUP SYSTÈME POUR RETOUR ARRIÈRE ==========
-1218|     let userHasInteracted = false;
-1219| 
-1220|     document.body.addEventListener('click', () => userHasInteracted = true, { once: true });
-1221|     document.body.addEventListener('keydown', () => userHasInteracted = true, { once: true });
-1222| 
-1223|     history.pushState(null, null, location.href);
+1217|         popup.innerHTML = `
+1218|             <span>🔔 <strong>${data.from}</strong> vous invite en chat privé.</span>
+1219|             <div style="display: flex; gap: 6px;">
+1220|                 <button id="inviteAccept" style="background:#27ae60; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">✅ Accepter</button>
+1221|                 <button id="inviteDecline" style="background:#e74c3c; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">❌ Refuser</button>
+1222|             </div>
+1223|         `;
 1224| 
-1225|     window.addEventListener('popstate', function (event) {
-1226|         if (!userHasInteracted) {
-1227|             history.pushState(null, null, location.href);
-1228|             return;
-1229|         }
-1230| 
-1231|         // 🔥 ENVOYER LA REQUÊTE AVANT DE QUITTER
-1232|         if (currentUserPseudo) {
-1233|             // Utiliser sendBeacon pour garantir l'envoi
-1234|             const data = JSON.stringify({ pseudo: currentUserPseudo });
-1235|             navigator.sendBeacon('/api/mark-for-deletion', data);
-1236| 
-1237|             // Fallback avec fetch si sendBeacon n'est pas supporté
-1238|             if (!navigator.sendBeacon) {
-1239|                 fetch('/api/mark-for-deletion', {
-1240|                     method: 'POST',
-1241|                     headers: { 'Content-Type': 'application/json' },
-1242|                     body: data
-1243|                 }).catch(() => { });
-1244|             }
-1245|         }
+1225|         chatPanel.appendChild(popup);
+1226| 
+1227|         setTimeout(() => {
+1228|             popup.style.opacity = '1';
+1229|             popup.style.transform = 'translateY(0)';
+1230|         }, 10);
+1231| 
+1232|         document.getElementById('inviteAccept').onclick = () => {
+1233|             socket.emit('acceptPrivateInvite', { fromPseudo: data.from, toPseudo: user.pseudo });
+1234|             popup.remove();
+1235|             alert(`💬 Chat privé ouvert avec ${data.from} !`);
+1236|         };
+1237| 
+1238|         document.getElementById('inviteDecline').onclick = () => {
+1239|             socket.emit('declinePrivateInvite', { fromPseudo: user.pseudo, toPseudo: data.from });
+1240|             popup.remove();
+1241|         };
+1242|     });
+1243| 
+1244|     // ========== POPUP SYSTÈME POUR RETOUR ARRIÈRE ==========
+1245|     let userHasInteracted = false;
 1246| 
-1247|         const beforeUnloadHandler = (e) => {
-1248|             e.preventDefault();
-1249|             e.returnValue = true;
-1250|         };
+1247|     document.body.addEventListener('click', () => userHasInteracted = true, { once: true });
+1248|     document.body.addEventListener('keydown', () => userHasInteracted = true, { once: true });
+1249| 
+1250|     history.pushState(null, null, location.href);
 1251| 
-1252|         window.addEventListener('beforeunload', beforeUnloadHandler);
-1253| 
-1254|         setTimeout(() => {
-1255|             window.removeEventListener('beforeunload', beforeUnloadHandler);
-1256|         }, 500);
+1252|     window.addEventListener('popstate', function (event) {
+1253|         if (!userHasInteracted) {
+1254|             history.pushState(null, null, location.href);
+1255|             return;
+1256|         }
 1257| 
-1258|         history.pushState(null, null, location.href);
-1259|     });
-1260|     window.addEventListener('pagehide', () => {
-1261|         if (currentUserPseudo) {
-1262|             // 🔥 Nouveau : marquer pour suppression au lieu de supprimer immédiatement
-1263|             navigator.sendBeacon('/api/mark-for-deletion', JSON.stringify({ pseudo: currentUserPseudo }));
-1264|             // Fallback : si la nouvelle route échoue, on garde l'ancien mécanisme
-1265|             setTimeout(() => {
-1266|                 navigator.sendBeacon('/api/delete-user', JSON.stringify({ pseudo: currentUserPseudo }));
-1267|                 navigator.sendBeacon('/api/messages/delete-user', JSON.stringify({ pseudo: currentUserPseudo }));
-1268|             }, 100);
-1269|         }
-1270|     });
-1271| 
-1272| } // ← FIN DE startChat()
+1258|         // 🔥 ENVOYER LA REQUÊTE AVANT DE QUITTER
+1259|         if (currentUserPseudo) {
+1260|             // Utiliser sendBeacon pour garantir l'envoi
+1261|             const data = JSON.stringify({ pseudo: currentUserPseudo });
+1262|             navigator.sendBeacon('/api/mark-for-deletion', data);
+1263| 
+1264|             // Fallback avec fetch si sendBeacon n'est pas supporté
+1265|             if (!navigator.sendBeacon) {
+1266|                 fetch('/api/mark-for-deletion', {
+1267|                     method: 'POST',
+1268|                     headers: { 'Content-Type': 'application/json' },
+1269|                     body: data
+1270|                 }).catch(() => { });
+1271|             }
+1272|         }
 1273| 
-1274| // ========== LANCEMENT ==========
-1275| initUser();
+1274|         const beforeUnloadHandler = (e) => {
+1275|             e.preventDefault();
+1276|             e.returnValue = true;
+1277|         };
+1278| 
+1279|         window.addEventListener('beforeunload', beforeUnloadHandler);
+1280| 
+1281|         setTimeout(() => {
+1282|             window.removeEventListener('beforeunload', beforeUnloadHandler);
+1283|         }, 500);
+1284| 
+1285|         history.pushState(null, null, location.href);
+1286|     });
+1287|     window.addEventListener('pagehide', () => {
+1288|         if (currentUserPseudo) {
+1289|             // 🔥 Nouveau : marquer pour suppression au lieu de supprimer immédiatement
+1290|             navigator.sendBeacon('/api/mark-for-deletion', JSON.stringify({ pseudo: currentUserPseudo }));
+1291|             // Fallback : si la nouvelle route échoue, on garde l'ancien mécanisme
+1292|             setTimeout(() => {
+1293|                 navigator.sendBeacon('/api/delete-user', JSON.stringify({ pseudo: currentUserPseudo }));
+1294|                 navigator.sendBeacon('/api/messages/delete-user', JSON.stringify({ pseudo: currentUserPseudo }));
+1295|             }, 100);
+1296|         }
+1297|     });
+1298| 
+1299| } // ← FIN DE startChat()
+1300| 
+1301| // ========== LANCEMENT ==========
+1302| initUser();
 
 # ============================================
 # FILE: public\js\chat-script.js
