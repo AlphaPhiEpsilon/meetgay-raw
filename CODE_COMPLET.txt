@@ -1,6 +1,6 @@
 # MEETGAY - CODE COMPLET
-# Généré le 2026-07-09 13:33:46
-# 5 fichier(s) inclus
+# Généré le 2026-07-09 15:09:37
+# 6 fichier(s) inclus
 
 # ========== SOMMAIRE ==========
 
@@ -9,6 +9,7 @@
 # 3. modules\session-manager.js
 # 4. modules\socket-handlers.js
 # 5. modules\cleanup.js
+# 6. server.js
 
 # ============================================
 # FILE: public\js\login-script.js
@@ -1853,49 +1854,42 @@
 125|     // 5. GESTION DÉCONNEXION SOCKET.IO (disconnect)
 126|     // ============================================================
 127|     async function handleDisconnect(socketId) {
-128|         try {
-129|             // NE RIEN FAIRE - laisser Socket.IO gérer la reconnexion
-130|             // Le socket_id reste en base, l'utilisateur reste visible
-131|             // Le nettoyeur s'occupera de l'inactivité après 10 minutes
-132|             console.log(`🔌 Déconnexion socket ${socketId} (en attente de reconnexion)`);
-133|             return null;
-134|         } catch (err) {
-135|             console.error('❌ Erreur handleDisconnect:', err.message);
-136|             return null;
-137|         }
-138|     }
-139| 
-140|     // ============================================================
-141|     // 6. HEARTBEAT (mise à jour de l'activité)
-142|     // ============================================================
-143|     async function updateActivity(socketId) {
-144|         try {
-145|             const result = await pool.query(
-146|                 `UPDATE users SET last_seen = NOW() WHERE socket_id = $1 RETURNING pseudo`,
-147|                 [socketId]
-148|             );
-149|             if (result.rows.length > 0) {
-150|                 return true;
-151|             }
-152|             return false;
-153|         } catch (err) {
-154|             console.error('❌ Erreur updateActivity:', err.message);
-155|             return false;
-156|         }
-157|     }
-158| 
-159|     // ============================================================
-160|     // 7. EXPORT DES FONCTIONS
-161|     // ============================================================
-162|     return {
-163|         startCleanup,
-164|         markForDeletion,
-165|         deleteUser,
-166|         handleDisconnect,
-167|         updateActivity,
-168|         forceLogout
-169|     };
-170| };
+128|         // NE RIEN FAIRE - le nettoyeur s'occupe de tout
+129|         console.log(`🔌 Déconnexion socket ${socketId} (ignorée, nettoyeur fera le ménage)`);
+130|         return null;
+131|     }
+132| 
+133|     // ============================================================
+134|     // 6. HEARTBEAT (mise à jour de l'activité)
+135|     // ============================================================
+136|     async function updateActivity(socketId) {
+137|         try {
+138|             const result = await pool.query(
+139|                 `UPDATE users SET last_seen = NOW() WHERE socket_id = $1 RETURNING pseudo`,
+140|                 [socketId]
+141|             );
+142|             if (result.rows.length > 0) {
+143|                 return true;
+144|             }
+145|             return false;
+146|         } catch (err) {
+147|             console.error('❌ Erreur updateActivity:', err.message);
+148|             return false;
+149|         }
+150|     }
+151| 
+152|     // ============================================================
+153|     // 7. EXPORT DES FONCTIONS
+154|     // ============================================================
+155|     return {
+156|         startCleanup,
+157|         markForDeletion,
+158|         deleteUser,
+159|         handleDisconnect,
+160|         updateActivity,
+161|         forceLogout
+162|     };
+163| };
 
 # ============================================
 # FILE: modules\socket-handlers.js
@@ -2313,7 +2307,7 @@
 410|                 if (pseudo) {
 411|                     console.log(`🔌 Déconnexion traitée: ${pseudo}`);
 412|                 } else {
-413|                     console.log(`🔌 Déconnexion socket ${socket.id} : aucun pseudo trouvé`);
+413|                     console.log(`🔌 Déconnexion socket ${socket.id} : mis en veille (pseudo conservé en base)`);
 414|                 }
 415|             } catch (err) {
 416|                 console.error('❌ Erreur lors de la déconnexion:', err.message);
@@ -2358,4 +2352,232 @@
 27| }
 28| 
 29| module.exports = { cleanOldData };
+
+# ============================================
+# FILE: server.js
+# ============================================
+
+1| // ============================================================
+2| // server.js - Cœur du chat MeetGay (version base de données)1111
+3| // ============================================================
+4| 
+5| // ========== CHARGEMENT DES VARIABLES D'ENVIRONNEMENT ==========
+6| if (process.env.NODE_ENV !== 'production') {
+7|     try {
+8|         require('dotenv').config();
+9|         console.log('✅ dotenv chargé (environnement local)');
+10|     } catch (err) {
+11|         console.log('⚠️ dotenv non installé, utilisation des variables système');
+12|     }
+13| } else {
+14|     console.log('✅ Mode production, variables Render utilisées');
+15| }
+16| 
+17| // ========== IMPORTS ==========
+18| const express = require('express');
+19| const compression = require('compression');
+20| const http = require('http');
+21| const socketIo = require('socket.io');
+22| const jwt = require('jsonwebtoken');
+23| const { Pool } = require('pg');
+24| const { disconnectBannedUser } = require('./moderation');
+25| const path = require('path');
+26| const bcrypt = require('bcrypt');
+27| const session = require('express-session');
+28| const pgSession = require('connect-pg-simple')(session);
+29| 
+30| 
+31| // Modules internes
+32| const { cleanOldData } = require('./modules/cleanup.js');
+33| const contactRoutes = require('./modules/routes/api-contact.js');
+34| const pool = require('./modules/postgresql.js');
+35| const htmlRoutes = require('./modules/routes/html.js');
+36| const adminRoutes = require('./modules/routes/admin.js');
+37| const authRoutes = require('./modules/routes/api-auth.js');
+38| const messagesRoutes = require('./modules/routes/api-messages.js');
+39| const maintenanceMiddleware = require('./modules/middleware/maintenance.js');
+40| const socketHandlers = require('./modules/socket-handlers.js');
+41| // Route de géocodage
+42| const geocodeRoutes = require('./modules/routes/geocode');
+43| 
+44| 
+45| 
+46| // ==========  VARIABLES GLOBALES ==========
+47| const TEST_MODE = false;  // ← Désactive le fingerprint si true
+48| 
+49| // JWT_SECRET pour les utilisateurs normaux
+50| const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
+51| 
+52| // PARAMÈTRES DE MODÉRATION
+53| const REPORTS_THRESHOLD = 2;        // Nombre de signalements (personnes différentes) avant auto-ban
+54| const REPORTS_WINDOW_MINUTES = 60;  // Fenêtre de temps en minutes
+55| const TEMP_BAN_MINUTES = 10;        // Durée du bannissement temporaire
+56| 
+57| // PARAMÈTRES DE NETTOYAGE AUTO
+58| const LOGS_RETENTION_DAYS = 30;     // Garder 30 jours de journal
+59| const REPORTS_RETENTION_DAYS = 60;  // Garder 60 jours de signalements
+60| const AUTO_CLEANUP_ENABLED = false;   // Activer/désactiver le nettoyage auto 1H
+61| const VISITOR_CLEANUP_ENABLED = false; // Nettoyage visiteurs déconnectés (1 minute)
+62| const INACTIVITY_MINUTES = 10;      // Déconnexion après X minutes sans activité
+63| const CLEANUP_INTERVAL_MINUTES = 1; // Nettoyage des absents toutes les X minutes
+64| 
+65| // DESACTIVE LE CACHE SERVEUR
+66| const DEV_MODE = true;
+67| 
+68| 
+69| 
+70| 
+71| 
+72| // ==========  CONFIGURATION EXPRESS ==========
+73| const app = express();
+74| const server = http.createServer(app);
+75| 
+76| console.log('🔍 DB_USER:', process.env.DB_USER);
+77| console.log('🔍 DB_PASSWORD:', process.env.DB_PASSWORD ? '******' : 'MISSING');
+78| 
+79| // Compression
+80| app.use(compression({
+81|     level: 6,
+82|     threshold: 1024,
+83|     filter: (req, res) => {
+84|         if (req.path === '/socket.io/') return false;
+85|         return compression.filter(req, res);
+86|     }
+87| }));
+88| 
+89| app.use(express.json());
+90| 
+91| app.use(session({
+92|     store: new pgSession({
+93|         pool: pool,
+94|         tableName: 'session',
+95|         createTableIfMissing: false,
+96|         pruneSessionInterval: 60
+97|     }),
+98|     secret: 'un-super-secret-change-moi',
+99|     resave: false,
+100|     saveUninitialized: false,
+101|     cookie: {
+102|         httpOnly: true,
+103|         secure: false,
+104|         maxAge: 30 * 24 * 60 * 60 * 1000 // 30 jours
+105|     }
+106| }));
+107| 
+108| 
+109| app.use(maintenanceMiddleware(pool));
+110| contactRoutes(app);
+111| htmlRoutes(app, pool);
+112| messagesRoutes(app, pool);
+113| authRoutes(app, pool);
+114| geocodeRoutes(app);
+115| require('./modules/routes/api-block')(app, pool);
+116| 
+117| // ========== CONFIGURATION DES FICHIERS STATIQUES ==========
+118| 
+119| // 🔥 Détermine les options selon le mode
+120| const staticOptions = {
+121|     setHeaders: function (res, path) {
+122|         if (path.endsWith('.css')) {
+123|             res.setHeader('Content-Type', 'text/css');
+124|         }
+125|     }
+126| };
+127| 
+128| // 🔥 Si DEV_MODE est activé, désactive le cache
+129| if (DEV_MODE === true) {
+130|     staticOptions.etag = false;           // Désactive ETag
+131|     staticOptions.maxAge = 0;             // Pas de mise en cache
+132|     staticOptions.lastModified = false;   // Désactive Last-Modified
+133| 
+134|     // Ajoute des headers anti-cache
+135|     staticOptions.setHeaders = function (res, path) {
+136|         if (path.endsWith('.css')) {
+137|             res.setHeader('Content-Type', 'text/css');
+138|         }
+139|         // 🔥 Headers anti-cache pour TOUS les fichiers
+140|         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
+141|         res.setHeader('Pragma', 'no-cache');
+142|         res.setHeader('Expires', '0');
+143|     };
+144| 
+145|     console.log('🔥 MODE DÉVELOPPEMENT ACTIF - Cache désactivé');
+146| } else {
+147|     console.log('✅ MODE PRODUCTION - Cache activé');
+148| }
+149| 
+150| // Applique la configuration
+151| app.use(express.static('/var/www/meetgay/public', staticOptions));
+152| 
+153| app.use(express.json());
+154| 
+155| // 🔥 Middleware anti-cache (seulement en développement)
+156| if (DEV_MODE === true) {
+157|     app.use((req, res, next) => {
+158|         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
+159|         res.setHeader('Pragma', 'no-cache');
+160|         res.setHeader('Expires', '0');
+161|         next();
+162|     });
+163|     console.log('🔥 Middleware anti-cache activé');
+164| }
+165| 
+166| // ========== SOCKET.IO ==========
+167| const io = socketIo(server, {
+168|     cors: {
+169|         origin: "*",
+170|         methods: ["GET", "POST"],
+171|         credentials: true,
+172|         allowedHeaders: ["*"]
+173|     },
+174|     transports: ['websocket', 'polling'],
+175|     allowEIO3: true,
+176|     pingTimeout: 120000,    // ← 2 minutes (au lieu de 10)
+177|     pingInterval: 30000     // ← 30 secondes (au lieu de 1 minute)
+178| });
+179| 
+180| const sessionManager = require('./modules/session-manager.js')(io, pool, {
+181|     CLEANUP_INTERVAL: CLEANUP_INTERVAL_MINUTES * 60 * 1000,
+182|     INACTIVITY_THRESHOLD: INACTIVITY_MINUTES * 60 * 1000
+183| });
+184| 
+185| adminRoutes(app, pool, io);
+186| 
+187| // Gestion d'erreur (port déjà utilisé)
+188| server.on('error', (err) => {
+189|     if (err.code === 'EADDRINUSE') {
+190|         console.error(`❌ Port déjà utilisé. Tue l'autre processus et redémarre.`);
+191|         process.exit(1);
+192|     }
+193| });
+194| 
+195| // Initialiser la surveillance d’inactivité (5 minutes sans activité)
+196| const updateActivity = sessionManager.updateActivity;
+197| 
+198| // ========== LANCEMENT DES HANDLERS SOCKET (APRÈS io, users, constants) ==========
+199| socketHandlers(io, pool, sessionManager, updateActivity, REPORTS_THRESHOLD, REPORTS_WINDOW_MINUTES, TEMP_BAN_MINUTES);
+200| 
+201| // ========== NETTOYAGE AUTOMATIQUE ==========
+202| // Nettoyage des utilisateurs inactifs
+203| if (VISITOR_CLEANUP_ENABLED) {
+204|     sessionManager.startCleanup();
+205| } else {
+206|     console.log('🧹 Nettoyage des visiteurs déconnectés DÉSACTIVÉ');
+207| }
+208| 
+209| // Nettoyage auto du journal et signalements (toutes les 24h)
+210| if (AUTO_CLEANUP_ENABLED) {
+211|     setInterval(async () => {
+212|         await cleanOldData(pool, LOGS_RETENTION_DAYS, REPORTS_RETENTION_DAYS);
+213|     }, 24 * 60 * 60 * 1000);
+214|     console.log(`🧹 Nettoyage auto activé: journal ${LOGS_RETENTION_DAYS} jours, signalements ${REPORTS_RETENTION_DAYS} jours`);
+215| } else {
+216|     console.log(`🧹 Nettoyage auto DÉSACTIVÉ`);
+217| }
+218| 
+219| // ========== DÉMARRAGE ==========
+220| const PORT = process.env.PORT || 3005;
+221| server.listen(PORT, '0.0.0.0', () => {
+222|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+223| });
 
