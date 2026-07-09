@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET
-# Généré le 2026-07-09 12:03:05
+# Généré le 2026-07-09 12:38:11
 # 8 fichier(s) inclus
 
 # ========== SOMMAIRE ==========
@@ -780,8 +780,8 @@
 57| // PARAMÈTRES DE NETTOYAGE AUTO
 58| const LOGS_RETENTION_DAYS = 30;     // Garder 30 jours de journal
 59| const REPORTS_RETENTION_DAYS = 60;  // Garder 60 jours de signalements
-60| const AUTO_CLEANUP_ENABLED = true;   // Activer/désactiver le nettoyage auto 1H
-61| const VISITOR_CLEANUP_ENABLED = true; // Nettoyage visiteurs déconnectés (1 minute)
+60| const AUTO_CLEANUP_ENABLED = false;   // Activer/désactiver le nettoyage auto 1H
+61| const VISITOR_CLEANUP_ENABLED = false; // Nettoyage visiteurs déconnectés (1 minute)
 62| const INACTIVITY_MINUTES = 10;      // Déconnexion après X minutes sans activité
 63| const CLEANUP_INTERVAL_MINUTES = 1; // Nettoyage des absents toutes les X minutes
 64| 
@@ -1087,7 +1087,7 @@
 136|                 const pseudo = result.rows[0].pseudo;
 137|                 // Mettre last_seen à une date ancienne pour que le nettoyeur le supprime
 138|                 await pool.query(
-139|                     `UPDATE users SET last_seen = NOW() - INTERVAL '15 minutes', socket_id = NULL WHERE socket_id = $1`,
+139|                     `UPDATE users SET socket_id = NULL WHERE socket_id = $1`,
 140|                     [socketId]
 141|                 );
 142|                 console.log(`🔌 Déconnexion détectée: ${pseudo}, marqué comme inactif`);
@@ -1136,83 +1136,35 @@
 # FILE: modules\cleanup.js
 # ============================================
 
-1| // options.js - Tâches annexes (nettoyage, surveillance inactivité)
-2| const { Pool } = require('pg');
-3| // 1. NETTOYAGE PÉRIODIQUE DES VISITEURS DÉCONNECTÉS
-4| function startCleanup(pool, getOnlineUsers, intervalMs = 60 * 1000) {
-5|     console.log(`🧹 Nettoyage programmé toutes les ${intervalMs / 1000} secondes`);
-6| 
-7|     // Stocker les utilisateurs vus précédemment
-8|     let lastSeenUsers = {};
-9| 
-10|     setInterval(async () => {
-11|         try {
-12|             const onlinePseudos = getOnlineUsers();
-13|             const now = Date.now();
-14| 
-15|             // Mettre à jour les utilisateurs vus
-16|             for (const pseudo of onlinePseudos) {
-17|                 lastSeenUsers[pseudo] = now;
-18|             }
-19| 
-20|             // Trouver les pseudos qui ne sont plus dans users depuis > 15 secondes
-21|             const toDelete = [];
-22|             for (const [pseudo, lastSeen] of Object.entries(lastSeenUsers)) {
-23|                 if (!onlinePseudos.includes(pseudo) && (now - lastSeen) > 15000) {
-24|                     toDelete.push(pseudo);
-25|                 }
-26|             }
-27| 
-28|             // Supprimer les fantômes
-29|             if (toDelete.length > 0) {
-30|                 const placeholders = toDelete.map((_, i) => `$${i + 1}`).join(',');
-31|                 const result = await pool.query(
-32|                     `DELETE FROM users WHERE pseudo IN (${placeholders}) AND (is_member = false OR is_member IS NULL)`,
-33|                     toDelete
-34|                 );
-35|                 if (result.rowCount > 0) {
-36|                     console.log(`🧹 ${result.rowCount} visiteur(s) supprimé(s) (fantômes)`);
-37|                     // Nettoyer lastSeenUsers
-38|                     for (const pseudo of toDelete) {
-39|                         delete lastSeenUsers[pseudo];
-40|                     }
-41|                 }
-42|             }
-43|         } catch (err) {
-44|             console.error('❌ Erreur nettoyage:', err.message);
-45|         }
-46|     }, intervalMs);
-47| }
-48| 
-49| 
-50| 
-51| // ========== NETTOYAGE AUTO DU JOURNAL ET SIGNALEMENTS ==========
-52| async function cleanOldData(pool, LOGS_RETENTION_DAYS, REPORTS_RETENTION_DAYS) {
-53|     try {
-54|         // Nettoyer le journal (moderation_actions)
-55|         const logsResult = await pool.query(
-56|             `DELETE FROM moderation_actions 
-57|              WHERE created_at < NOW() - INTERVAL '${LOGS_RETENTION_DAYS} days'`
-58|         );
-59|         if (logsResult.rowCount > 0) {
-60|             console.log(`🧹 Nettoyage auto journal: ${logsResult.rowCount} entrées supprimées (> ${LOGS_RETENTION_DAYS} jours)`);
-61|         }
-62| 
-63|         // Nettoyer les signalements (reports)
-64|         const reportsResult = await pool.query(
-65|             `DELETE FROM reports 
-66|              WHERE created_at < NOW() - INTERVAL '${REPORTS_RETENTION_DAYS} days'`
-67|         );
-68|         if (reportsResult.rowCount > 0) {
-69|             console.log(`🧹 Nettoyage auto signalements: ${reportsResult.rowCount} signalements supprimés (> ${REPORTS_RETENTION_DAYS} jours)`);
-70|         }
-71|     } catch (err) {
-72|         console.error('❌ Erreur nettoyage auto:', err);
-73|     }
-74| }
-75| 
-76| module.exports = { startCleanup, cleanOldData };
-77| 
+1| // modules/cleanup.js - Nettoyage des logs et signalements uniquement
+2| // La gestion des sessions est maintenant dans session-manager.js
+3| 
+4| // ========== NETTOYAGE AUTO DU JOURNAL ET SIGNALEMENTS ==========
+5| async function cleanOldData(pool, LOGS_RETENTION_DAYS, REPORTS_RETENTION_DAYS) {
+6|     try {
+7|         // Nettoyer le journal (moderation_actions)
+8|         const logsResult = await pool.query(
+9|             `DELETE FROM moderation_actions 
+10|              WHERE created_at < NOW() - INTERVAL '${LOGS_RETENTION_DAYS} days'`
+11|         );
+12|         if (logsResult.rowCount > 0) {
+13|             console.log(`🧹 Nettoyage auto journal: ${logsResult.rowCount} entrées supprimées (> ${LOGS_RETENTION_DAYS} jours)`);
+14|         }
+15| 
+16|         // Nettoyer les signalements (reports)
+17|         const reportsResult = await pool.query(
+18|             `DELETE FROM reports 
+19|              WHERE created_at < NOW() - INTERVAL '${REPORTS_RETENTION_DAYS} days'`
+20|         );
+21|         if (reportsResult.rowCount > 0) {
+22|             console.log(`🧹 Nettoyage auto signalements: ${reportsResult.rowCount} signalements supprimés (> ${REPORTS_RETENTION_DAYS} jours)`);
+23|         }
+24|     } catch (err) {
+25|         console.error('❌ Erreur nettoyage auto:', err);
+26|     }
+27| }
+28| 
+29| module.exports = { cleanOldData };
 
 # ============================================
 # FILE: public\js\login-script.js
