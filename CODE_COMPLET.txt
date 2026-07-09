@@ -1,592 +1,488 @@
 # MEETGAY - CODE COMPLET
-# Généré le 2026-07-09 16:14:10
-# 6 fichier(s) inclus
+# Généré le 2026-07-09 21:46:30
+# 4 fichier(s) inclus
 
 # ========== SOMMAIRE ==========
 
-# 1. public\js\login-script.js
+# 1. modules\socket-handlers.js
 # 2. public\js\chat.js
-# 3. modules\session-manager.js
-# 4. modules\socket-handlers.js
-# 5. modules\cleanup.js
-# 6. server.js
+# 3. public\js\chat-script.js
+# 4. public\js\common.js
 
 # ============================================
-# FILE: public\js\login-script.js
+# FILE: modules\socket-handlers.js
 # ============================================
 
-1| ﻿
-2| 
-3| (function () {
-4|     // ---------- 1. Attente de common.js ----------+++
-5|     function waitForCommon(callback) {
-6|         if (typeof window.common !== 'undefined') {
-7|             console.log('✅ common.js chargé');
-8|             callback();
-9|         } else {
-10|             console.log('⏳ Attente de common.js...');
-11|             setTimeout(() => waitForCommon(callback), 50);
-12|         }
-13|     }
-14| 
-15|     // ---------- 2. Fonctions de traduction ----------
-16|     let currentLang = localStorage.getItem('MeetGay_lang') || 'fr';
+1| ﻿// modules/socket-handlers.js
+2| module.exports = function (io, pool, sessionManager, updateActivity, REPORTS_THRESHOLD, REPORTS_WINDOW_MINUTES, TEMP_BAN_MINUTES) {
+3|     io.on('connection', (socket) => {
+4|         console.log('🔌 Nouvelle connexion :', socket.id);
+5| 
+6|         socket.on('user join', async (userInfo) => {
+7|             console.log('📥 SOCKET - userInfo.origine reçu pour', userInfo.pseudo, ':', userInfo.origine);
+8|             if (!userInfo || !userInfo.pseudo) {
+9|                 socket.emit('join error', { error: 'Pseudo requis pour rejoindre' });
+10|                 return;
+11|             }
+12| 
+13|             // Récupérer l'IP du client
+14|             const clientIp = socket.handshake.headers['x-forwarded-for']
+15|                 ? socket.handshake.headers['x-forwarded-for'].split(',')[0]
+16|                 : socket.conn.remoteAddress;
 17| 
-18|     const translations = {
-19|         fr: {
-20|             subtitle: "Rejoignez le chat",
-21|             pseudo: "Pseudo :",
-22|             age: "Âge :",
-23|             ageDefault: "Sélectionnez votre âge",
-24|             origine: "Origine :",
-25|             origineDefault: "Sélectionnez votre origine (Facultatif)",
-26|             tendencies: "Orientation :",
-27|             tendenciesDefault: "Sélectionnez",
-28|             location: "Localité :",
-29|             locationDefault: "Sélectionnez votre région",
-30|             bio: "Présentez-vous :",
-31|             bioPlaceholder: "Quelques mots sur vous... (100 caractères max)",
-32|             submit: "ENTRER DANS LE CHAT",
-33|             note: "⚡ Chat privé instantané\nCliquez sur un pseudo pour lui parler",
-34|             gender: "Genre :",
-35|             genderDefault: "Sélectionnez",
-36|             genderG: "Gay ⚣",
-37|             genderH: "Hétéro ⚤",
-38|             genderB: "Bisexuel ⚥",
-39|             genderT: "Transgenre ⚧",
-40|             purpose: "Je suis ici pour :",
-41|             purposeDefault: "Sélectionnez",
-42|             purposeMeeting: "Rencontre",
-43|             purposeFlirt: "Flirt",
-44|             purposeAdultery: "Relation sexuelle"
-45|         },
-46|         nl: {
-47|             subtitle: "Praat mee",
-48|             pseudo: "Gebruikersnaam :",
-49|             age: "Leeftijd :",
-50|             ageDefault: "Selecteer uw leeftijd",
-51|             origine: "Afkomst :",
-52|             origineDefault: "Selecteer uw afkomst",
-53|             tendencies: "Oriëntatie :",
-54|             tendenciesDefault: "Selecteer",
-55|             location: "Locatie :",
-56|             locationDefault: "Selecteer uw regio",
-57|             bio: "Stel je voor :",
-58|             bioPlaceholder: "Een paar woorden over jezelf... (100 tekens max)",
-59|             submit: "CHAT BINNENKOMEN",
-60|             note: "Privé chat\nKlik op een pseudoniem om te praten",
-61|             gender: "Geslacht :",
-62|             genderDefault: "Selecteer",
-63|             genderG: "Gay",
-64|             genderH: "Hetero",
-65|             genderB: "Biseksueel",
-66|             genderT: "Transgender",
-67|             purpose: "Ik ben hier voor :",
-68|             purposeDefault: "Selecteer",
-69|             purposeMeeting: "Ontmoeting",
-70|             purposeFlirt: "Flirt",
-71|             purposeAdultery: "Seksuele relatie"
-72|         }
-73|     };
-74| 
-75|     // Au début du fichier, après la déclaration de forbiddenWords
-76|     let forbiddenWords = ['pd', 'tapette', 'enculé', 'fdp', 'ntm', 'salope', 'pute', 'bâtard', 'connard', 'merde'];
-77|     window.forbiddenWords = forbiddenWords;
-78| 
-79|     async function loadForbiddenWords() {
-80|         try {
-81|             const response = await fetch('/js/forbidden-words.json');
-82|             if (!response.ok) throw new Error(`HTTP ${response.status}`);
-83|             const words = await response.json();
-84|             if (words && words.length > 0) {
-85|                 forbiddenWords = words;
-86|                 window.forbiddenWords = forbiddenWords;
-87|                 console.log('✅ Mots interdits chargés:', forbiddenWords.length);
-88|             }
-89|         } catch (err) {
-90|             console.log('⚠️ Utilisation de la liste par défaut:', err.message);
-91|         }
-92|     }
+18|             console.log(`📡 Connexion de ${userInfo.pseudo} depuis IP: ${clientIp}`);
+19| 
+20|             // Récupérer la date de création depuis la base
+21|             let firstConnectedAt = Date.now();
+22|             try {
+23|                 const result = await pool.query(
+24|                     `SELECT first_connected_at FROM users WHERE pseudo = $1`,
+25|                     [userInfo.pseudo]
+26|                 );
+27|                 if (result.rows.length > 0 && result.rows[0].first_connected_at) {
+28|                     firstConnectedAt = new Date(result.rows[0].first_connected_at).getTime();
+29|                 } else {
+30|                     await pool.query(
+31|                         `UPDATE users SET first_connected_at = NOW() WHERE pseudo = $1`,
+32|                         [userInfo.pseudo]
+33|                     );
+34|                 }
+35|             } catch (err) {
+36|                 console.error('Erreur récupération first_connected_at:', err.message);
+37|             }
+38| 
+39|             // 🔥 SUPPRESSION DES ANCIENNES SESSIONS DU MÊME PSEUDO (remplace le delete de users)
+40|             try {
+41|                 await pool.query(
+42|                     `UPDATE users SET socket_id = NULL 
+43|              WHERE pseudo = $1 AND socket_id IS NOT NULL`,
+44|                     [userInfo.pseudo]
+45|                 );
+46|                 console.log(`🧹 Ancienne socket nettoyée pour ${userInfo.pseudo}`);
+47|             } catch (err) {
+48|                 console.error('Erreur nettoyage ancienne socket:', err.message);
+49|             }
+50| 
+51|             // Stocker le fingerprint et l'IP dans la base
+52|             if (userInfo.fingerprint) {
+53|                 try {
+54|                     const existingFp = await pool.query(
+55|                         'SELECT id FROM fingerprints WHERE fingerprint_hash = $1',
+56|                         [userInfo.fingerprint]
+57|                     );
+58| 
+59|                     let fingerprintId;
+60|                     if (existingFp.rows.length > 0) {
+61|                         fingerprintId = existingFp.rows[0].id;
+62|                         await pool.query(
+63|                             `UPDATE fingerprints
+64|                      SET last_seen = NOW(),
+65|                      notes = CASE
+66|                          WHEN notes IS NULL THEN $1
+67|                          ELSE notes || ' | ' || $1
+68|                      END
+69|                      WHERE id = $2`,
+70|                             [`IP: ${clientIp}`, fingerprintId]
+71|                         );
+72|                     } else {
+73|                         const newFp = await pool.query(
+74|                             `INSERT INTO fingerprints (fingerprint_hash, first_seen, last_seen, notes)
+75|                      VALUES ($1, NOW(), NOW(), $2)
+76|                      RETURNING id`,
+77|                             [userInfo.fingerprint, `IP: ${clientIp}`]
+78|                         );
+79|                         fingerprintId = newFp.rows[0].id;
+80|                     }
+81| 
+82|                     await pool.query(
+83|                         'UPDATE users SET fingerprint_id = $1, last_ip = $2, socket_id = $3, last_seen = NOW() WHERE pseudo = $4',
+84|                         [fingerprintId, clientIp, socket.id, userInfo.pseudo]
+85|                     );
+86| 
+87|                     // 🔥 RÉCUPÉRER LES MESSAGES EN ATTENTE
+88|                     try {
+89|                         const pendingResult = await pool.query(
+90|                             'SELECT from_pseudo, message, created_at FROM pending_messages WHERE to_pseudo = $1 ORDER BY created_at ASC',
+91|                             [userInfo.pseudo]
+92|                         );
 93| 
-94|     // AJOUTE CET APPEL - charge la liste immédiatement
-95|     loadForbiddenWords();
-96| 
-97| 
-98| 
-99|     function applyLanguage(lang) {
-100|         const t = translations[lang];
-101|         if (!t) return;
-102| 
-103|         document.getElementById('subtitle').innerHTML = `<i class="fas fa-sign-in-alt"></i> ${t.subtitle}`;
-104|         document.getElementById('labelPseudo').innerHTML = `<i class="fas fa-user"></i> ${t.pseudo}`;
-105|         document.getElementById('labelAge').innerHTML = `<i class="fas fa-birthday-cake"></i> ${t.age}`;
-106|         const ageDefault = document.getElementById('ageDefault');
-107|         if (ageDefault) ageDefault.innerText = t.ageDefault;
-108|         const labelOrigine = document.getElementById('labelOrigine');
-109|         if (labelOrigine) labelOrigine.innerHTML = `<i class="fa-solid fa-globe"></i> ${t.origine}`;
-110|         const origineDefault = document.getElementById('origineDefault');
-111|         if (origineDefault) origineDefault.innerText = t.origineDefault;
-112|         document.getElementById('labelTendencies').innerHTML = `<i class="fas fa-exchange-alt"></i> ${t.tendencies}`;
-113|         const tendenciesDefault = document.getElementById('tendenciesDefault');
-114|         if (tendenciesDefault) tendenciesDefault.innerText = t.tendenciesDefault;
-115|         document.getElementById('labelLocation').innerHTML = `<i class="fas fa-map-marker-alt"></i> ${t.location}`;
-116|         const locationDefault = document.getElementById('locationDefault');
-117|         if (locationDefault) locationDefault.innerText = t.locationDefault;
-118|         document.getElementById('labelBio').innerHTML = `<i class="fas fa-pen"></i> ${t.bio}`;
-119|         const bioField = document.getElementById('bio');
-120|         if (bioField) bioField.placeholder = t.bioPlaceholder;
-121|         const submitBtn = document.getElementById('submitBtn');
-122|         if (submitBtn) submitBtn.innerHTML = `<i class="fas fa-gamepad"></i> ${t.submit}`;
-123| 
-124|         const labelGender = document.getElementById('labelGender');
-125|         if (labelGender) labelGender.innerHTML = `<i class="fa-solid fa-mars-double"></i> ${t.gender}`;
-126|         const genderDefault = document.getElementById('genderDefault');
-127|         if (genderDefault) genderDefault.innerText = t.genderDefault;
-128|         const genderGOption = document.querySelector('#gender option[value="G"]');
-129|         if (genderGOption) genderGOption.innerText = t.genderG;
-130|         const genderHOption = document.querySelector('#gender option[value="H"]');
-131|         if (genderHOption) genderHOption.innerText = t.genderH;
-132|         const genderBOption = document.querySelector('#gender option[value="B"]');
-133|         if (genderBOption) genderBOption.innerText = t.genderB;
-134|         const genderTOption = document.querySelector('#gender option[value="T"]');
-135|         if (genderTOption) genderTOption.innerText = t.genderT;
-136| 
-137|         const labelPurpose = document.getElementById('labelPurpose');
-138|         if (labelPurpose) labelPurpose.innerHTML = `<i class="fas fa-bullseye"></i> ${t.purpose}`;
-139|         const purposeDefault = document.getElementById('purposeDefault');
-140|         if (purposeDefault) purposeDefault.innerText = t.purposeDefault;
-141|         const purposeMeeting = document.querySelector('#purpose option[value="meeting"]');
-142|         if (purposeMeeting) purposeMeeting.innerHTML = `<i class="fas fa-handshake"></i> ${t.purposeMeeting}`;
-143|         const purposeFlirt = document.querySelector('#purpose option[value="flirt"]');
-144|         if (purposeFlirt) purposeFlirt.innerHTML = `<i class="fas fa-heart"></i> ${t.purposeFlirt}`;
-145|         const purposeAdultery = document.querySelector('#purpose option[value="adultery"]');
-146|         if (purposeAdultery) purposeAdultery.innerHTML = `<i class="fas fa-heartbeat"></i> ${t.purposeAdultery}`;
-147| 
-148|         const note = document.getElementById('note');
-149|         if (note) note.innerHTML = `<i class="fas fa-bolt"></i> ${t.note.replace(/\n/g, '<br>')}`;
-150|     }
-151| 
-152|     function translateOrientation() {
-153|         const currentLang = localStorage.getItem('MeetGay_lang') || 'fr';
-154|         const optA = document.getElementById('optA');
-155|         const optP = document.getElementById('optP');
-156|         const optV = document.getElementById('optV');
-157| 
-158|         if (currentLang === 'nl') {
-159|             if (optA) optA.innerHTML = '<i class="fas fa-arrow-up"></i> Actief ▲';
-160|             if (optP) optP.innerHTML = '<i class="fas fa-arrow-down"></i> Passief ▼';
-161|             if (optV) optV.innerHTML = '<i class="fas fa-arrows-alt-v"></i> Veelzijdig ▲▼';
-162|         } else {
-163|             if (optA) optA.innerHTML = '<i class="fas fa-arrow-up"></i> Actif  ▲';
-164|             if (optP) optP.innerHTML = '<i class="fas fa-arrow-down"></i> Passif  ▼';
-165|             if (optV) optV.innerHTML = '<i class="fas fa-arrows-alt-v"></i> Versatile  ▲▼';
-166|         }
-167|     }
-168| 
-169|     function populateAges() {
-170|         const ageSelect = document.getElementById('age');
-171|         if (!ageSelect) return;
-172|         const lang = localStorage.getItem('MeetGay_lang') || 'fr';
-173|         const ageSuffix = lang === 'fr' ? 'ans' : 'jaar';
-174|         while (ageSelect.options.length > 1) ageSelect.remove(1);
-175|         for (let i = 18; i <= 99; i++) {
-176|             const option = document.createElement('option');
-177|             option.value = i;
-178|             option.textContent = `${i} ${ageSuffix}`;
-179|             ageSelect.appendChild(option);
-180|         }
-181|     }
-182| 
-183|     function highlightField(fieldId) {
-184|         const field = document.getElementById(fieldId);
-185|         if (field) {
-186|             field.style.border = '2px solid #ff6b6b';
-187|             field.style.backgroundColor = '#fff0f0';
-188|             setTimeout(() => {
-189|                 field.style.border = '';
-190|                 field.style.backgroundColor = '';
-191|             }, 2000);
-192|         }
-193|     }
-194| 
-195|     // ---------- 3. Nettoyage et vérification âge ----------
-196|     window.addEventListener('pageshow', function () {
-197|         const oldUser = localStorage.getItem('meetgay_user');
-198|         if (oldUser) {
-199|             localStorage.clear();
-200|         }
-201|     });
+94|                         if (pendingResult.rows.length > 0) {
+95|                             console.log(`📨 ${pendingResult.rows.length} message(s) en attente pour ${userInfo.pseudo}`);
+96|                             for (const msg of pendingResult.rows) {
+97|                                 socket.emit('private message received', {
+98|                                     fromPseudo: msg.from_pseudo,
+99|                                     message: msg.message,
+100|                                     timestamp: msg.created_at
+101|                                 });
+102|                             }
+103|                             // Supprimer les messages envoyés
+104|                             await pool.query(
+105|                                 'DELETE FROM pending_messages WHERE to_pseudo = $1',
+106|                                 [userInfo.pseudo]
+107|                             );
+108|                             console.log(`🗑️ Messages en attente supprimés pour ${userInfo.pseudo}`);
+109|                         }
+110|                     } catch (err) {
+111|                         console.error('❌ Erreur récupération messages en attente:', err.message);
+112|                     }
+113| 
+114|                     console.log(`🔒 Fingerprint lié pour ${userInfo.pseudo} (ID: ${fingerprintId})`);
+115|                 } catch (err) {
+116|                     console.error('Erreur stockage fingerprint/IP:', err);
+117|                 }
+118|             } else {
+119|                 // Même sans fingerprint, on met à jour socket_id
+120|                 await pool.query(
+121|                     'UPDATE users SET socket_id = $1, last_ip = $2, last_seen = NOW() WHERE pseudo = $3',
+122|                     [socket.id, clientIp, userInfo.pseudo]
+123|                 );
+124|                 console.warn(`⚠️ Pas de fingerprint pour ${userInfo.pseudo}`);
+125|             }
+126| 
+127|             // 🔥 RÉCUPÉRER LA LISTE DES CONNECTÉS DEPUIS LA BASE (remplace Object.values(users))
+128|             try {
+129|                 const result = await pool.query(`
+130|             SELECT 
+131|                 pseudo,
+132|                 age,
+133|                 COALESCE(NULLIF(origine, ''), 'NC') as origine,
+134|                 tendencies,
+135|                 gender,
+136|                 purpose,
+137|                 COALESCE(bio, 'Aucune présentation') as bio,
+138|                 location_city as "locationCity",
+139|                 location_commune as "locationCommune",
+140|                 location_postal_code as "locationPostalCode",
+141|                 location_province as "locationProvince",
+142|                 location_region as "locationRegion",
+143|                 location_country as "locationCountry",
+144|                 location_neighborhood as "locationNeighborhood",
+145|                 location_postcode_localities as "locationPostcodeLocalities",
+146|                 location_sublocality_level_1 as "locationSublocalityLevel1",
+147|                 location_sublocality_level_2 as "locationSublocalityLevel2",
+148|                 location_sublocality_level_3 as "locationSublocalityLevel3",
+149|                 location_sublocality_level_4 as "locationSublocalityLevel4",
+150|                 location_sublocality_level_5 as "locationSublocalityLevel5",
+151|                 location_admin_level_3 as "locationAdminLevel3",
+152|                 location_admin_level_4 as "locationAdminLevel4",
+153|                 location_admin_level_5 as "locationAdminLevel5",
+154|                 location_admin_level_6 as "locationAdminLevel6",
+155|                 location_admin_level_7 as "locationAdminLevel7",
+156|                 location_colloquial_area as "locationColloquialArea",
+157|                 location_intersection as "locationIntersection",
+158|                 location_lat as "locationLat",
+159|                 location_lng as "locationLng",
+160|                 socket_id as "socketId",
+161|                 EXTRACT(EPOCH FROM first_connected_at) * 1000 as "connectedAt"
+162|             FROM users 
+163|             WHERE socket_id IS NOT NULL 
+164|             AND last_seen > NOW() - INTERVAL '15 minutes'
+165|             ORDER BY first_connected_at DESC
+166|         `);
+167| 
+168|                 // Construire la liste avec la MÊME STRUCTURE qu'avant
+169|                 const usersList = result.rows.map(u => ({
+170|                     pseudo: u.pseudo,
+171|                     age: u.age,
+172|                     origine: (u.origine && u.origine !== 'undefined' && u.origine !== 'null') ? u.origine : 'NC',
+173|                     tendencies: u.tendencies,
+174|                     gender: u.gender,
+175|                     purpose: u.purpose,
+176|                     bio: u.bio || 'Aucune présentation',
+177|                     locationCity: u.locationCity || null,
+178|                     locationCommune: u.locationCommune || null,
+179|                     locationPostalCode: u.locationPostalCode || null,
+180|                     locationProvince: u.locationProvince || null,
+181|                     locationRegion: u.locationRegion || null,
+182|                     locationCountry: u.locationCountry || null,
+183|                     locationNeighborhood: u.locationNeighborhood || null,
+184|                     locationPostcodeLocalities: u.locationPostcodeLocalities || null,
+185|                     locationSublocalityLevel1: u.locationSublocalityLevel1 || null,
+186|                     locationSublocalityLevel2: u.locationSublocalityLevel2 || null,
+187|                     locationSublocalityLevel3: u.locationSublocalityLevel3 || null,
+188|                     locationSublocalityLevel4: u.locationSublocalityLevel4 || null,
+189|                     locationSublocalityLevel5: u.locationSublocalityLevel5 || null,
+190|                     locationAdminLevel3: u.locationAdminLevel3 || null,
+191|                     locationAdminLevel4: u.locationAdminLevel4 || null,
+192|                     locationAdminLevel5: u.locationAdminLevel5 || null,
+193|                     locationAdminLevel6: u.locationAdminLevel6 || null,
+194|                     locationAdminLevel7: u.locationAdminLevel7 || null,
+195|                     locationColloquialArea: u.locationColloquialArea || null,
+196|                     locationIntersection: u.locationIntersection || null,
+197|                     locationLat: u.locationLat || null,
+198|                     locationLng: u.locationLng || null,
+199|                     socketId: u.socketId,
+200|                     connectedAt: u.connectedAt || 0
+201|                 }));
 202| 
-203|     (function checkAgeVerification() {
-204|         const isAgeVerified = sessionStorage.getItem('meetgay_age_verified');
-205|         if (!isAgeVerified) {
-206|             window.location.href = '/index.html';
-207|             return;
-208|         }
-209|         const verifiedTime = sessionStorage.getItem('meetgay_age_verified_time');
-210|         if (verifiedTime && (Date.now() - parseInt(verifiedTime) > 86400000)) {
-211|             sessionStorage.removeItem('meetgay_age_verified');
-212|             window.location.href = '/index.html';
-213|         }
-214|     })();
-215| 
-216|     // ---------- 4. Lancement principal après chargement DOM et common.js ----------
-217|     function init() {
-218|         // Compteur bio
-219|         const bioTextarea = document.getElementById('bio');
-220|         const bioCounter = document.getElementById('bioCounter');
-221|         if (bioTextarea && bioCounter) {
-222|             bioTextarea.addEventListener('input', () => {
-223|                 bioCounter.textContent = bioTextarea.value.length;
-224|             });
-225|         }
-226| 
-227|         // Formulaire inscription
-228|         document.getElementById('loginForm').addEventListener('submit', async (e) => {
-229|             e.preventDefault();
-230|             const clean = (str) => str.replace(/[<>]/g, '').trim();
-231|             const pseudo = clean(document.getElementById('pseudo').value);
-232|             // Fonctions de détection intelligente avancée
-233|             function normalizeWord(str) {
-234|                 // Supprime les répétitions de lettres (peddde -> pede)
-235|                 return str.replace(/(.)\1+/g, '$1');
-236|             }
-237| 
-238|             function removeAccents(str) {
-239|                 // Convertit les accents en lettres simples
-240|                 const accents = {
-241|                     'à': 'a', 'â': 'a', 'ä': 'a', 'á': 'a',
-242|                     'é': 'e', 'è': 'e', 'ê': 'e', 'ë': 'e',
-243|                     'î': 'i', 'ï': 'i', 'í': 'i', 'ì': 'i',
-244|                     'ô': 'o', 'ö': 'o', 'ó': 'o', 'ò': 'o',
-245|                     'ù': 'u', 'û': 'u', 'ü': 'u', 'ú': 'u',
-246|                     'ç': 'c', 'ñ': 'n'
-247|                 };
-248|                 return str.replace(/[àâäáéèêëîïíìôöóòùûüúçñ]/g, letter => accents[letter] || letter);
-249|             }
-250| 
-251|             function removeSpecialChars(str) {
-252|                 // Supprime les caractères spéciaux mais garde le tiret et les lettres
-253|                 return str.replace(/[^a-z-]/g, '');
-254|             }
-255| 
-256|             function decodeLeetSpeak(str) {
-257|                 return str
-258|                     .replace(/0/g, 'o').replace(/1/g, 'i').replace(/3/g, 'e')
-259|                     .replace(/4/g, 'a').replace(/5/g, 's').replace(/7/g, 't')
-260|                     .replace(/8/g, 'b').replace(/@/g, 'a').replace(/\$/g, 's');
-261|             }
-262| 
-263|             function isPseudoForbidden(pseudo, forbiddenWords) {
-264|                 const lowerPseudo = pseudo.toLowerCase();
-265| 
-266|                 for (const forbidden of forbiddenWords) {
-267|                     const lowerForbidden = forbidden.toLowerCase();
-268| 
-269|                     // Vérification EXACTE : le pseudo doit être le mot interdit
-270|                     // OU le mot interdit est un mot séparé (avec des espaces ou tirets)
-271|                     if (lowerPseudo === lowerForbidden) {
-272|                         return true;
-273|                     }
-274| 
-275|                     // Vérifier si le mot interdit est un mot isolé dans le pseudo
-276|                     // (entouré d'espaces, de tirets, ou en début/fin)
-277|                     const regex = new RegExp(`\\b${escapeRegex(lowerForbidden)}\\b`);
-278|                     if (regex.test(lowerPseudo)) {
-279|                         return true;
-280|                     }
-281|                 }
-282|                 return false;
-283|             }
-284| 
-285|             // Fonction utilitaire pour échapper les caractères spéciaux dans une regex
-286|             function escapeRegex(str) {
-287|                 return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-288|             }
-289| 
-290|             const isForbidden = isPseudoForbidden(pseudo, forbiddenWords);
-291| 
-292|             if (isForbidden) {
-293|                 alert(currentLang === 'fr' ? "Ce pseudo contient un mot interdit" : "Deze gebruikersnaam bevat een verboden woord");
-294|                 return;
-295|             }
-296|             const bio = clean(document.getElementById('bio').value);
-297|             const age = document.getElementById('age').value;
-298|             const origine = document.getElementById('origine').value;
-299|             const tendencies = document.getElementById('tendencies').value;
-300|             const gender = document.getElementById('gender').value;
-301|             const purpose = document.getElementById('purpose').value;
-302|             const location = document.getElementById('location').value;
+203|                 // Envoyer la liste à TOUS les clients
+204|                 io.emit('update users', usersList);
+205| 
+206|                 console.log('📤 update users envoyé pour', userInfo.pseudo);
+207|                 console.log('📤 Envoi de join confirmed pour', userInfo.pseudo);
+208|                 socket.emit('join confirmed', { success: true, user: userInfo });
+209| 
+210|                 // 🔥 RÉCUPÉRER LES MESSAGES MANQUANTS À LA RECONNEXION
+211|                 try {
+212|                     // Récupérer tous les messages non lus (sans limite de temps)
+213|                     const result = await pool.query(
+214|                         `SELECT from_pseudo, message, created_at FROM messages 
+215|                         WHERE to_pseudo = $1
+216|                         ORDER BY created_at ASC`,
+217|                         [userInfo.pseudo]
+218|                     );
+219|                     if (result.rows.length > 0) {
+220|                         socket.emit('pending messages', result.rows);
+221|                         console.log(`📨 ${result.rows.length} messages manquants envoyés à ${userInfo.pseudo}`);
+222|                     } else {
+223|                         console.log(`📭 Aucun message manquant pour ${userInfo.pseudo}`);
+224|                     }
+225| 
+226|                 } catch (err) {
+227|                     console.error('❌ Erreur récupération liste utilisateurs:', err);
+228|                     socket.emit('join error', { error: 'Erreur lors du chargement des utilisateurs' });
+229|                 }
+230|             });
+231| 
+232| 
+233| 
+234| 
+235| 
+236|         // Heartbeat pour mettre à jour lastSeen
+237|         socket.on('heartbeat', async () => {
+238|             try {
+239|                 await pool.query(
+240|                     'UPDATE users SET last_seen = NOW() WHERE socket_id = $1',
+241|                     [socket.id]
+242|                 );
+243|             } catch (err) {
+244|                 console.error('❌ Erreur heartbeat:', err.message);
+245|             }
+246|             socket.emit('heartbeat_ack');
+247|         });
+248| 
+249|         socket.on('ping', async () => {
+250|             try {
+251|                 await pool.query(
+252|                     'UPDATE users SET last_seen = NOW() WHERE socket_id = $1',
+253|                     [socket.id]
+254|                 );
+255|             } catch (err) {
+256|                 console.error('❌ Erreur ping:', err.message);
+257|             }
+258|         });
+259| 
+260| 
+261|         socket.on('private message', async (data) => {
+262|             const { toSocketId, message, fromPseudo } = data;
+263|             try {
+264|                 const result = await pool.query(
+265|                     'SELECT socket_id FROM users WHERE pseudo = $1 AND socket_id IS NOT NULL',
+266|                     [toSocketId]
+267|                 );
+268|                 if (result.rows.length === 0) {
+269|                     // 🔥 DESTINATAIRE DÉCONNECTÉ → STOCKER LE MESSAGE
+270|                     try {
+271|                         await pool.query(
+272|                             'INSERT INTO pending_messages (from_pseudo, to_pseudo, message) VALUES ($1, $2, $3)',
+273|                             [fromPseudo, toSocketId, message]
+274|                         );
+275|                         console.log(`📦 Message stocké pour ${toSocketId} (en attente)`);
+276|                         socket.emit('error', { message: `📦 ${toSocketId} est déconnecté. Message stocké.` });
+277|                         return;
+278|                     } catch (err) {
+279|                         console.error('❌ Erreur stockage message en attente:', err.message);
+280|                         socket.emit('error', { message: 'Erreur lors de l\'envoi du message' });
+281|                         return;
+282|                     }
+283|                 }
+284|                 const targetSocketId = result.rows[0].socket_id;
+285|                 io.to(targetSocketId).emit('private message received', {
+286|                     fromPseudo: fromPseudo,
+287|                     fromSocketId: socket.id,
+288|                     message: message,
+289|                     timestamp: new Date()
+290|                 });
+291|                 socket.emit('message sent confirmation', {
+292|                     message: message,
+293|                     toPseudo: toSocketId,
+294|                     timestamp: new Date()
+295|                 });
+296|                 console.log(`💬 Message de ${fromPseudo} à ${toSocketId}: ${message.substring(0, 30)}...`);
+297|             } catch (err) {
+298|                 console.error('❌ Erreur message privé:', err.message);
+299|                 socket.emit('error', { message: 'Erreur lors de l\'envoi du message' });
+300|             }
+301|         });
+302| 
 303| 
 304| 
-305| 
-306|             // Si l'utilisateur a choisi une valeur dans la liste déroulante (pas GPS)
-307|             if (location !== 'GPS') {
-308|                 const selectedOption = document.getElementById('location').selectedOptions[0];
-309|                 const locationText = selectedOption ? selectedOption.textContent : location;
-310| 
-311|                 // 🔥 VÉRIFIER SI geolocation.js A DÉJÀ CRÉÉ DES CHAMPS
-312|                 const cityHidden = document.getElementById('location_city_hidden');
-313|                 const communeHidden = document.getElementById('location_commune_hidden');
-314| 
-315|                 // Si les champs n'existent pas, on les crée (c'est une sélection manuelle)
-316|                 if (!cityHidden) {
-317|                     const hiddenCity = document.createElement('input');
-318|                     hiddenCity.type = 'hidden';
-319|                     hiddenCity.id = 'location_city_hidden';
-320|                     hiddenCity.name = 'locationCity';
-321|                     document.getElementById('loginForm').appendChild(hiddenCity);
-322|                     hiddenCity.value = locationText;
-323|                 } else {
-324|                     // Si le champ existe déjà mais est vide, on le remplit
-325|                     if (!cityHidden.value || cityHidden.value === 'null') {
-326|                         cityHidden.value = locationText;
-327|                     }
-328|                 }
-329| 
-330|                 if (!communeHidden) {
-331|                     const hiddenCommune = document.createElement('input');
-332|                     hiddenCommune.type = 'hidden';
-333|                     hiddenCommune.id = 'location_commune_hidden';
-334|                     hiddenCommune.name = 'locationCommune';
-335|                     document.getElementById('loginForm').appendChild(hiddenCommune);
-336|                     hiddenCommune.value = null;  // Pour la liste, pas de commune
-337|                 } else {
-338|                     // Si le champ existe déjà mais est vide, on le met à null
-339|                     if (!communeHidden.value || communeHidden.value === 'null') {
-340|                         communeHidden.value = null;
-341|                     }
-342|                     // Sinon, on ne touche pas (c'est geolocation.js qui a mis une valeur)
-343|                 }
-344|             }
+305|         /*socket.on('get users list', () => {
+306|             const usersList = Object.values(users).sort((a, b) => (b.firstConnectedAt || 0) - (a.firstConnectedAt || 0)).map(u => ({
+307|                 pseudo: u.pseudo,
+308|                 age: u.age,
+309|                 origine: (u.origine && u.origine !== 'undefined' && u.origine !== 'null') ? u.origine : 'NC',
+310|                 tendencies: u.tendencies,
+311|                 gender: u.gender,
+312|                 purpose: u.purpose,
+313|                 bio: u.bio || 'Aucune présentation',
+314|                 locationCity: u.locationCity || null,
+315|                 locationCommune: u.locationCommune || null,
+316|                 locationPostalCode: u.locationPostalCode || null,
+317|                 locationProvince: u.locationProvince || null,
+318|                 locationRegion: u.locationRegion || null,
+319|                 locationCountry: u.locationCountry || null,
+320|                 locationNeighborhood: u.locationNeighborhood || null,
+321|                 locationPostcodeLocalities: u.locationPostcodeLocalities || null,
+322|                 locationSublocalityLevel1: u.locationSublocalityLevel1 || null,
+323|                 locationSublocalityLevel2: u.locationSublocalityLevel2 || null,
+324|                 locationSublocalityLevel3: u.locationSublocalityLevel3 || null,
+325|                 locationSublocalityLevel4: u.locationSublocalityLevel4 || null,
+326|                 locationSublocalityLevel5: u.locationSublocalityLevel5 || null,
+327|                 locationAdminLevel3: u.locationAdminLevel3 || null,
+328|                 locationAdminLevel4: u.locationAdminLevel4 || null,
+329|                 locationAdminLevel5: u.locationAdminLevel5 || null,
+330|                 locationAdminLevel6: u.locationAdminLevel6 || null,
+331|                 locationAdminLevel7: u.locationAdminLevel7 || null,
+332|                 locationColloquialArea: u.locationColloquialArea || null,
+333|                 locationIntersection: u.locationIntersection || null,
+334|                 locationLat: u.locationLat || null,
+335|                 locationLng: u.locationLng || null,
+336|                 socketId: u.socketId,
+337|                 connectedAt: u.connectedAt || 0
+338|             }));
+339|             socket.emit('update users', usersList);
+340|         });*/
+341| 
+342|         // Gestion des signalements utilisateur
+343|         socket.on('report user', async (data) => {
+344|             const { targetPseudo } = data;
 345| 
-346| 
-347|             let missing = [];
-348|             if (!age) missing.push('age');
-349|             if (!tendencies) missing.push('tendencies');
-350|             if (!gender) missing.push('gender');
-351|             if (!purpose) missing.push('purpose');
-352|             if (!location) missing.push('location');
-353| 
-354|             if (missing.length > 0) {
-355|                 missing.forEach(field => highlightField(field));
-356|                 alert(currentLang === 'fr' ? "Veuillez remplir tous les champs (champs en rouge)" : "Vul alle velden in (rode velden)");
-357|                 return;
-358|             }
-359|             if (pseudo.length < 2 || pseudo.length > 15) {
-360|                 alert(currentLang === 'fr' ? "Le pseudo doit faire entre 2 et 15 caractères" : "De gebruikersnaam moet 2-15 tekens bevatten");
-361|                 return;
-362|             }
-363|             console.log('🌍 LOGIN - Origine AVANT envoi:', origine, '| Valeur du select:', document.getElementById('origine').value);
+346|             // Récupérer le pseudo du signaleur depuis users[socket.id]
+347|             // Récupérer le pseudo du signaleur depuis la base
+348|             let reporterPseudo;
+349|             try {
+350|                 const result = await pool.query(
+351|                     'SELECT pseudo FROM users WHERE socket_id = $1',
+352|                     [socket.id]
+353|                 );
+354|                 if (result.rows.length === 0) {
+355|                     socket.emit('report_error', { error: 'Utilisateur non identifié' });
+356|                     return;
+357|                 }
+358|                 reporterPseudo = result.rows[0].pseudo;
+359|             } catch (err) {
+360|                 console.error('❌ Erreur récupération reporter:', err.message);
+361|                 socket.emit('report_error', { error: 'Erreur serveur' });
+362|                 return;
+363|             }
 364| 
-365|             console.log('🔍 LOGIN - communeHidden.value AVANT FORCE:', document.getElementById('location_commune_hidden')?.value);
-366|             console.log('🔍 LOGIN - cityHidden.value:', document.getElementById('location_city_hidden')?.value);
-367| 
-368|             // 🔥 FORCER LA VALEUR DE location_commune_hidden
-369|             const cityHidden = document.getElementById('location_city_hidden');
-370|             const communeHidden = document.getElementById('location_commune_hidden');
-371| 
-372|             if (cityHidden && communeHidden && communeHidden.value === 'null') {
-373|                 communeHidden.value = cityHidden.value;
-374|             }
-375| 
+365|             if (!targetPseudo || targetPseudo === reporterPseudo) {
+366|                 socket.emit('report_error', { error: 'Signalement invalide' });
+367|                 return;
+368|             }
+369| 
+370|             try {
+371|                 // 1. Insérer le signalement
+372|                 await pool.query(
+373|                     'INSERT INTO reports (reporter_pseudo, target_pseudo) VALUES ($1, $2)',
+374|                     [reporterPseudo, targetPseudo]
+375|                 );
 376| 
-377|             const user = {
-378|                 pseudo, age: parseInt(age), tendencies, gender, purpose,
-379|                 locationCode: location.substring(0, 10),
-380|                 origine: (origine && origine !== 'undefined' && origine !== '' && origine !== 'null') ? origine : 'NC',
-381|                 locationCity: document.getElementById('location_city_hidden')?.value || null,
-382|                 locationCommune: document.getElementById('location_commune_hidden')?.value || null,
-383|                 locationPostalCode: document.getElementById('location_postal_code_hidden')?.value || null,
-384|                 locationProvince: document.getElementById('location_province_hidden')?.value || null,
-385|                 locationRegion: document.getElementById('location_region_hidden')?.value || null,
-386|                 locationCountry: document.getElementById('location_country_hidden')?.value || null,
-387|                 locationNeighborhood: document.getElementById('location_neighborhood_hidden')?.value || null,
-388|                 locationPostcodeLocalities: document.getElementById('location_postcode_localities_hidden')?.value || null,
-389|                 locationSublocalityLevel1: document.getElementById('location_sublocality_level_1_hidden')?.value || null,
-390|                 locationSublocalityLevel2: document.getElementById('location_sublocality_level_2_hidden')?.value || null,
-391|                 locationSublocalityLevel3: document.getElementById('location_sublocality_level_3_hidden')?.value || null,
-392|                 locationSublocalityLevel4: document.getElementById('location_sublocality_level_4_hidden')?.value || null,
-393|                 locationSublocalityLevel5: document.getElementById('location_sublocality_level_5_hidden')?.value || null,
-394|                 locationAdminLevel3: document.getElementById('location_admin_level_3_hidden')?.value || null,
-395|                 locationAdminLevel4: document.getElementById('location_admin_level_4_hidden')?.value || null,
-396|                 locationAdminLevel5: document.getElementById('location_admin_level_5_hidden')?.value || null,
-397|                 locationAdminLevel6: document.getElementById('location_admin_level_6_hidden')?.value || null,
-398|                 locationAdminLevel7: document.getElementById('location_admin_level_7_hidden')?.value || null,
-399|                 locationColloquialArea: document.getElementById('location_colloquial_area_hidden')?.value || null,
-400|                 locationIntersection: document.getElementById('location_intersection_hidden')?.value || null,
-401|                 locationLat: document.getElementById('location_lat_hidden')?.value || null,
-402|                 locationLng: document.getElementById('location_lng_hidden')?.value || null,
-403|                 bio: bio.substring(0, 100) || (currentLang === 'fr' ? "Aucune présentation" : "Geen introductie"),
-404|                 fingerprint: sessionStorage.getItem('fingerprint') || 'fallback_' + Date.now()
-405|             };
-406| 
-407|             const submitBtn = document.getElementById('submitBtn');
-408|             const originalText = submitBtn.innerHTML;
-409|             submitBtn.disabled = true;
-410|             submitBtn.innerHTML = currentLang === 'fr' ? "Envoi en cours..." : "Bezig met verzenden...";
-411| 
-412|             try {
-413|                 const registerRes = await fetch('/api/register', {
-414|                     method: 'POST',
-415|                     headers: { 'Content-Type': 'application/json' },
-416|                     body: JSON.stringify(user)
-417|                 });
-418|                 const registerData = await registerRes.json();
-419|                 if (!registerRes.ok) {
-420|                     if (registerData.error === 'Pseudo déjà utilisé') {
-421|                         alert(currentLang === 'fr' ? "Ce pseudo est déjà utilisé" : "Deze gebruikersnaam is al in gebruik");
-422|                     } else {
-423|                         throw new Error(registerData.error || 'Erreur inscription');
-424|                     }
-425|                     submitBtn.disabled = false;
-426|                     submitBtn.innerHTML = originalText;
-427|                     return;
-428|                 }
-429|                 const loginRes = await fetch('/api/login', {
-430|                     method: 'POST',
-431|                     headers: { 'Content-Type': 'application/json' },
-432|                     body: JSON.stringify({ pseudo })
-433|                 });
-434|                 const loginData = await loginRes.json();
-435|                 if (loginData.success) {
-436|                     localStorage.setItem('meetgay_token', loginData.token);
-437|                     localStorage.setItem('meetgay_user', JSON.stringify(loginData.user));
-438|                     localStorage.setItem('meetgay_pseudo', pseudo);
-439|                     window.location.href = '/chat.html';
-440|                 } else {
-441|                     alert(loginData.error || (currentLang === 'fr' ? "Erreur de connexion" : "Foutmelding"));
-442|                     submitBtn.disabled = false;
-443|                     submitBtn.innerHTML = originalText;
-444|                 }
-445|             } catch (err) {
-446|                 console.error('Erreur:', err);
-447|                 alert(currentLang === 'fr' ? "Erreur de connexion au serveur. Vérifiez que le serveur est démarré." : "Verbindingsfout met de server. Controleer of de server draait.");
-448|                 submitBtn.disabled = false;
-449|                 submitBtn.innerHTML = originalText;
-450|             }
-451|         });
-452| 
-453|         // Initialisation langue et âges
-454|         applyLanguage(currentLang);
-455|         translateOrientation();
-456|         populateAges();
-457| 
-458|         window.addEventListener('storage', (e) => {
-459|             if (e.key === 'MeetGay_lang') {
-460|                 currentLang = e.newValue || 'fr';
-461|                 applyLanguage(currentLang);
-462|                 translateOrientation();
-463|                 populateAges();
-464|             }
+377|                 // 2. Utiliser les constantes de server.js
+378|                 const threshold = REPORTS_THRESHOLD;
+379| 
+380|                 // 3. Récupérer la date de fin du dernier ban (si existe)
+381|                 const lastBan = await pool.query(
+382|                     `SELECT expires_at FROM temp_bans 
+383|                     WHERE user_pseudo = $1 
+384|                     ORDER BY expires_at DESC LIMIT 1`,
+385|                     [targetPseudo]
+386|                 );
+387| 
+388|                 let sinceDate = `NOW() - INTERVAL '${REPORTS_WINDOW_MINUTES} minutes'`;
+389|                 if (lastBan.rows.length > 0) {
+390|                     const lastBanExpiry = lastBan.rows[0].expires_at;
+391|                     // Prendre la date la plus récente entre la fin du dernier ban et la fenêtre
+392|                     sinceDate = `GREATEST(NOW() - INTERVAL '${REPORTS_WINDOW_MINUTES} minutes', '${lastBanExpiry.toISOString()}')`;
+393|                 }
+394| 
+395|                 const countRes = await pool.query(
+396|                     `SELECT COUNT(DISTINCT reporter_pseudo) FROM reports 
+397|                     WHERE target_pseudo = $1 
+398|                     AND created_at > ${sinceDate}`,
+399|                     [targetPseudo]
+400|                 );
+401|                 const reportCount = parseInt(countRes.rows[0].count);
+402| 
+403|                 // 4. Confirmation au signaleur
+404|                 socket.emit('report_confirmation', {
+405|                     targetPseudo,
+406|                     reportCount,
+407|                     threshold,
+408|                     willTrigger: reportCount >= threshold
+409|                 });
+410| 
+411|                 // 5. Si seuil atteint, déclencher temp_ban (10 minutes)
+412|                 if (reportCount >= threshold) {
+413|                     const expiresAt = new Date(Date.now() + TEMP_BAN_MINUTES * 60 * 1000);
+414| 
+415|                     await pool.query(
+416|                         `INSERT INTO temp_bans (user_pseudo, expires_at, reason) 
+417|                          VALUES ($1, $2, $3)
+418|                          ON CONFLICT (user_pseudo) DO UPDATE 
+419|                          SET expires_at = EXCLUDED.expires_at, reason = EXCLUDED.reason`,
+420|                         [targetPseudo, expiresAt, `${reportCount} signalements reçus`]
+421|                     );
+422| 
+423|                     // Journaliser l'action
+424|                     await pool.query(
+425|                         `INSERT INTO moderation_actions (admin_pseudo, action_type, target_pseudo, duration_minutes, reason)
+426|                          VALUES ('SYSTEM', 'temp_ban', $1, 10, $2)`,
+427|                         [targetPseudo, `Ban auto après ${reportCount} signalements`]
+428|                     );
+429| 
+430|                     // Déconnecter l'utilisateur cible s'il est connecté
+431|                     let targetSocketId = null;
+432|                     try {
+433|                         const targetResult = await pool.query(
+434|                             'SELECT socket_id FROM users WHERE pseudo = $1 AND socket_id IS NOT NULL',
+435|                             [targetPseudo]
+436|                         );
+437|                         if (targetResult.rows.length > 0) {
+438|                             targetSocketId = targetResult.rows[0].socket_id;
+439|                             io.to(targetSocketId).emit('force logout', {
+440|                                 reason: `Vous avez été banni temporairement (10 minutes) pour comportement abusif.`
+441|                             });
+442|                         }
+443|                     } catch (err) {
+444|                         console.error('❌ Erreur récupération socket cible:', err.message);
+445|                     }
+446| 
+447|                     // Notifier tous les admins connectés (optionnel)
+448|                     io.emit('new_report_auto_ban', {
+449|                         targetPseudo,
+450|                         reportCount,
+451|                         duration: 10
+452|                     });
+453| 
+454|                     console.log(`🔨 Auto-ban: ${targetPseudo} banni 10 min (${reportCount} signalements)`);
+455|                 }
+456|             } catch (err) {
+457|                 console.error('Erreur lors du signalement:', err);
+458|                 socket.emit('report_error', { error: 'Erreur serveur' });
+459|             }
+460|         });
+461| 
+462|         socket.on('disconnect', () => {
+463|             console.log(`🔌 Déconnexion socket ${socket.id} (ignorée, l'utilisateur reste connecté en base)`);
+464|             // NE RIEN FAIRE - on laisse le socket_id en base
 465|         });
 466| 
-467|         // Fingerprint
-468|         (async () => {
-469|             try {
-470|                 const fp = await FingerprintJS.load();
-471|                 const result = await fp.get();
-472|                 sessionStorage.setItem('fingerprint', result.visitorId);
-473|                 console.log('✅ Empreinte générée:', result.visitorId);
-474|             } catch (err) {
-475|                 console.error('Erreur fingerprint:', err);
-476|                 // Fallback avec un ID unique
-477|                 const fallbackId = 'fallback_' + Date.now() + '_' + Math.random().toString(36).substring(2);
-478|                 sessionStorage.setItem('fingerprint', fallbackId);
-479|                 console.log('🔑 Fallback généré:', fallbackId);
-480|             }
-481|         })();
-482| 
-483|         // ========== AFFICHAGE DES CONNECTÉS (via API REST) ==========
-484|         async function fetchLoginUsers() {
-485|             try {
-486|                 const response = await fetch('/api/users/active');
-487|                 const usersList = await response.json();
-488| 
-489|                 console.log('🎯 Affichage connectés, usersList =', usersList);
-490|                 const container = document.getElementById('loginUsersList');
-491|                 const countSpan = document.getElementById('loginOnlineCount');
-492|                 const moodText = document.getElementById('moodText');
-493|                 const moodBox = document.getElementById('moodBox');
-494| 
-495|                 if (container) {
-496|                     const count = usersList.length;
-497|                     countSpan.textContent = count;
-498| 
-499|                     // 🔥 Mettre à jour le message d'humeur
-500|                     let moodMessage = '';
-501|                     let moodClass = '';
-502|                     let emoji = '';
-503| 
-504|                     if (count === 0) {
-505|                         moodMessage = 'Personne pour le moment... Reviens plus tard !';
-506|                         moodClass = 'calm';
-507|                         emoji = '🌙';
-508|                     } else if (count <= 5) {
-509|                         moodMessage = 'C\'est un peu calme par ici...';
-510|                         moodClass = 'calm';
-511|                         emoji = '🌿';
-512|                     } else if (count <= 15) {
-513|                         moodMessage = 'Il commence à y avoir du monde !';
-514|                         moodClass = 'busy';
-515|                         emoji = '👋';
-516|                     } else if (count <= 30) {
-517|                         moodMessage = 'Il y a du monde par ici !';
-518|                         moodClass = 'busy';
-519|                         emoji = '😊';
-520|                     } else if (count <= 50) {
-521|                         moodMessage = 'La soirée commence à chauffer !';
-522|                         moodClass = 'crowded';
-523|                         emoji = '🔥';
-524|                     } else if (count <= 100) {
-525|                         moodMessage = 'Il y a beaucoup de monde par ici !';
-526|                         moodClass = 'crowded';
-527|                         emoji = '🎉';
-528|                     } else if (count <= 200) {
-529|                         moodMessage = 'La fête bat son plein !';
-530|                         moodClass = 'very-crowded';
-531|                         emoji = '🥳';
-532|                     } else {
-533|                         moodMessage = '🚨 ATTENTION : Invasion massive !';
-534|                         moodClass = 'very-crowded';
-535|                         emoji = '🚨';
-536|                     }
-537| 
-538|                     moodText.innerHTML = `<span class="mood-emoji">${emoji}</span><span class="mood-text">${moodMessage}</span>`;
-539|                     moodBox.className = `mood-box ${moodClass}`;
-540| 
-541|                     // Afficher la liste des utilisateurs
-542|                     if (count === 0) {
-543|                         container.innerHTML = '<em>Aucun connecté</em>';
-544|                     } else {
-545|                         container.innerHTML = usersList.map(user => `
-546|                     <div class="user-item">
-547|                         <strong>${window.common.escapeHtml(user.pseudo)}</strong>
-548|                         <span class="user-details">
-549|                             <small>${user.age} ans · ${user.locationCity || user.locationCode || '?'}</small>
-550|                         </span>
-551|                     </div>
-552|                 `).join('');
-553|                     }
-554|                 }
-555|             } catch (err) {
-556|                 console.error('❌ Erreur chargement utilisateurs:', err);
-557|             }
-558|         }
-559| 
-560|         // Charger au démarrage et rafraîchir toutes les 10 secondes
-561|         fetchLoginUsers();
-562|         setInterval(fetchLoginUsers, 10000);
-563|     }
-564| 
-565|     // ---------- 5. Démarrage ----------
-566|     document.addEventListener('DOMContentLoaded', async () => {
-567|         await loadForbiddenWords();
-568|         waitForCommon(init);
-569|     });
-570| 
-571| 
-572| })();
+467|     });
+468| 
+469| 
+470| };
 
 # ============================================
 # FILE: public\js\chat.js
@@ -1321,1294 +1217,1103 @@
 727|         loadBlockedUsers();
 728|     });
 729| 
-730|     socket.on('join error', (error) => {
-731|         console.error('❌ Erreur join:', error);
-732|     });
-733| 
-734| 
-735|     // Rafraîchir la liste des connectés toutes les 10 secondes
-736|     window.fetchActiveUsers();
-737|     setInterval(fetchActiveUsers, 10000);
-738| 
-739|     // Écouter l'événement 'kicked' pour les utilisateurs expulsés par l'admin
-740|     socket.on('kicked', (data) => {
-741|         alert(data.message || '🦵 Vous avez été expulsé par un administrateur.');
-742|         setTimeout(() => {
-743|             window.location.href = '/';
-744|         }, 1500);
-745|     });
-746| 
-747|     // --------------------------------------------------------------
-748|     // ENVOI ET RÉCEPTION DES MESSAGES
-749|     // --------------------------------------------------------------
-750|     socket.on('message sent confirmation', async (data) => {
-751|         displayMessage(data.message, 'sent', null, currentTargetName);
-752|         addToHistory(currentTargetName, data.message, 'sent', user.pseudo, currentTargetName);
-753| 
-754|         try {
-755|             await fetch('/api/messages/save', {
-756|                 method: 'POST',
-757|                 headers: { 'Content-Type': 'application/json' },
-758|                 body: JSON.stringify({
-759|                     from: user.pseudo,
-760|                     to: currentTargetName,
-761|                     message: data.message
-762|                 })
-763|             });
-764|         } catch (err) {
-765|             console.error('Erreur sauvegarde message:', err);
-766|         }
-767| 
-768|         messageInput.value = '';
-769|         messageInput.focus();
+730|     socket.on('pending messages', (messages) => {
+731|         console.log(`📥 ${messages.length} messages manquants reçus pour ${user.pseudo}`);
+732|         messages.forEach(msg => {
+733|             // Afficher chaque message dans le chat
+734|             if (typeof displayMessage === 'function') {
+735|                 displayMessage(msg.message, 'received', msg.from_pseudo);
+736|             }
+737|             if (typeof addToHistory === 'function') {
+738|                 addToHistory(msg.from_pseudo, msg.message, 'received', msg.from_pseudo, user.pseudo);
+739|             }
+740|         });
+741|         // Mettre à jour l'affichage
+742|         if (typeof updateHistoryDisplay === 'function') {
+743|             updateHistoryDisplay();
+744|         }
+745|         // Optionnel : notifier l'utilisateur
+746|         if (messages.length > 0 && typeof MGModal !== 'undefined') {
+747|             MGModal.show({
+748|                 title: '📨 Nouveaux messages',
+749|                 message: `Vous avez ${messages.length} message(s) en attente.`,
+750|                 onConfirm: () => { }
+751|             });
+752|         }
+753|     });
+754| 
+755|     socket.on('join error', (error) => {
+756|         console.error('❌ Erreur join:', error);
+757|     });
+758| 
+759| 
+760|     // Rafraîchir la liste des connectés toutes les 10 secondes
+761|     window.fetchActiveUsers();
+762|     setInterval(fetchActiveUsers, 10000);
+763| 
+764|     // Écouter l'événement 'kicked' pour les utilisateurs expulsés par l'admin
+765|     socket.on('kicked', (data) => {
+766|         alert(data.message || '🦵 Vous avez été expulsé par un administrateur.');
+767|         setTimeout(() => {
+768|             window.location.href = '/';
+769|         }, 1500);
 770|     });
 771| 
-772|     socket.on('private message received', (data) => {
-773|         if (window.blockedUsers.includes(data.fromPseudo)) {
-774|             console.log(`🚫 Message ignoré de ${data.fromPseudo} (bloqué)`);
-775|             return;
-776|         }
-777| 
-778|         if (data.fromPseudo !== user.pseudo) {
-779|             console.log(`🔊 Message reçu de ${data.fromPseudo} → jouer le son`);
-780|             playMessageSound();
-781|         } else {
-782|             console.log(`🔇 Message ignoré (c'est nous-même)`);
-783|         }
-784| 
-785|         pendingMessages.push(data);
-786| 
-787|         fetch('/api/messages/save', {
-788|             method: 'POST',
-789|             headers: { 'Content-Type': 'application/json' },
-790|             body: JSON.stringify({
-791|                 from: data.fromPseudo,
-792|                 to: user.pseudo,
-793|                 message: data.message
-794|             })
-795|         }).catch(err => console.error('Erreur sauvegarde message reçu:', err));
+772|     // --------------------------------------------------------------
+773|     // ENVOI ET RÉCEPTION DES MESSAGES
+774|     // --------------------------------------------------------------
+775|     socket.on('message sent confirmation', async (data) => {
+776|         displayMessage(data.message, 'sent', null, currentTargetName);
+777|         addToHistory(currentTargetName, data.message, 'sent', user.pseudo, currentTargetName);
+778| 
+779|         try {
+780|             await fetch('/api/messages/save', {
+781|                 method: 'POST',
+782|                 headers: { 'Content-Type': 'application/json' },
+783|                 body: JSON.stringify({
+784|                     from: user.pseudo,
+785|                     to: currentTargetName,
+786|                     message: data.message
+787|                 })
+788|             });
+789|         } catch (err) {
+790|             console.error('Erreur sauvegarde message:', err);
+791|         }
+792| 
+793|         messageInput.value = '';
+794|         messageInput.focus();
+795|     });
 796| 
-797|         updateEnvelope(pendingMessages.length);
-798|         startBlinking();
-799|     });
-800| 
-801|     socket.on('error', (msg) => {
-802|         console.error('Erreur:', msg);
-803|     });
-804| 
-805|     socket.on('force logout', (data) => {
-806|         console.log('🚪 Force logout reçu:', data.reason);
-807| 
-808|         if (typeof MGModal !== 'undefined') {
-809|             MGModal.show({
-810|                 title: '⛔ Déconnexion',
-811|                 message: data.reason || 'Vous avez été déconnecté.',
-812|                 onConfirm: () => {
-813|                     localStorage.removeItem('meetgay_token');
-814|                     localStorage.removeItem('meetgay_user');
-815|                     window.location.href = '/login.html';
-816|                 }
-817|             });
-818| 
-819|             // 🔥 Redirection automatique après 3 secondes (même sans cliquer)
-820|             setTimeout(() => {
-821|                 localStorage.removeItem('meetgay_token');
-822|                 localStorage.removeItem('meetgay_user');
-823|                 window.location.href = '/login.html';
-824|             }, 3000);
-825|         } else {
-826|             // Fallback si le modal n'existe pas
-827|             localStorage.removeItem('meetgay_token');
-828|             localStorage.removeItem('meetgay_user');
-829|             window.location.href = '/login.html';
-830|         }
-831|     });
-832| 
-833|     // --------------------------------------------------------------
-834|     // ENVELOPPE (messages reçus)
-835|     // --------------------------------------------------------------
-836|     envelope.onclick = async () => {
-837|         if (pendingMessages.length === 0) return;
-838| 
-839|         const msg = pendingMessages.shift();
-840|         displayMessage(msg.message, 'received', msg.fromPseudo);
-841|         addToHistory(msg.fromPseudo, msg.message, 'received', msg.fromPseudo, user.pseudo);
-842|         loadHistory(msg.fromPseudo);
-843| 
-844|         currentTarget = msg.fromPseudo;
-845|         currentTargetName = msg.fromPseudo;
-846|         messageInput.disabled = false;
-847|         sendBtn.disabled = false;
-848|         messageInput.placeholder = `Répondre à ${msg.fromPseudo}...`;
-849|         messageInput.focus();
-850| 
-851|         document.querySelectorAll('.user-item').forEach(el => {
-852|             if (el.textContent.includes(msg.fromPseudo) && !el.textContent.includes('(moi)')) {
-853|                 document.querySelectorAll('.user-item').forEach(e => e.classList.remove('current-target'));
-854|                 el.classList.add('current-target');
-855|             }
-856|         });
-857| 
-858|         const senderInfo = usersList.find(u => u.pseudo === msg.fromPseudo);
-859|         if (senderInfo) {
-860|             let fullSender = senderInfo;
-861|             if (typeof window.showContactInfo === 'function') {
-862|                 window.showContactInfo(
-863|                     fullSender.pseudo,
-864|                     fullSender.age,
-865|                     fullSender.origine,
-866|                     fullSender.gender,
-867|                     fullSender.tendencies,
-868|                     fullSender,
-869|                     fullSender.locationCity || fullSender.locationCode,
-870|                     fullSender.locationCommune || null,
-871|                     fullSender.purpose,
-872|                     fullSender.bio || 'Pas de présentation',
-873|                     window.blockedUsers || []
-874|                 );
-875|             } else {
-876|                 console.error('❌ showContactInfo non disponible');
-877|             }
-878|         } else {
-879|             if (typeof window.showContactInfo === 'function') {
-880|                 window.showContactInfo(msg.fromPseudo, '?', '', '?', '?', {}, '?', null, '?', 'Bio non disponible', []);
-881|             }
-882|         }
-883| 
-884|         updateEnvelope(pendingMessages.length);
-885|         if (pendingMessages.length === 0) {
-886|             stopBlinking();
-887|         }
-888|     };
-889| 
-890|     // --------------------------------------------------------------
-891|     // ENVOI DE MESSAGE
-892|     // --------------------------------------------------------------
-893|     sendBtn.onclick = () => {
-894|         const text = messageInput.value.trim();
-895|         if (!text || !currentTarget) return;
-896| 
-897|         if (currentTargetName && window.blockedUsers.includes(currentTargetName)) {
-898|             if (typeof MGModal !== 'undefined') {
-899|                 MGModal.show({
-900|                     title: '🚫 Message bloqué',
-901|                     message: `Vous avez bloqué ${currentTargetName}. Débloquez-le d'abord.`,
-902|                     onConfirm: () => { }
-903|                 });
-904|             } else {
-905|                 alert(`Vous avez bloqué ${currentTargetName}`);
-906|             }
-907|             return;
-908|         }
-909| 
-910|         if (currentReceivedMessage !== null) {
-911|             clearMessageArea();
-912|         }
-913| 
-914|         socket.emit('private message', {
-915|             toSocketId: currentTarget,
-916|             message: text,
-917|             fromPseudo: user.pseudo
-918|         });
-919|     };
-920| 
-921|     messageInput.addEventListener('keypress', (e) => {
-922|         if (e.key === 'Enter') sendBtn.click();
-923|     });
-924| 
-925|     // --------------------------------------------------------------
-926|     // CHAT PRIVÉ (POPUP)
-927|     // --------------------------------------------------------------
-928|     let privateChatAvailable = {};
-929| 
-930|     socket.on('privateChatAvailable', (data) => {
-931|         console.log(`🔔 Seuil atteint avec ${data.with}`);
-932|         privateChatAvailable[data.with] = true;
-933|         showPrivatePopup(data.with);
-934|     });
-935| 
-936|     function showPrivatePopup(pseudo) {
-937|         if (document.getElementById('privatePopup')) return;
-938| 
-939|         const chatPanel = document.querySelector('.chat-panel');
-940|         if (!chatPanel) return;
-941| 
-942|         if (getComputedStyle(chatPanel).position !== 'relative') {
-943|             chatPanel.style.position = 'relative';
-944|         }
-945| 
-946|         const inputArea = document.querySelector('.input-area');
-947|         if (!inputArea) return;
-948| 
-949|         const inputRect = inputArea.getBoundingClientRect();
-950|         const chatRect = chatPanel.getBoundingClientRect();
-951|         const topPosition = inputRect.bottom - chatRect.top;
-952| 
-953|         const popup = document.createElement('div');
-954|         popup.id = 'privatePopup';
-955|         popup.style.cssText = `
-956|             position: absolute;
-957|             top: ${topPosition + 5}px;
-958|             left: 0;
-959|             right: 0;
-960|             background: #2c3e50;
-961|             color: white;
-962|             border-radius: 8px;
-963|             padding: 10px 12px;
-964|             z-index: 1000;
-965|             font-family: 'Segoe UI', sans-serif;
-966|             font-size: 12px;
-967|             display: flex;
-968|             justify-content: space-between;
-969|             align-items: center;
-970|             flex-wrap: wrap;
-971|             gap: 8px;
-972|             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-973|             opacity: 0;
-974|             transform: translateY(-10px);
-975|             transition: opacity 0.2s ease, transform 0.2s ease;
-976|         `;
-977| 
-978|         popup.innerHTML = `
-979|             <span>💬 <strong>${pseudo}</strong> : 3 messages échangés. Passer en privé ?</span>
-980|             <div style="display: flex; gap: 6px;">
-981|                 <button id="popupAccept" style="background:#27ae60; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">✅ Oui</button>
-982|                 <button id="popupDecline" style="background:#e74c3c; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">❌ Non</button>
-983|             </div>
-984|         `;
-985| 
-986|         chatPanel.appendChild(popup);
-987| 
-988|         setTimeout(() => {
-989|             popup.style.opacity = '1';
-990|             popup.style.transform = 'translateY(0)';
-991|         }, 10);
-992| 
-993|         document.getElementById('popupAccept').onclick = () => {
-994|             socket.emit('invitePrivate', { toPseudo: pseudo, fromPseudo: user.pseudo });
-995|             popup.remove();
-996|         };
-997| 
-998|         document.getElementById('popupDecline').onclick = () => {
-999|             popup.remove();
-1000|         };
-1001|     }
-1002| 
-1003|     socket.on('privateInviteReceived', (data) => {
-1004|         if (document.getElementById('invitePopup')) return;
-1005| 
-1006|         const chatPanel = document.querySelector('.chat-panel');
-1007|         if (!chatPanel) return;
-1008| 
-1009|         if (getComputedStyle(chatPanel).position !== 'relative') {
-1010|             chatPanel.style.position = 'relative';
-1011|         }
-1012| 
-1013|         const inputArea = document.querySelector('.input-area');
-1014|         if (!inputArea) return;
-1015| 
-1016|         const inputRect = inputArea.getBoundingClientRect();
-1017|         const chatRect = chatPanel.getBoundingClientRect();
-1018|         const topPosition = inputRect.bottom - chatRect.top;
-1019| 
-1020|         const popup = document.createElement('div');
-1021|         popup.id = 'invitePopup';
-1022|         popup.style.cssText = `
-1023|             position: absolute;
-1024|             top: ${topPosition + 5}px;
-1025|             left: 0;
-1026|             right: 0;
-1027|             background: #2c3e50;
-1028|             color: white;
-1029|             border-radius: 8px;
-1030|             padding: 10px 12px;
-1031|             z-index: 1000;
-1032|             font-family: 'Segoe UI', sans-serif;
-1033|             font-size: 12px;
-1034|             display: flex;
-1035|             justify-content: space-between;
-1036|             align-items: center;
-1037|             flex-wrap: wrap;
-1038|             gap: 8px;
-1039|             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-1040|             opacity: 0;
-1041|             transform: translateY(-10px);
-1042|             transition: opacity 0.2s ease, transform 0.2s ease;
-1043|         `;
-1044| 
-1045|         popup.innerHTML = `
-1046|             <span>🔔 <strong>${data.from}</strong> vous invite en chat privé.</span>
-1047|             <div style="display: flex; gap: 6px;">
-1048|                 <button id="inviteAccept" style="background:#27ae60; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">✅ Accepter</button>
-1049|                 <button id="inviteDecline" style="background:#e74c3c; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">❌ Refuser</button>
-1050|             </div>
-1051|         `;
-1052| 
-1053|         chatPanel.appendChild(popup);
-1054| 
-1055|         setTimeout(() => {
-1056|             popup.style.opacity = '1';
-1057|             popup.style.transform = 'translateY(0)';
-1058|         }, 10);
-1059| 
-1060|         document.getElementById('inviteAccept').onclick = () => {
-1061|             socket.emit('acceptPrivateInvite', { fromPseudo: data.from, toPseudo: user.pseudo });
-1062|             popup.remove();
-1063|             alert(`💬 Chat privé ouvert avec ${data.from} !`);
-1064|         };
-1065| 
-1066|         document.getElementById('inviteDecline').onclick = () => {
-1067|             socket.emit('declinePrivateInvite', { fromPseudo: user.pseudo, toPseudo: data.from });
-1068|             popup.remove();
-1069|         };
-1070|     });
-1071| 
-1072|     // ========== POPUP SYSTÈME POUR RETOUR ARRIÈRE ==========
-1073|     let userHasInteracted = false;
+797|     socket.on('private message', async (data) => {
+798|         const { toSocketId, message, fromPseudo } = data;
+799| 
+800|         // Vérifier si le destinataire est connecté
+801|         let targetSocketId = null;
+802|         try {
+803|             const result = await pool.query(
+804|                 'SELECT socket_id FROM users WHERE pseudo = $1 AND socket_id IS NOT NULL',
+805|                 [toSocketId]
+806|             );
+807|             if (result.rows.length > 0) {
+808|                 targetSocketId = result.rows[0].socket_id;
+809|             }
+810|         } catch (err) {
+811|             console.error('❌ Erreur recherche destinataire:', err.message);
+812|             socket.emit('error', { message: 'Erreur lors de l\'envoi du message' });
+813|             return;
+814|         }
+815| 
+816|         // Sauvegarder le message en base de données
+817|         try {
+818|             // 1. Vérifier si une conversation existe déjà entre les deux utilisateurs
+819|             const convResult = await pool.query(
+820|                 `SELECT id FROM conversations 
+821|              WHERE (user1_pseudo = $1 AND user2_pseudo = $2) 
+822|                 OR (user1_pseudo = $2 AND user2_pseudo = $1)`,
+823|                 [fromPseudo, toSocketId]
+824|             );
+825| 
+826|             let conversationId;
+827|             if (convResult.rows.length === 0) {
+828|                 // 2. Créer une nouvelle conversation
+829|                 const newConv = await pool.query(
+830|                     `INSERT INTO conversations (user1_pseudo, user2_pseudo, last_message, last_message_time) 
+831|                  VALUES ($1, $2, $3, NOW()) 
+832|                  RETURNING id`,
+833|                     [fromPseudo, toSocketId, message]
+834|                 );
+835|                 conversationId = newConv.rows[0].id;
+836|                 console.log(`📁 Nouvelle conversation ${conversationId} créée pour ${fromPseudo} ↔ ${toSocketId}`);
+837|             } else {
+838|                 conversationId = convResult.rows[0].id;
+839|                 // 3. Mettre à jour le dernier message
+840|                 await pool.query(
+841|                     `UPDATE conversations SET last_message = $1, last_message_time = NOW() WHERE id = $2`,
+842|                     [message, conversationId]
+843|                 );
+844|             }
+845| 
+846|             // 4. Insérer le message
+847|             await pool.query(
+848|                 `INSERT INTO messages (conversation_id, from_pseudo, to_pseudo, message, created_at) 
+849|              VALUES ($1, $2, $3, $4, NOW())`,
+850|                 [conversationId, fromPseudo, toSocketId, message]
+851|             );
+852|             console.log(`📦 Message sauvegardé dans la conversation ${conversationId}`);
+853| 
+854|         } catch (err) {
+855|             console.error('❌ Erreur sauvegarde message:', err.message);
+856|             // On continue même si la sauvegarde échoue, pour ne pas bloquer l'envoi
+857|         }
+858| 
+859|         // Si le destinataire est connecté, envoyer le message immédiatement
+860|         if (targetSocketId) {
+861|             io.to(targetSocketId).emit('private message received', {
+862|                 fromPseudo: fromPseudo,
+863|                 fromSocketId: socket.id,
+864|                 message: message,
+865|                 timestamp: new Date()
+866|             });
+867| 
+868|             // Confirmer à l'expéditeur
+869|             socket.emit('message sent confirmation', {
+870|                 message: message,
+871|                 toPseudo: toSocketId,
+872|                 timestamp: new Date()
+873|             });
+874| 
+875|             console.log(`💬 Message de ${fromPseudo} à ${toSocketId}: ${message.substring(0, 30)}...`);
+876|         } else {
+877|             // Le destinataire n'est pas connecté, le message est déjà sauvegardé en base
+878|             console.log(`💤 Message de ${fromPseudo} à ${toSocketId} sauvegardé (destinataire déconnecté)`);
+879|             socket.emit('message sent confirmation', {
+880|                 message: message,
+881|                 toPseudo: toSocketId,
+882|                 timestamp: new Date(),
+883|                 pending: true
+884|             });
+885|         }
+886|     });
+887| 
+888|     socket.on('error', (msg) => {
+889|         console.error('Erreur:', msg);
+890|     });
+891| 
+892|     socket.on('force logout', (data) => {
+893|         console.log('🚪 Force logout reçu:', data.reason);
+894| 
+895|         if (typeof MGModal !== 'undefined') {
+896|             MGModal.show({
+897|                 title: '⛔ Déconnexion',
+898|                 message: data.reason || 'Vous avez été déconnecté.',
+899|                 onConfirm: () => {
+900|                     localStorage.removeItem('meetgay_token');
+901|                     localStorage.removeItem('meetgay_user');
+902|                     window.location.href = '/login.html';
+903|                 }
+904|             });
+905| 
+906|             // 🔥 Redirection automatique après 3 secondes (même sans cliquer)
+907|             setTimeout(() => {
+908|                 localStorage.removeItem('meetgay_token');
+909|                 localStorage.removeItem('meetgay_user');
+910|                 window.location.href = '/login.html';
+911|             }, 3000);
+912|         } else {
+913|             // Fallback si le modal n'existe pas
+914|             localStorage.removeItem('meetgay_token');
+915|             localStorage.removeItem('meetgay_user');
+916|             window.location.href = '/login.html';
+917|         }
+918|     });
+919| 
+920|     // --------------------------------------------------------------
+921|     // ENVELOPPE (messages reçus)
+922|     // --------------------------------------------------------------
+923|     envelope.onclick = async () => {
+924|         if (pendingMessages.length === 0) return;
+925| 
+926|         const msg = pendingMessages.shift();
+927|         displayMessage(msg.message, 'received', msg.fromPseudo);
+928|         addToHistory(msg.fromPseudo, msg.message, 'received', msg.fromPseudo, user.pseudo);
+929|         loadHistory(msg.fromPseudo);
+930| 
+931|         currentTarget = msg.fromPseudo;
+932|         currentTargetName = msg.fromPseudo;
+933|         messageInput.disabled = false;
+934|         sendBtn.disabled = false;
+935|         messageInput.placeholder = `Répondre à ${msg.fromPseudo}...`;
+936|         messageInput.focus();
+937| 
+938|         document.querySelectorAll('.user-item').forEach(el => {
+939|             if (el.textContent.includes(msg.fromPseudo) && !el.textContent.includes('(moi)')) {
+940|                 document.querySelectorAll('.user-item').forEach(e => e.classList.remove('current-target'));
+941|                 el.classList.add('current-target');
+942|             }
+943|         });
+944| 
+945|         const senderInfo = usersList.find(u => u.pseudo === msg.fromPseudo);
+946|         if (senderInfo) {
+947|             let fullSender = senderInfo;
+948|             if (typeof window.showContactInfo === 'function') {
+949|                 window.showContactInfo(
+950|                     fullSender.pseudo,
+951|                     fullSender.age,
+952|                     fullSender.origine,
+953|                     fullSender.gender,
+954|                     fullSender.tendencies,
+955|                     fullSender,
+956|                     fullSender.locationCity || fullSender.locationCode,
+957|                     fullSender.locationCommune || null,
+958|                     fullSender.purpose,
+959|                     fullSender.bio || 'Pas de présentation',
+960|                     window.blockedUsers || []
+961|                 );
+962|             } else {
+963|                 console.error('❌ showContactInfo non disponible');
+964|             }
+965|         } else {
+966|             if (typeof window.showContactInfo === 'function') {
+967|                 window.showContactInfo(msg.fromPseudo, '?', '', '?', '?', {}, '?', null, '?', 'Bio non disponible', []);
+968|             }
+969|         }
+970| 
+971|         updateEnvelope(pendingMessages.length);
+972|         if (pendingMessages.length === 0) {
+973|             stopBlinking();
+974|         }
+975|     };
+976| 
+977|     // --------------------------------------------------------------
+978|     // ENVOI DE MESSAGE
+979|     // --------------------------------------------------------------
+980|     sendBtn.onclick = () => {
+981|         const text = messageInput.value.trim();
+982|         if (!text || !currentTarget) return;
+983| 
+984|         if (currentTargetName && window.blockedUsers.includes(currentTargetName)) {
+985|             if (typeof MGModal !== 'undefined') {
+986|                 MGModal.show({
+987|                     title: '🚫 Message bloqué',
+988|                     message: `Vous avez bloqué ${currentTargetName}. Débloquez-le d'abord.`,
+989|                     onConfirm: () => { }
+990|                 });
+991|             } else {
+992|                 alert(`Vous avez bloqué ${currentTargetName}`);
+993|             }
+994|             return;
+995|         }
+996| 
+997|         if (currentReceivedMessage !== null) {
+998|             clearMessageArea();
+999|         }
+1000| 
+1001|         socket.emit('private message', {
+1002|             toSocketId: currentTarget,
+1003|             message: text,
+1004|             fromPseudo: user.pseudo
+1005|         });
+1006|     };
+1007| 
+1008|     messageInput.addEventListener('keypress', (e) => {
+1009|         if (e.key === 'Enter') sendBtn.click();
+1010|     });
+1011| 
+1012|     // --------------------------------------------------------------
+1013|     // CHAT PRIVÉ (POPUP)
+1014|     // --------------------------------------------------------------
+1015|     let privateChatAvailable = {};
+1016| 
+1017|     socket.on('privateChatAvailable', (data) => {
+1018|         console.log(`🔔 Seuil atteint avec ${data.with}`);
+1019|         privateChatAvailable[data.with] = true;
+1020|         showPrivatePopup(data.with);
+1021|     });
+1022| 
+1023|     function showPrivatePopup(pseudo) {
+1024|         if (document.getElementById('privatePopup')) return;
+1025| 
+1026|         const chatPanel = document.querySelector('.chat-panel');
+1027|         if (!chatPanel) return;
+1028| 
+1029|         if (getComputedStyle(chatPanel).position !== 'relative') {
+1030|             chatPanel.style.position = 'relative';
+1031|         }
+1032| 
+1033|         const inputArea = document.querySelector('.input-area');
+1034|         if (!inputArea) return;
+1035| 
+1036|         const inputRect = inputArea.getBoundingClientRect();
+1037|         const chatRect = chatPanel.getBoundingClientRect();
+1038|         const topPosition = inputRect.bottom - chatRect.top;
+1039| 
+1040|         const popup = document.createElement('div');
+1041|         popup.id = 'privatePopup';
+1042|         popup.style.cssText = `
+1043|             position: absolute;
+1044|             top: ${topPosition + 5}px;
+1045|             left: 0;
+1046|             right: 0;
+1047|             background: #2c3e50;
+1048|             color: white;
+1049|             border-radius: 8px;
+1050|             padding: 10px 12px;
+1051|             z-index: 1000;
+1052|             font-family: 'Segoe UI', sans-serif;
+1053|             font-size: 12px;
+1054|             display: flex;
+1055|             justify-content: space-between;
+1056|             align-items: center;
+1057|             flex-wrap: wrap;
+1058|             gap: 8px;
+1059|             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+1060|             opacity: 0;
+1061|             transform: translateY(-10px);
+1062|             transition: opacity 0.2s ease, transform 0.2s ease;
+1063|         `;
+1064| 
+1065|         popup.innerHTML = `
+1066|             <span>💬 <strong>${pseudo}</strong> : 3 messages échangés. Passer en privé ?</span>
+1067|             <div style="display: flex; gap: 6px;">
+1068|                 <button id="popupAccept" style="background:#27ae60; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">✅ Oui</button>
+1069|                 <button id="popupDecline" style="background:#e74c3c; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">❌ Non</button>
+1070|             </div>
+1071|         `;
+1072| 
+1073|         chatPanel.appendChild(popup);
 1074| 
-1075|     document.body.addEventListener('click', () => userHasInteracted = true, { once: true });
-1076|     document.body.addEventListener('keydown', () => userHasInteracted = true, { once: true });
-1077| 
-1078|     history.pushState(null, null, location.href);
+1075|         setTimeout(() => {
+1076|             popup.style.opacity = '1';
+1077|             popup.style.transform = 'translateY(0)';
+1078|         }, 10);
 1079| 
-1080|     window.addEventListener('popstate', function (event) {
-1081|         if (!userHasInteracted) {
-1082|             history.pushState(null, null, location.href);
-1083|             return;
-1084|         }
-1085| 
-1086|         // 🔥 ENVOYER LA REQUÊTE AVANT DE QUITTER
-1087|         if (currentUserPseudo) {
-1088|             // Utiliser sendBeacon pour garantir l'envoi
-1089|             const data = JSON.stringify({ pseudo: currentUserPseudo });
-1090|             navigator.sendBeacon('/api/mark-for-deletion', data);
-1091| 
-1092|             // Fallback avec fetch si sendBeacon n'est pas supporté
-1093|             if (!navigator.sendBeacon) {
-1094|                 fetch('/api/mark-for-deletion', {
-1095|                     method: 'POST',
-1096|                     headers: { 'Content-Type': 'application/json' },
-1097|                     body: data
-1098|                 }).catch(() => { });
-1099|             }
-1100|         }
-1101| 
-1102|         const beforeUnloadHandler = (e) => {
-1103|             e.preventDefault();
-1104|             e.returnValue = true;
-1105|         };
+1080|         document.getElementById('popupAccept').onclick = () => {
+1081|             socket.emit('invitePrivate', { toPseudo: pseudo, fromPseudo: user.pseudo });
+1082|             popup.remove();
+1083|         };
+1084| 
+1085|         document.getElementById('popupDecline').onclick = () => {
+1086|             popup.remove();
+1087|         };
+1088|     }
+1089| 
+1090|     socket.on('privateInviteReceived', (data) => {
+1091|         if (document.getElementById('invitePopup')) return;
+1092| 
+1093|         const chatPanel = document.querySelector('.chat-panel');
+1094|         if (!chatPanel) return;
+1095| 
+1096|         if (getComputedStyle(chatPanel).position !== 'relative') {
+1097|             chatPanel.style.position = 'relative';
+1098|         }
+1099| 
+1100|         const inputArea = document.querySelector('.input-area');
+1101|         if (!inputArea) return;
+1102| 
+1103|         const inputRect = inputArea.getBoundingClientRect();
+1104|         const chatRect = chatPanel.getBoundingClientRect();
+1105|         const topPosition = inputRect.bottom - chatRect.top;
 1106| 
-1107|         window.addEventListener('beforeunload', beforeUnloadHandler);
-1108| 
-1109|         setTimeout(() => {
-1110|             window.removeEventListener('beforeunload', beforeUnloadHandler);
-1111|         }, 500);
-1112| 
-1113|         history.pushState(null, null, location.href);
-1114|     });
-1115|     window.addEventListener('pagehide', () => {
-1116|         if (currentUserPseudo) {
-1117|             // 🔥 Nouveau : marquer pour suppression au lieu de supprimer immédiatement
-1118|             navigator.sendBeacon('/api/mark-for-deletion', JSON.stringify({ pseudo: currentUserPseudo }));
-1119|             // Fallback : si la nouvelle route échoue, on garde l'ancien mécanisme
-1120|             setTimeout(() => {
-1121|                 navigator.sendBeacon('/api/delete-user', JSON.stringify({ pseudo: currentUserPseudo }));
-1122|                 navigator.sendBeacon('/api/messages/delete-user', JSON.stringify({ pseudo: currentUserPseudo }));
-1123|             }, 100);
-1124|         }
-1125|     });
-1126| 
-1127| } // ← FIN DE startChat()
-1128| 
-1129| // ========== LANCEMENT ==========
-1130| initUser();
+1107|         const popup = document.createElement('div');
+1108|         popup.id = 'invitePopup';
+1109|         popup.style.cssText = `
+1110|             position: absolute;
+1111|             top: ${topPosition + 5}px;
+1112|             left: 0;
+1113|             right: 0;
+1114|             background: #2c3e50;
+1115|             color: white;
+1116|             border-radius: 8px;
+1117|             padding: 10px 12px;
+1118|             z-index: 1000;
+1119|             font-family: 'Segoe UI', sans-serif;
+1120|             font-size: 12px;
+1121|             display: flex;
+1122|             justify-content: space-between;
+1123|             align-items: center;
+1124|             flex-wrap: wrap;
+1125|             gap: 8px;
+1126|             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+1127|             opacity: 0;
+1128|             transform: translateY(-10px);
+1129|             transition: opacity 0.2s ease, transform 0.2s ease;
+1130|         `;
+1131| 
+1132|         popup.innerHTML = `
+1133|             <span>🔔 <strong>${data.from}</strong> vous invite en chat privé.</span>
+1134|             <div style="display: flex; gap: 6px;">
+1135|                 <button id="inviteAccept" style="background:#27ae60; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">✅ Accepter</button>
+1136|                 <button id="inviteDecline" style="background:#e74c3c; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">❌ Refuser</button>
+1137|             </div>
+1138|         `;
+1139| 
+1140|         chatPanel.appendChild(popup);
+1141| 
+1142|         setTimeout(() => {
+1143|             popup.style.opacity = '1';
+1144|             popup.style.transform = 'translateY(0)';
+1145|         }, 10);
+1146| 
+1147|         document.getElementById('inviteAccept').onclick = () => {
+1148|             socket.emit('acceptPrivateInvite', { fromPseudo: data.from, toPseudo: user.pseudo });
+1149|             popup.remove();
+1150|             alert(`💬 Chat privé ouvert avec ${data.from} !`);
+1151|         };
+1152| 
+1153|         document.getElementById('inviteDecline').onclick = () => {
+1154|             socket.emit('declinePrivateInvite', { fromPseudo: user.pseudo, toPseudo: data.from });
+1155|             popup.remove();
+1156|         };
+1157|     });
+1158| 
+1159|     // ========== POPUP SYSTÈME POUR RETOUR ARRIÈRE ==========
+1160|     let userHasInteracted = false;
+1161| 
+1162|     document.body.addEventListener('click', () => userHasInteracted = true, { once: true });
+1163|     document.body.addEventListener('keydown', () => userHasInteracted = true, { once: true });
+1164| 
+1165|     history.pushState(null, null, location.href);
+1166| 
+1167|     window.addEventListener('popstate', function (event) {
+1168|         if (!userHasInteracted) {
+1169|             history.pushState(null, null, location.href);
+1170|             return;
+1171|         }
+1172| 
+1173|         // 🔥 ENVOYER LA REQUÊTE AVANT DE QUITTER
+1174|         if (currentUserPseudo) {
+1175|             // Utiliser sendBeacon pour garantir l'envoi
+1176|             const data = JSON.stringify({ pseudo: currentUserPseudo });
+1177|             navigator.sendBeacon('/api/mark-for-deletion', data);
+1178| 
+1179|             // Fallback avec fetch si sendBeacon n'est pas supporté
+1180|             if (!navigator.sendBeacon) {
+1181|                 fetch('/api/mark-for-deletion', {
+1182|                     method: 'POST',
+1183|                     headers: { 'Content-Type': 'application/json' },
+1184|                     body: data
+1185|                 }).catch(() => { });
+1186|             }
+1187|         }
+1188| 
+1189|         const beforeUnloadHandler = (e) => {
+1190|             e.preventDefault();
+1191|             e.returnValue = true;
+1192|         };
+1193| 
+1194|         window.addEventListener('beforeunload', beforeUnloadHandler);
+1195| 
+1196|         setTimeout(() => {
+1197|             window.removeEventListener('beforeunload', beforeUnloadHandler);
+1198|         }, 500);
+1199| 
+1200|         history.pushState(null, null, location.href);
+1201|     });
+1202|     window.addEventListener('pagehide', () => {
+1203|         if (currentUserPseudo) {
+1204|             // 🔥 Nouveau : marquer pour suppression au lieu de supprimer immédiatement
+1205|             navigator.sendBeacon('/api/mark-for-deletion', JSON.stringify({ pseudo: currentUserPseudo }));
+1206|             // Fallback : si la nouvelle route échoue, on garde l'ancien mécanisme
+1207|             setTimeout(() => {
+1208|                 navigator.sendBeacon('/api/delete-user', JSON.stringify({ pseudo: currentUserPseudo }));
+1209|                 navigator.sendBeacon('/api/messages/delete-user', JSON.stringify({ pseudo: currentUserPseudo }));
+1210|             }, 100);
+1211|         }
+1212|     });
+1213| 
+1214|     // 🔥 ÉCOUTER LES MESSAGES MANQUANTS
+1215|     socket.on('pending messages', (messages) => {
+1216|         console.log(`📥 ${messages.length} messages manquants reçus pour ${user.pseudo}`);
+1217|         messages.forEach(msg => {
+1218|             // Ajouter à l'historique
+1219|             if (typeof addToHistory === 'function') {
+1220|                 addToHistory(msg.from_pseudo, msg.message, 'received', msg.from_pseudo, user.pseudo);
+1221|             }
+1222|             // Afficher dans la zone de chat si c'est le contact actuel
+1223|             if (currentTargetName === msg.from_pseudo && typeof displayMessage === 'function') {
+1224|                 displayMessage(msg.message, 'received', msg.from_pseudo);
+1225|             }
+1226|         });
+1227|         // Mettre à jour l'affichage de l'historique
+1228|         if (typeof updateHistoryDisplay === 'function') {
+1229|             updateHistoryDisplay();
+1230|         }
+1231|         // Notifier l'utilisateur
+1232|         if (messages.length > 0 && typeof MGModal !== 'undefined') {
+1233|             MGModal.show({
+1234|                 title: '📨 Nouveaux messages',
+1235|                 message: `Vous avez ${messages.length} message(s) en attente.`,
+1236|                 onConfirm: () => { }
+1237|             });
+1238|         }
+1239|     });
+1240| 
+1241| } // ← FIN DE startChat()
+1242| 
+1243| // ========== LANCEMENT ==========
+1244| initUser();
 
 # ============================================
-# FILE: modules\session-manager.js
+# FILE: public\js\chat-script.js
 # ============================================
 
-1| // modules/session-manager.js
-2| // Système centralisé de gestion des sessions et nettoyage (version BASE DE DONNÉES)
+1| ﻿// ========== CHAT SCRIPT - MeetGay ==========
+2| // Centralise toute la logique restante du chat (fingerprint, traductions, historique coulissant, menus)
 3| 
-4| module.exports = function (io, pool, config = {}) {
-5|     const CLEANUP_INTERVAL = config.CLEANUP_INTERVAL || 60000;
-6|     const INACTIVITY_THRESHOLD = config.INACTIVITY_THRESHOLD || 600000;
-7| 
-8|     // ============================================================
-9|     // 1. NETTOYAGE PÉRIODIQUE (cœur du système - version base)
-10|     // ============================================================
-11|     function startCleanup() {
-12|         console.log(`🧹 Session Manager: nettoyage toutes les ${CLEANUP_INTERVAL / 1000}s (base de données)`);
-13| 
-14|         setInterval(async () => {
-15|             try {
-16|                 // 🔥 Récupérer les utilisateurs inactifs directement depuis la base
-17|                 const result = await pool.query(`
-18|                     SELECT pseudo, socket_id 
-19|                     FROM users 
-20|                     WHERE last_seen < NOW() - INTERVAL '${INACTIVITY_THRESHOLD / 60000} minutes'
-21|                     AND socket_id IS NOT NULL
-22|                 `);
-23| 
-24|                 if (result.rows.length === 0) return;
-25| 
-26|                 const toDelete = result.rows;
-27| 
-28|                 // 1. Envoyer force logout à chaque utilisateur concerné
-29|                 for (const row of toDelete) {
-30|                     if (row.socket_id) {
-31|                         const socket = io.sockets.sockets.get(row.socket_id);
-32|                         if (socket) {
-33|                             socket.emit('force logout', {
-34|                                 reason: 'Inactivité prolongée, vous avez été déconnecté.'
-35|                             });
-36|                             console.log(`🚪 Force logout envoyé à ${row.pseudo} (inactif)`);
-37|                         }
-38|                     }
-39|                 }
+4| (function () {
+5|     // ========== 1. Fingerprint (si non déjà fait par fp-bundle.js) ==========
+6|     (async function () {
+7|         let fingerprint = sessionStorage.getItem('fingerprint');
+8|         if (!fingerprint) {
+9|             try {
+10|                 // Si FingerprintJS est déjà chargé globalement, on l'utilise
+11|                 if (typeof FingerprintJS !== 'undefined') {
+12|                     const fp = await FingerprintJS.load();
+13|                     const result = await fp.get();
+14|                     fingerprint = result.visitorId;
+15|                 } else {
+16|                     console.warn('FingerprintJS non trouvé, utilisation d\'un identifiant aléatoire');
+17|                     fingerprint = 'fp_' + Math.random().toString(36).substring(2);
+18|                 }
+19|                 sessionStorage.setItem('fingerprint', fingerprint);
+20|                 window.currentFingerprint = fingerprint;
+21|             } catch (err) {
+22|                 console.error('❌ Fingerprint impossible à générer:', err);
+23|                 fingerprint = 'fallback_' + Math.random().toString(36).substring(2);
+24|                 sessionStorage.setItem('fingerprint', fingerprint);
+25|                 window.currentFingerprint = fingerprint;
+26|             }
+27|         } else {
+28|             window.currentFingerprint = fingerprint;
+29|         }
+30|     })();
+31| 
+32|     // ========== 2. Vérifier si l'utilisateur est en session ==========
+33|     {
+34|         let user = localStorage.getItem('meetgay_user');
+35|         if (!user) {
+36|             window.location.href = '/login.html';
+37|             return;
+38|         }
+39|     }
 40| 
-41|                 // 2. Supprimer les utilisateurs de la base
-42|                 const placeholders = toDelete.map((_, i) => `$${i + 1}`).join(',');
-43|                 const pseudos = toDelete.map(row => row.pseudo);
-44|                 await pool.query(
-45|                     `DELETE FROM users WHERE pseudo IN (${placeholders})`,
-46|                     pseudos
-47|                 );
-48| 
-49|                 console.log(`🧹 ${toDelete.length} utilisateur(s) supprimé(s) pour inactivité`);
-50| 
-51|             } catch (err) {
-52|                 console.error('❌ Erreur nettoyage:', err.message);
-53|             }
-54|         }, CLEANUP_INTERVAL);
-55|     }
-56| 
-57|     // ============================================================
-58|     // 2. MARQUER UN UTILISATEUR POUR SUPPRESSION (pagehide)
-59|     // ============================================================
-60|     function markForDeletion(pseudo) {
-61|         if (!pseudo) return false;
-62| 
-63|         // On met last_seen à une date ancienne pour que le nettoyeur le supprime
-64|         pool.query(
-65|             `UPDATE users SET last_seen = NOW() - INTERVAL '15 minutes' WHERE pseudo = $1`,
-66|             [pseudo]
-67|         ).then(result => {
-68|             if (result.rowCount > 0) {
-69|                 console.log(`📌 Utilisateur marqué pour suppression: ${pseudo}`);
-70|             }
-71|         }).catch(err => {
-72|             console.error('❌ Erreur marquage:', err.message);
-73|         });
-74| 
-75|         return true;
-76|     }
-77| 
-78|     // ============================================================
-79|     // 3. SUPPRESSION IMMÉDIATE (logoutBtn, déconnexion volontaire)
-80|     // ============================================================
-81|     async function deleteUser(pseudo) {
-82|         if (!pseudo) return false;
-83| 
-84|         try {
-85|             await pool.query('DELETE FROM users WHERE pseudo = $1', [pseudo]);
-86|             console.log(`🗑️ Utilisateur supprimé volontairement: ${pseudo}`);
-87|             return true;
-88|         } catch (err) {
-89|             console.error('❌ Erreur suppression volontaire:', err.message);
-90|             return false;
-91|         }
-92|     }
-93| 
-94|     // ============================================================
-95|     // 4. ENVOYER UN FORCE LOGOUT À UN UTILISATEUR
-96|     // ============================================================
-97|     async function forceLogout(pseudo, reason = 'Vous avez été déconnecté.') {
-98|         if (!pseudo) return false;
-99| 
-100|         try {
-101|             // Récupérer le socket_id depuis la base
-102|             const result = await pool.query(
-103|                 'SELECT socket_id FROM users WHERE pseudo = $1 AND socket_id IS NOT NULL',
-104|                 [pseudo]
-105|             );
-106| 
-107|             if (result.rows.length > 0) {
-108|                 const socketId = result.rows[0].socket_id;
-109|                 const socket = io.sockets.sockets.get(socketId);
-110|                 if (socket) {
-111|                     socket.emit('force logout', { reason: reason });
-112|                     console.log(`🚪 Force logout envoyé à ${pseudo}`);
-113|                     return true;
-114|                 }
-115|             }
-116|             console.log(`⚠️ Utilisateur ${pseudo} non trouvé pour force logout`);
-117|             return false;
-118|         } catch (err) {
-119|             console.error('❌ Erreur force logout:', err.message);
-120|             return false;
-121|         }
-122|     }
-123| 
-124|     // ============================================================
-125|     // 5. GESTION DÉCONNEXION SOCKET.IO (disconnect)
-126|     // ============================================================
-127|     async function handleDisconnect(socketId) {
-128|         // NE RIEN FAIRE - le nettoyeur s'occupe de tout
-129|         console.log(`🔌 Déconnexion socket ${socketId} (ignorée, nettoyeur fera le ménage)`);
-130|         return null;
-131|     }
-132| 
-133|     // ============================================================
-134|     // 6. HEARTBEAT (mise à jour de l'activité)
-135|     // ============================================================
-136|     async function updateActivity(socketId) {
-137|         try {
-138|             const result = await pool.query(
-139|                 `UPDATE users SET last_seen = NOW() WHERE socket_id = $1 RETURNING pseudo`,
-140|                 [socketId]
-141|             );
-142|             if (result.rows.length > 0) {
-143|                 return true;
-144|             }
-145|             return false;
-146|         } catch (err) {
-147|             console.error('❌ Erreur updateActivity:', err.message);
-148|             return false;
-149|         }
-150|     }
-151| 
-152|     // ============================================================
-153|     // 7. EXPORT DES FONCTIONS
-154|     // ============================================================
-155|     return {
-156|         startCleanup,
-157|         markForDeletion,
-158|         deleteUser,
-159|         handleDisconnect,
-160|         updateActivity,
-161|         forceLogout
-162|     };
-163| };
-
-# ============================================
-# FILE: modules\socket-handlers.js
-# ============================================
-
-1| ﻿// modules/socket-handlers.js
-2| module.exports = function (io, pool, sessionManager, updateActivity, REPORTS_THRESHOLD, REPORTS_WINDOW_MINUTES, TEMP_BAN_MINUTES) {
-3|     io.on('connection', (socket) => {
-4|         console.log('🔌 Nouvelle connexion :', socket.id);
-5| 
-6|         socket.on('user join', async (userInfo) => {
-7|             console.log('📥 SOCKET - userInfo.origine reçu pour', userInfo.pseudo, ':', userInfo.origine);
-8|             if (!userInfo || !userInfo.pseudo) {
-9|                 socket.emit('join error', { error: 'Pseudo requis pour rejoindre' });
-10|                 return;
-11|             }
-12| 
-13|             // Récupérer l'IP du client
-14|             const clientIp = socket.handshake.headers['x-forwarded-for']
-15|                 ? socket.handshake.headers['x-forwarded-for'].split(',')[0]
-16|                 : socket.conn.remoteAddress;
-17| 
-18|             console.log(`📡 Connexion de ${userInfo.pseudo} depuis IP: ${clientIp}`);
-19| 
-20|             // Récupérer la date de création depuis la base
-21|             let firstConnectedAt = Date.now();
-22|             try {
-23|                 const result = await pool.query(
-24|                     `SELECT first_connected_at FROM users WHERE pseudo = $1`,
-25|                     [userInfo.pseudo]
-26|                 );
-27|                 if (result.rows.length > 0 && result.rows[0].first_connected_at) {
-28|                     firstConnectedAt = new Date(result.rows[0].first_connected_at).getTime();
-29|                 } else {
-30|                     await pool.query(
-31|                         `UPDATE users SET first_connected_at = NOW() WHERE pseudo = $1`,
-32|                         [userInfo.pseudo]
-33|                     );
-34|                 }
-35|             } catch (err) {
-36|                 console.error('Erreur récupération first_connected_at:', err.message);
-37|             }
-38| 
-39|             // 🔥 SUPPRESSION DES ANCIENNES SESSIONS DU MÊME PSEUDO (remplace le delete de users)
-40|             try {
-41|                 await pool.query(
-42|                     `UPDATE users SET socket_id = NULL 
-43|              WHERE pseudo = $1 AND socket_id IS NOT NULL`,
-44|                     [userInfo.pseudo]
-45|                 );
-46|                 console.log(`🧹 Ancienne socket nettoyée pour ${userInfo.pseudo}`);
-47|             } catch (err) {
-48|                 console.error('Erreur nettoyage ancienne socket:', err.message);
-49|             }
-50| 
-51|             // Stocker le fingerprint et l'IP dans la base
-52|             if (userInfo.fingerprint) {
-53|                 try {
-54|                     const existingFp = await pool.query(
-55|                         'SELECT id FROM fingerprints WHERE fingerprint_hash = $1',
-56|                         [userInfo.fingerprint]
-57|                     );
-58| 
-59|                     let fingerprintId;
-60|                     if (existingFp.rows.length > 0) {
-61|                         fingerprintId = existingFp.rows[0].id;
-62|                         await pool.query(
-63|                             `UPDATE fingerprints
-64|                      SET last_seen = NOW(),
-65|                      notes = CASE
-66|                          WHEN notes IS NULL THEN $1
-67|                          ELSE notes || ' | ' || $1
-68|                      END
-69|                      WHERE id = $2`,
-70|                             [`IP: ${clientIp}`, fingerprintId]
-71|                         );
-72|                     } else {
-73|                         const newFp = await pool.query(
-74|                             `INSERT INTO fingerprints (fingerprint_hash, first_seen, last_seen, notes)
-75|                      VALUES ($1, NOW(), NOW(), $2)
-76|                      RETURNING id`,
-77|                             [userInfo.fingerprint, `IP: ${clientIp}`]
-78|                         );
-79|                         fingerprintId = newFp.rows[0].id;
-80|                     }
-81| 
-82|                     await pool.query(
-83|                         'UPDATE users SET fingerprint_id = $1, last_ip = $2, socket_id = $3, last_seen = NOW() WHERE pseudo = $4',
-84|                         [fingerprintId, clientIp, socket.id, userInfo.pseudo]
-85|                     );
-86| 
-87|                     // 🔥 RÉCUPÉRER LES MESSAGES EN ATTENTE
-88|                     try {
-89|                         const pendingResult = await pool.query(
-90|                             'SELECT from_pseudo, message, created_at FROM pending_messages WHERE to_pseudo = $1 ORDER BY created_at ASC',
-91|                             [userInfo.pseudo]
-92|                         );
-93| 
-94|                         if (pendingResult.rows.length > 0) {
-95|                             console.log(`📨 ${pendingResult.rows.length} message(s) en attente pour ${userInfo.pseudo}`);
-96|                             for (const msg of pendingResult.rows) {
-97|                                 socket.emit('private message received', {
-98|                                     fromPseudo: msg.from_pseudo,
-99|                                     message: msg.message,
-100|                                     timestamp: msg.created_at
-101|                                 });
-102|                             }
-103|                             // Supprimer les messages envoyés
-104|                             await pool.query(
-105|                                 'DELETE FROM pending_messages WHERE to_pseudo = $1',
-106|                                 [userInfo.pseudo]
-107|                             );
-108|                             console.log(`🗑️ Messages en attente supprimés pour ${userInfo.pseudo}`);
-109|                         }
-110|                     } catch (err) {
-111|                         console.error('❌ Erreur récupération messages en attente:', err.message);
-112|                     }
-113| 
-114|                     console.log(`🔒 Fingerprint lié pour ${userInfo.pseudo} (ID: ${fingerprintId})`);
-115|                 } catch (err) {
-116|                     console.error('Erreur stockage fingerprint/IP:', err);
-117|                 }
-118|             } else {
-119|                 // Même sans fingerprint, on met à jour socket_id
-120|                 await pool.query(
-121|                     'UPDATE users SET socket_id = $1, last_ip = $2, last_seen = NOW() WHERE pseudo = $3',
-122|                     [socket.id, clientIp, userInfo.pseudo]
-123|                 );
-124|                 console.warn(`⚠️ Pas de fingerprint pour ${userInfo.pseudo}`);
-125|             }
-126| 
-127|             // 🔥 RÉCUPÉRER LA LISTE DES CONNECTÉS DEPUIS LA BASE (remplace Object.values(users))
-128|             try {
-129|                 const result = await pool.query(`
-130|             SELECT 
-131|                 pseudo,
-132|                 age,
-133|                 COALESCE(NULLIF(origine, ''), 'NC') as origine,
-134|                 tendencies,
-135|                 gender,
-136|                 purpose,
-137|                 COALESCE(bio, 'Aucune présentation') as bio,
-138|                 location_city as "locationCity",
-139|                 location_commune as "locationCommune",
-140|                 location_postal_code as "locationPostalCode",
-141|                 location_province as "locationProvince",
-142|                 location_region as "locationRegion",
-143|                 location_country as "locationCountry",
-144|                 location_neighborhood as "locationNeighborhood",
-145|                 location_postcode_localities as "locationPostcodeLocalities",
-146|                 location_sublocality_level_1 as "locationSublocalityLevel1",
-147|                 location_sublocality_level_2 as "locationSublocalityLevel2",
-148|                 location_sublocality_level_3 as "locationSublocalityLevel3",
-149|                 location_sublocality_level_4 as "locationSublocalityLevel4",
-150|                 location_sublocality_level_5 as "locationSublocalityLevel5",
-151|                 location_admin_level_3 as "locationAdminLevel3",
-152|                 location_admin_level_4 as "locationAdminLevel4",
-153|                 location_admin_level_5 as "locationAdminLevel5",
-154|                 location_admin_level_6 as "locationAdminLevel6",
-155|                 location_admin_level_7 as "locationAdminLevel7",
-156|                 location_colloquial_area as "locationColloquialArea",
-157|                 location_intersection as "locationIntersection",
-158|                 location_lat as "locationLat",
-159|                 location_lng as "locationLng",
-160|                 socket_id as "socketId",
-161|                 EXTRACT(EPOCH FROM first_connected_at) * 1000 as "connectedAt"
-162|             FROM users 
-163|             WHERE socket_id IS NOT NULL 
-164|             AND last_seen > NOW() - INTERVAL '15 minutes'
-165|             ORDER BY first_connected_at DESC
-166|         `);
-167| 
-168|                 // Construire la liste avec la MÊME STRUCTURE qu'avant
-169|                 const usersList = result.rows.map(u => ({
-170|                     pseudo: u.pseudo,
-171|                     age: u.age,
-172|                     origine: (u.origine && u.origine !== 'undefined' && u.origine !== 'null') ? u.origine : 'NC',
-173|                     tendencies: u.tendencies,
-174|                     gender: u.gender,
-175|                     purpose: u.purpose,
-176|                     bio: u.bio || 'Aucune présentation',
-177|                     locationCity: u.locationCity || null,
-178|                     locationCommune: u.locationCommune || null,
-179|                     locationPostalCode: u.locationPostalCode || null,
-180|                     locationProvince: u.locationProvince || null,
-181|                     locationRegion: u.locationRegion || null,
-182|                     locationCountry: u.locationCountry || null,
-183|                     locationNeighborhood: u.locationNeighborhood || null,
-184|                     locationPostcodeLocalities: u.locationPostcodeLocalities || null,
-185|                     locationSublocalityLevel1: u.locationSublocalityLevel1 || null,
-186|                     locationSublocalityLevel2: u.locationSublocalityLevel2 || null,
-187|                     locationSublocalityLevel3: u.locationSublocalityLevel3 || null,
-188|                     locationSublocalityLevel4: u.locationSublocalityLevel4 || null,
-189|                     locationSublocalityLevel5: u.locationSublocalityLevel5 || null,
-190|                     locationAdminLevel3: u.locationAdminLevel3 || null,
-191|                     locationAdminLevel4: u.locationAdminLevel4 || null,
-192|                     locationAdminLevel5: u.locationAdminLevel5 || null,
-193|                     locationAdminLevel6: u.locationAdminLevel6 || null,
-194|                     locationAdminLevel7: u.locationAdminLevel7 || null,
-195|                     locationColloquialArea: u.locationColloquialArea || null,
-196|                     locationIntersection: u.locationIntersection || null,
-197|                     locationLat: u.locationLat || null,
-198|                     locationLng: u.locationLng || null,
-199|                     socketId: u.socketId,
-200|                     connectedAt: u.connectedAt || 0
-201|                 }));
-202| 
-203|                 // Envoyer la liste à TOUS les clients
-204|                 io.emit('update users', usersList);
-205| 
-206|                 console.log('📤 update users envoyé pour', userInfo.pseudo);
-207|                 console.log('📤 Envoi de join confirmed pour', userInfo.pseudo);
-208|                 socket.emit('join confirmed', { success: true, user: userInfo });
-209| 
-210|             } catch (err) {
-211|                 console.error('❌ Erreur récupération liste utilisateurs:', err);
-212|                 socket.emit('join error', { error: 'Erreur lors du chargement des utilisateurs' });
-213|             }
-214|         });
-215| 
-216| 
-217| 
-218| 
-219| 
-220|         // Heartbeat pour mettre à jour lastSeen
-221|         socket.on('heartbeat', async () => {
-222|             try {
-223|                 await pool.query(
-224|                     'UPDATE users SET last_seen = NOW() WHERE socket_id = $1',
-225|                     [socket.id]
-226|                 );
-227|             } catch (err) {
-228|                 console.error('❌ Erreur heartbeat:', err.message);
-229|             }
-230|             socket.emit('heartbeat_ack');
-231|         });
-232| 
-233|         socket.on('ping', async () => {
-234|             try {
-235|                 await pool.query(
-236|                     'UPDATE users SET last_seen = NOW() WHERE socket_id = $1',
-237|                     [socket.id]
-238|                 );
-239|             } catch (err) {
-240|                 console.error('❌ Erreur ping:', err.message);
-241|             }
-242|         });
-243| 
-244| 
-245|         socket.on('private message', async (data) => {
-246|             const { toSocketId, message, fromPseudo } = data;
-247|             try {
-248|                 const result = await pool.query(
-249|                     'SELECT socket_id FROM users WHERE pseudo = $1 AND socket_id IS NOT NULL',
-250|                     [toSocketId]
-251|                 );
-252|                 if (result.rows.length === 0) {
-253|                     // 🔥 DESTINATAIRE DÉCONNECTÉ → STOCKER LE MESSAGE
-254|                     try {
-255|                         await pool.query(
-256|                             'INSERT INTO pending_messages (from_pseudo, to_pseudo, message) VALUES ($1, $2, $3)',
-257|                             [fromPseudo, toSocketId, message]
-258|                         );
-259|                         console.log(`📦 Message stocké pour ${toSocketId} (en attente)`);
-260|                         socket.emit('error', { message: `📦 ${toSocketId} est déconnecté. Message stocké.` });
-261|                         return;
-262|                     } catch (err) {
-263|                         console.error('❌ Erreur stockage message en attente:', err.message);
-264|                         socket.emit('error', { message: 'Erreur lors de l\'envoi du message' });
-265|                         return;
-266|                     }
-267|                 }
-268|                 const targetSocketId = result.rows[0].socket_id;
-269|                 io.to(targetSocketId).emit('private message received', {
-270|                     fromPseudo: fromPseudo,
-271|                     fromSocketId: socket.id,
-272|                     message: message,
-273|                     timestamp: new Date()
-274|                 });
-275|                 socket.emit('message sent confirmation', {
-276|                     message: message,
-277|                     toPseudo: toSocketId,
-278|                     timestamp: new Date()
-279|                 });
-280|                 console.log(`💬 Message de ${fromPseudo} à ${toSocketId}: ${message.substring(0, 30)}...`);
-281|             } catch (err) {
-282|                 console.error('❌ Erreur message privé:', err.message);
-283|                 socket.emit('error', { message: 'Erreur lors de l\'envoi du message' });
-284|             }
-285|         });
-286| 
-287| 
-288| 
-289|         /*socket.on('get users list', () => {
-290|             const usersList = Object.values(users).sort((a, b) => (b.firstConnectedAt || 0) - (a.firstConnectedAt || 0)).map(u => ({
-291|                 pseudo: u.pseudo,
-292|                 age: u.age,
-293|                 origine: (u.origine && u.origine !== 'undefined' && u.origine !== 'null') ? u.origine : 'NC',
-294|                 tendencies: u.tendencies,
-295|                 gender: u.gender,
-296|                 purpose: u.purpose,
-297|                 bio: u.bio || 'Aucune présentation',
-298|                 locationCity: u.locationCity || null,
-299|                 locationCommune: u.locationCommune || null,
-300|                 locationPostalCode: u.locationPostalCode || null,
-301|                 locationProvince: u.locationProvince || null,
-302|                 locationRegion: u.locationRegion || null,
-303|                 locationCountry: u.locationCountry || null,
-304|                 locationNeighborhood: u.locationNeighborhood || null,
-305|                 locationPostcodeLocalities: u.locationPostcodeLocalities || null,
-306|                 locationSublocalityLevel1: u.locationSublocalityLevel1 || null,
-307|                 locationSublocalityLevel2: u.locationSublocalityLevel2 || null,
-308|                 locationSublocalityLevel3: u.locationSublocalityLevel3 || null,
-309|                 locationSublocalityLevel4: u.locationSublocalityLevel4 || null,
-310|                 locationSublocalityLevel5: u.locationSublocalityLevel5 || null,
-311|                 locationAdminLevel3: u.locationAdminLevel3 || null,
-312|                 locationAdminLevel4: u.locationAdminLevel4 || null,
-313|                 locationAdminLevel5: u.locationAdminLevel5 || null,
-314|                 locationAdminLevel6: u.locationAdminLevel6 || null,
-315|                 locationAdminLevel7: u.locationAdminLevel7 || null,
-316|                 locationColloquialArea: u.locationColloquialArea || null,
-317|                 locationIntersection: u.locationIntersection || null,
-318|                 locationLat: u.locationLat || null,
-319|                 locationLng: u.locationLng || null,
-320|                 socketId: u.socketId,
-321|                 connectedAt: u.connectedAt || 0
-322|             }));
-323|             socket.emit('update users', usersList);
-324|         });*/
-325| 
-326|         // Gestion des signalements utilisateur
-327|         socket.on('report user', async (data) => {
-328|             const { targetPseudo } = data;
-329| 
-330|             // Récupérer le pseudo du signaleur depuis users[socket.id]
-331|             // Récupérer le pseudo du signaleur depuis la base
-332|             let reporterPseudo;
-333|             try {
-334|                 const result = await pool.query(
-335|                     'SELECT pseudo FROM users WHERE socket_id = $1',
-336|                     [socket.id]
-337|                 );
-338|                 if (result.rows.length === 0) {
-339|                     socket.emit('report_error', { error: 'Utilisateur non identifié' });
-340|                     return;
-341|                 }
-342|                 reporterPseudo = result.rows[0].pseudo;
-343|             } catch (err) {
-344|                 console.error('❌ Erreur récupération reporter:', err.message);
-345|                 socket.emit('report_error', { error: 'Erreur serveur' });
-346|                 return;
-347|             }
-348| 
-349|             if (!targetPseudo || targetPseudo === reporterPseudo) {
-350|                 socket.emit('report_error', { error: 'Signalement invalide' });
-351|                 return;
-352|             }
-353| 
-354|             try {
-355|                 // 1. Insérer le signalement
-356|                 await pool.query(
-357|                     'INSERT INTO reports (reporter_pseudo, target_pseudo) VALUES ($1, $2)',
-358|                     [reporterPseudo, targetPseudo]
-359|                 );
-360| 
-361|                 // 2. Utiliser les constantes de server.js
-362|                 const threshold = REPORTS_THRESHOLD;
-363| 
-364|                 // 3. Récupérer la date de fin du dernier ban (si existe)
-365|                 const lastBan = await pool.query(
-366|                     `SELECT expires_at FROM temp_bans 
-367|                     WHERE user_pseudo = $1 
-368|                     ORDER BY expires_at DESC LIMIT 1`,
-369|                     [targetPseudo]
-370|                 );
-371| 
-372|                 let sinceDate = `NOW() - INTERVAL '${REPORTS_WINDOW_MINUTES} minutes'`;
-373|                 if (lastBan.rows.length > 0) {
-374|                     const lastBanExpiry = lastBan.rows[0].expires_at;
-375|                     // Prendre la date la plus récente entre la fin du dernier ban et la fenêtre
-376|                     sinceDate = `GREATEST(NOW() - INTERVAL '${REPORTS_WINDOW_MINUTES} minutes', '${lastBanExpiry.toISOString()}')`;
-377|                 }
-378| 
-379|                 const countRes = await pool.query(
-380|                     `SELECT COUNT(DISTINCT reporter_pseudo) FROM reports 
-381|                     WHERE target_pseudo = $1 
-382|                     AND created_at > ${sinceDate}`,
-383|                     [targetPseudo]
-384|                 );
-385|                 const reportCount = parseInt(countRes.rows[0].count);
-386| 
-387|                 // 4. Confirmation au signaleur
-388|                 socket.emit('report_confirmation', {
-389|                     targetPseudo,
-390|                     reportCount,
-391|                     threshold,
-392|                     willTrigger: reportCount >= threshold
-393|                 });
-394| 
-395|                 // 5. Si seuil atteint, déclencher temp_ban (10 minutes)
-396|                 if (reportCount >= threshold) {
-397|                     const expiresAt = new Date(Date.now() + TEMP_BAN_MINUTES * 60 * 1000);
-398| 
-399|                     await pool.query(
-400|                         `INSERT INTO temp_bans (user_pseudo, expires_at, reason) 
-401|                          VALUES ($1, $2, $3)
-402|                          ON CONFLICT (user_pseudo) DO UPDATE 
-403|                          SET expires_at = EXCLUDED.expires_at, reason = EXCLUDED.reason`,
-404|                         [targetPseudo, expiresAt, `${reportCount} signalements reçus`]
-405|                     );
-406| 
-407|                     // Journaliser l'action
-408|                     await pool.query(
-409|                         `INSERT INTO moderation_actions (admin_pseudo, action_type, target_pseudo, duration_minutes, reason)
-410|                          VALUES ('SYSTEM', 'temp_ban', $1, 10, $2)`,
-411|                         [targetPseudo, `Ban auto après ${reportCount} signalements`]
-412|                     );
-413| 
-414|                     // Déconnecter l'utilisateur cible s'il est connecté
-415|                     let targetSocketId = null;
-416|                     try {
-417|                         const targetResult = await pool.query(
-418|                             'SELECT socket_id FROM users WHERE pseudo = $1 AND socket_id IS NOT NULL',
-419|                             [targetPseudo]
-420|                         );
-421|                         if (targetResult.rows.length > 0) {
-422|                             targetSocketId = targetResult.rows[0].socket_id;
-423|                             io.to(targetSocketId).emit('force logout', {
-424|                                 reason: `Vous avez été banni temporairement (10 minutes) pour comportement abusif.`
-425|                             });
-426|                         }
-427|                     } catch (err) {
-428|                         console.error('❌ Erreur récupération socket cible:', err.message);
-429|                     }
-430| 
-431|                     // Notifier tous les admins connectés (optionnel)
-432|                     io.emit('new_report_auto_ban', {
-433|                         targetPseudo,
-434|                         reportCount,
-435|                         duration: 10
-436|                     });
-437| 
-438|                     console.log(`🔨 Auto-ban: ${targetPseudo} banni 10 min (${reportCount} signalements)`);
-439|                 }
-440|             } catch (err) {
-441|                 console.error('Erreur lors du signalement:', err);
-442|                 socket.emit('report_error', { error: 'Erreur serveur' });
-443|             }
-444|         });
-445| 
-446|         socket.on('disconnect', () => {
-447|             console.log(`🔌 Déconnexion socket ${socket.id} (ignorée, l'utilisateur reste connecté en base)`);
-448|             // NE RIEN FAIRE - on laisse le socket_id en base
-449|         });
-450| 
-451|     });
-452| 
-453| 
-454| };
-
-# ============================================
-# FILE: modules\cleanup.js
-# ============================================
-
-1| // modules/cleanup.js - Nettoyage des logs et signalements uniquement
-2| // La gestion des sessions est maintenant dans session-manager.js
-3| 
-4| // ========== NETTOYAGE AUTO DU JOURNAL ET SIGNALEMENTS ==========
-5| async function cleanOldData(pool, LOGS_RETENTION_DAYS, REPORTS_RETENTION_DAYS) {
-6|     try {
-7|         // Nettoyer le journal (moderation_actions)
-8|         const logsResult = await pool.query(
-9|             `DELETE FROM moderation_actions 
-10|              WHERE created_at < NOW() - INTERVAL '${LOGS_RETENTION_DAYS} days'`
-11|         );
-12|         if (logsResult.rowCount > 0) {
-13|             console.log(`🧹 Nettoyage auto journal: ${logsResult.rowCount} entrées supprimées (> ${LOGS_RETENTION_DAYS} jours)`);
-14|         }
-15| 
-16|         // Nettoyer les signalements (reports)
-17|         const reportsResult = await pool.query(
-18|             `DELETE FROM reports 
-19|              WHERE created_at < NOW() - INTERVAL '${REPORTS_RETENTION_DAYS} days'`
-20|         );
-21|         if (reportsResult.rowCount > 0) {
-22|             console.log(`🧹 Nettoyage auto signalements: ${reportsResult.rowCount} signalements supprimés (> ${REPORTS_RETENTION_DAYS} jours)`);
-23|         }
-24|     } catch (err) {
-25|         console.error('❌ Erreur nettoyage auto:', err);
-26|     }
-27| }
-28| 
-29| module.exports = { cleanOldData };
-
-# ============================================
-# FILE: server.js
-# ============================================
-
-1| // ============================================================
-2| // server.js - Cœur du chat MeetGay (version base de données)1111
-3| // ============================================================
-4| 
-5| // ========== CHARGEMENT DES VARIABLES D'ENVIRONNEMENT ==========
-6| if (process.env.NODE_ENV !== 'production') {
-7|     try {
-8|         require('dotenv').config();
-9|         console.log('✅ dotenv chargé (environnement local)');
-10|     } catch (err) {
-11|         console.log('⚠️ dotenv non installé, utilisation des variables système');
-12|     }
-13| } else {
-14|     console.log('✅ Mode production, variables Render utilisées');
-15| }
-16| 
-17| // ========== IMPORTS ==========
-18| const express = require('express');
-19| const compression = require('compression');
-20| const http = require('http');
-21| const socketIo = require('socket.io');
-22| const jwt = require('jsonwebtoken');
-23| const { Pool } = require('pg');
-24| const { disconnectBannedUser } = require('./moderation');
-25| const path = require('path');
-26| const bcrypt = require('bcrypt');
-27| const session = require('express-session');
-28| const pgSession = require('connect-pg-simple')(session);
-29| 
-30| 
-31| // Modules internes
-32| const { cleanOldData } = require('./modules/cleanup.js');
-33| const contactRoutes = require('./modules/routes/api-contact.js');
-34| const pool = require('./modules/postgresql.js');
-35| const htmlRoutes = require('./modules/routes/html.js');
-36| const adminRoutes = require('./modules/routes/admin.js');
-37| const authRoutes = require('./modules/routes/api-auth.js');
-38| const messagesRoutes = require('./modules/routes/api-messages.js');
-39| const maintenanceMiddleware = require('./modules/middleware/maintenance.js');
-40| const socketHandlers = require('./modules/socket-handlers.js');
-41| // Route de géocodage
-42| const geocodeRoutes = require('./modules/routes/geocode');
+41|     // ========== 3. Traductions du chat ==========
+42|     let chatLang = localStorage.getItem('MeetGay_lang') || 'fr';
 43| 
-44| 
-45| 
-46| // ==========  VARIABLES GLOBALES ==========
-47| const TEST_MODE = false;  // ← Désactive le fingerprint si true
-48| 
-49| // JWT_SECRET pour les utilisateurs normaux
-50| const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
-51| 
-52| // PARAMÈTRES DE MODÉRATION
-53| const REPORTS_THRESHOLD = 2;        // Nombre de signalements (personnes différentes) avant auto-ban
-54| const REPORTS_WINDOW_MINUTES = 60;  // Fenêtre de temps en minutes
-55| const TEMP_BAN_MINUTES = 10;        // Durée du bannissement temporaire
-56| 
-57| // PARAMÈTRES DE NETTOYAGE AUTO
-58| const LOGS_RETENTION_DAYS = 30;     // Garder 30 jours de journal
-59| const REPORTS_RETENTION_DAYS = 60;  // Garder 60 jours de signalements
-60| const AUTO_CLEANUP_ENABLED = false;   // Activer/désactiver le nettoyage auto 1H
-61| const VISITOR_CLEANUP_ENABLED = false; // Nettoyage visiteurs déconnectés (1 minute)
-62| const INACTIVITY_MINUTES = 10;      // Déconnexion après X minutes sans activité
-63| const CLEANUP_INTERVAL_MINUTES = 1; // Nettoyage des absents toutes les X minutes
+44|     const chatTranslations = {
+45|         fr: {
+46|             emptyMessage: "En attente de message...",
+47|             placeholderInput: "Cliquez sur un pseudo d'abord...",
+48|             sendBtn: "Envoyer",
+49|             historyTitle: "Historique",
+50|             connectedTitle: "Connectés"
+51|         },
+52|         nl: {
+53|             emptyMessage: "Wachten op bericht...",
+54|             placeholderInput: "Klik eerst op een pseudoniem...",
+55|             sendBtn: "Verstuur",
+56|             historyTitle: "Historisch",
+57|             connectedTitle: "Aangesloten"
+58|         }
+59|     };
+60| 
+61|     const t = chatTranslations[chatLang];
+62|     window.chatLang = chatLang;
+63|     window.chatT = chatTranslations[chatLang];
 64| 
-65| // DESACTIVE LE CACHE SERVEUR
-66| const DEV_MODE = true;
-67| 
-68| 
+65|     // ========== 4. Initialisation des textes dynamiques ==========
+66|     document.addEventListener('DOMContentLoaded', () => {
+67|         window.chatLang = chatLang;
+68|         window.chatT = chatTranslations[chatLang];
 69| 
-70| 
-71| 
-72| // ==========  CONFIGURATION EXPRESS ==========
-73| const app = express();
-74| const server = http.createServer(app);
+70|         const msgArea = document.getElementById('messageArea');
+71|         if (msgArea) msgArea.innerHTML = `<div class="empty-message"><i class="fas fa-comment"></i> ${t.emptyMessage}</div>`;
+72| 
+73|         const historyDiv = document.getElementById('historyList');
+74|         if (historyDiv) historyDiv.innerHTML = `<div class="empty-message" style="padding: 20px;"><i class="fas fa-comment-slash"></i> Aucune conversation</div>`;
 75| 
-76| console.log('🔍 DB_USER:', process.env.DB_USER);
-77| console.log('🔍 DB_PASSWORD:', process.env.DB_PASSWORD ? '******' : 'MISSING');
+76|         const sendBtn = document.getElementById('sendBtn');
+77|         if (sendBtn) sendBtn.innerHTML = `<i class="fas fa-paper-plane"></i> ${t.sendBtn}`;
 78| 
-79| // Compression
-80| app.use(compression({
-81|     level: 6,
-82|     threshold: 1024,
-83|     filter: (req, res) => {
-84|         if (req.path === '/socket.io/') return false;
-85|         return compression.filter(req, res);
-86|     }
-87| }));
+79|         const messageInput = document.getElementById('messageInput');
+80|         if (messageInput) messageInput.placeholder = t.placeholderInput;
+81|     });
+82| 
+83|     // ========== 5. Gestion de l'historique coulissant ==========
+84|     document.addEventListener('DOMContentLoaded', function () {
+85|         const historyInner = document.getElementById('historyInner');
+86|         const historyTab = document.getElementById('historyTab');
+87|         const closeBtn = document.getElementById('closeInnerSlider');
 88| 
-89| app.use(express.json());
-90| 
-91| app.use(session({
-92|     store: new pgSession({
-93|         pool: pool,
-94|         tableName: 'session',
-95|         createTableIfMissing: false,
-96|         pruneSessionInterval: 60
-97|     }),
-98|     secret: 'un-super-secret-change-moi',
-99|     resave: false,
-100|     saveUninitialized: false,
-101|     cookie: {
-102|         httpOnly: true,
-103|         secure: false,
-104|         maxAge: 30 * 24 * 60 * 60 * 1000 // 30 jours
-105|     }
-106| }));
+89|         // État du décalage du bouton (false = position normale)
+90|         let tabOffset = false;
+91| 
+92|         // Fonction pour décaler ou remettre le bouton
+93|         function toggleTabOffset() {
+94|             if (!historyTab) return;
+95|             if (tabOffset) {
+96|                 historyTab.style.right = '0';
+97|                 tabOffset = false;
+98|             } else {
+99|                 historyTab.style.right = '-10px';
+100|                 tabOffset = true;
+101|             }
+102|         }
+103| 
+104|         if (historyInner) {
+105|             historyInner.classList.remove('open');
+106|         }
 107| 
-108| 
-109| app.use(maintenanceMiddleware(pool));
-110| contactRoutes(app);
-111| htmlRoutes(app, pool);
-112| messagesRoutes(app, pool);
-113| authRoutes(app, pool);
-114| geocodeRoutes(app);
-115| require('./modules/routes/api-block')(app, pool);
-116| 
-117| // ========== CONFIGURATION DES FICHIERS STATIQUES ==========
-118| 
-119| // 🔥 Détermine les options selon le mode
-120| const staticOptions = {
-121|     setHeaders: function (res, path) {
-122|         if (path.endsWith('.css')) {
-123|             res.setHeader('Content-Type', 'text/css');
-124|         }
-125|     }
-126| };
-127| 
-128| // 🔥 Si DEV_MODE est activé, désactive le cache
-129| if (DEV_MODE === true) {
-130|     staticOptions.etag = false;           // Désactive ETag
-131|     staticOptions.maxAge = 0;             // Pas de mise en cache
-132|     staticOptions.lastModified = false;   // Désactive Last-Modified
-133| 
-134|     // Ajoute des headers anti-cache
-135|     staticOptions.setHeaders = function (res, path) {
-136|         if (path.endsWith('.css')) {
-137|             res.setHeader('Content-Type', 'text/css');
-138|         }
-139|         // 🔥 Headers anti-cache pour TOUS les fichiers
-140|         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
-141|         res.setHeader('Pragma', 'no-cache');
-142|         res.setHeader('Expires', '0');
-143|     };
+108|         if (historyTab && historyInner) {
+109|             historyTab.addEventListener('click', function (e) {
+110|                 e.stopPropagation();
+111|                 historyInner.classList.toggle('open');
+112|                 toggleTabOffset(); // ← décaler/remettre le bouton au clic
+113|             });
+114|         }
+115| 
+116|         if (closeBtn && historyInner) {
+117|             closeBtn.addEventListener('click', function () {
+118|                 historyInner.classList.remove('open');
+119|                 // Quand on ferme avec la croix, on remet aussi le bouton
+120|                 if (historyTab) historyTab.style.right = '0';
+121|                 tabOffset = false;
+122|             });
+123|         }
+124|     });
+125| 
+126|     // ========== 6. GÉNÉRATION DES MENUS ==========
+127|     (function initMenus() {
+128|         const menuList = document.getElementById('newMenusList');
+129|         const windowContent = document.getElementById('windowContent');
+130|         const windowPlaceholder = document.getElementById('windowPlaceholder');
+131| 
+132|         if (!menuList) {
+133|             setTimeout(initMenus, 500);
+134|             return;
+135|         }
+136| 
+137|         // Fonction pour créer les menus
+138|         function displayMenus() {
+139|             // Vérifier que les données existent
+140|             if (!window.MENUS_DATA || !window.CONTENTS_DATA) {
+141|                 console.error('❌ Données des menus non chargées');
+142|                 return;
+143|             }
 144| 
-145|     console.log('🔥 MODE DÉVELOPPEMENT ACTIF - Cache désactivé');
-146| } else {
-147|     console.log('✅ MODE PRODUCTION - Cache activé');
-148| }
-149| 
-150| // Applique la configuration
-151| app.use(express.static('/var/www/meetgay/public', staticOptions));
-152| 
-153| app.use(express.json());
-154| 
-155| // 🔥 Middleware anti-cache (seulement en développement)
-156| if (DEV_MODE === true) {
-157|     app.use((req, res, next) => {
-158|         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
-159|         res.setHeader('Pragma', 'no-cache');
-160|         res.setHeader('Expires', '0');
-161|         next();
-162|     });
-163|     console.log('🔥 Middleware anti-cache activé');
-164| }
-165| 
-166| // ========== SOCKET.IO ==========
-167| const io = socketIo(server, {
-168|     cors: {
-169|         origin: "*",
-170|         methods: ["GET", "POST"],
-171|         credentials: true,
-172|         allowedHeaders: ["*"]
-173|     },
-174|     transports: ['websocket', 'polling'],
-175|     allowEIO3: true,
-176|     pingTimeout: 120000,    // ← 2 minutes (au lieu de 10)
-177|     pingInterval: 30000     // ← 30 secondes (au lieu de 1 minute)
-178| });
-179| 
-180| const sessionManager = require('./modules/session-manager.js')(io, pool, {
-181|     CLEANUP_INTERVAL: CLEANUP_INTERVAL_MINUTES * 60 * 1000,
-182|     INACTIVITY_THRESHOLD: INACTIVITY_MINUTES * 60 * 1000
-183| });
-184| 
-185| adminRoutes(app, pool, io);
-186| 
-187| // Gestion d'erreur (port déjà utilisé)
-188| server.on('error', (err) => {
-189|     if (err.code === 'EADDRINUSE') {
-190|         console.error(`❌ Port déjà utilisé. Tue l'autre processus et redémarre.`);
-191|         process.exit(1);
-192|     }
-193| });
-194| 
-195| // Initialiser la surveillance d’inactivité (5 minutes sans activité)
-196| const updateActivity = sessionManager.updateActivity;
-197| 
-198| // ========== LANCEMENT DES HANDLERS SOCKET (APRÈS io, users, constants) ==========
-199| socketHandlers(io, pool, sessionManager, updateActivity, REPORTS_THRESHOLD, REPORTS_WINDOW_MINUTES, TEMP_BAN_MINUTES);
-200| 
-201| // ========== NETTOYAGE AUTOMATIQUE ==========
-202| // Nettoyage des utilisateurs inactifs
-203| if (VISITOR_CLEANUP_ENABLED) {
-204|     sessionManager.startCleanup();
-205| } else {
-206|     console.log('🧹 Nettoyage des visiteurs déconnectés DÉSACTIVÉ');
-207| }
-208| 
-209| // Nettoyage auto du journal et signalements (toutes les 24h)
-210| if (AUTO_CLEANUP_ENABLED) {
-211|     setInterval(async () => {
-212|         await cleanOldData(pool, LOGS_RETENTION_DAYS, REPORTS_RETENTION_DAYS);
-213|     }, 24 * 60 * 60 * 1000);
-214|     console.log(`🧹 Nettoyage auto activé: journal ${LOGS_RETENTION_DAYS} jours, signalements ${REPORTS_RETENTION_DAYS} jours`);
-215| } else {
-216|     console.log(`🧹 Nettoyage auto DÉSACTIVÉ`);
-217| }
-218| 
-219| // ========== DÉMARRAGE ==========
-220| const PORT = process.env.PORT || 3005;
-221| server.listen(PORT, '0.0.0.0', () => {
-222|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
-223| });
+145|             menuList.innerHTML = '';
+146| 
+147|             window.MENUS_DATA.forEach(menu => {
+148|                 const item = document.createElement('div');
+149|                 item.className = 'new-menu-item';
+150|                 item.innerHTML = `<i class="fas ${menu.icon}"></i><span>${menu.title}</span>`;
+151| 
+152|                 item.onclick = function () {
+153|                     // Afficher le contenu
+154|                     if (windowPlaceholder) windowPlaceholder.style.display = 'none';
+155|                     if (windowContent) {
+156|                         windowContent.style.display = 'block';
+157|                         windowContent.innerHTML = window.CONTENTS_DATA[menu.id] ||
+158|                             '<div class="dynamic-content"><h3>Contenu à venir</h3></div>';
+159|                     }
+160| 
+161|                     // Fermer le hamburger sur mobile
+162|                     const menuContainer = document.getElementById('menus');
+163|                     const toggleBtn = document.getElementById('menuToggleBtn');
+164|                     if (window.innerWidth <= 710 && menuContainer && toggleBtn) {
+165|                         menuContainer.classList.remove('open');
+166|                         toggleBtn.classList.remove('open');
+167|                         toggleBtn.textContent = '☰';
+168|                     }
+169|                 };
+170| 
+171|                 menuList.appendChild(item);
+172|             });
+173| 
+174|             console.log('✅ Menus chargés :', window.MENUS_DATA.length);
+175|         }
+176| 
+177|         // Vérifier si les données sont déjà chargées
+178|         if (window.MENUS_DATA && window.CONTENTS_DATA) {
+179|             displayMenus();
+180|             return;
+181|         }
+182| 
+183|         // Sinon charger le fichier
+184|         const script = document.createElement('script');
+185|         script.src = '/js/menus-data.js';
+186|         script.onload = function () {
+187|             // Attendre que les données soient disponibles
+188|             let attempts = 0;
+189|             const checkData = setInterval(() => {
+190|                 if (window.MENUS_DATA && window.CONTENTS_DATA) {
+191|                     clearInterval(checkData);
+192|                     displayMenus();
+193|                 } else if (attempts > 20) {
+194|                     clearInterval(checkData);
+195|                     console.error('❌ Impossible de charger les données');
+196|                 }
+197|                 attempts++;
+198|             }, 100);
+199|         };
+200|         script.onerror = function () {
+201|             console.error('❌ Fichier menus-data.js introuvable');
+202|         };
+203|         document.head.appendChild(script);
+204|     })();
+205| 
+206|     // ========== HAMBURGER ==========
+207|     (function initHamburger() {
+208|         const toggleBtn = document.getElementById('menuToggleBtn');
+209|         const menu = document.getElementById('menus');
+210| 
+211|         if (!toggleBtn || !menu) return;
+212| 
+213|         toggleBtn.addEventListener('click', function (e) {
+214|             e.stopPropagation();
+215|             menu.classList.toggle('open');
+216|             toggleBtn.classList.toggle('open');
+217|             toggleBtn.textContent = menu.classList.contains('open') ? '✕' : '☰';
+218|         });
+219| 
+220|         document.addEventListener('click', function (e) {
+221|             if (menu.classList.contains('open') &&
+222|                 !menu.contains(e.target) &&
+223|                 !toggleBtn.contains(e.target)) {
+224|                 menu.classList.remove('open');
+225|                 toggleBtn.classList.remove('open');
+226|                 toggleBtn.textContent = '☰';
+227|             }
+228|         });
+229|     })();
+230| 
+231| 
+232|     (function () {
+233|         'use strict';
+234| 
+235|         // Lecture des media queries CSS (vous les modifiez dans le CSS)
+236|         const desktopMQ = window.matchMedia('(min-width: 1081px)');
+237|         const mobileMQ = window.matchMedia('(max-width: 350px)');
+238|         // Entre 351px et 1080px = mode desktop également
+239| 
+240|         // === VERSION DESKTOP ===
+241|         function initDesktopVersion() {
+242|             const nav = document.getElementById('mobileNav');
+243|             const panel = document.getElementById('navSettingsPanel');
+244|             const settingsBtn = document.getElementById('navSettingsBtn');
+245|             const navButtons = document.querySelectorAll('.mobile-nav button:not(#toggleNavBtn)');
+246| 
+247|             let isPanelOpen = false;
+248|             let animationTimer = null;
+249| 
+250|             if (nav) nav.style.display = 'flex';
+251| 
+252|             // Bouton bleu
+253|             const oldToggleBtn = document.getElementById('toggleNavBtn');
+254|             if (oldToggleBtn) {
+255|                 const newToggleBtn = oldToggleBtn.cloneNode(true);
+256|                 oldToggleBtn.parentNode.replaceChild(newToggleBtn, oldToggleBtn);
+257|                 newToggleBtn.onclick = function (e) {
+258|                     e.preventDefault();
+259|                     const isVisible = navButtons[0]?.classList.contains('hidden');
+260|                     navButtons.forEach(btn => {
+261|                         if (isVisible) btn.classList.remove('hidden');
+262|                         else btn.classList.add('hidden');
+263|                     });
+264|                     localStorage.setItem('mobileNavVisible', !isVisible);
+265|                 };
+266|             }
+267| 
+268|             function setPanelOrientation() {
+269|                 if (!panel || !nav) return;
+270|                 const pos = nav.getAttribute('data-position') || 'bottom';
+271|                 panel.classList.remove('horizontal', 'vertical');
+272|                 if (pos === 'left' || pos === 'right') {
+273|                     panel.classList.add('vertical');
+274|                 } else {
+275|                     panel.classList.add('horizontal');
+276|                 }
+277|             }
+278| 
+279|             function positionPanel() {
+280|                 if (!panel || !nav) return;
+281|                 const navRect = nav.getBoundingClientRect();
+282|                 const panelW = panel.offsetWidth;
+283|                 const panelH = panel.offsetHeight;
+284|                 const pos = nav.getAttribute('data-position') || 'bottom';
+285|                 if (panelW === 0 || panelH === 0) return;
+286| 
+287|                 let top, left;
+288|                 switch (pos) {
+289|                     case 'left':
+290|                         left = navRect.right + 8;
+291|                         top = navRect.top + (navRect.height / 2) - (panelH / 2);
+292|                         break;
+293|                     case 'right':
+294|                         left = navRect.left - panelW - 8;
+295|                         top = navRect.top + (navRect.height / 2) - (panelH / 2);
+296|                         break;
+297|                     case 'top':
+298|                         left = navRect.left;
+299|                         top = navRect.bottom + 8;
+300|                         break;
+301|                     default:
+302|                         left = navRect.left;
+303|                         top = navRect.top - panelH - 8;
+304|                         break;
+305|                 }
+306| 
+307|                 if (left < 5) left = 5;
+308|                 if (left + panelW > window.innerWidth - 5) left = window.innerWidth - panelW - 5;
+309|                 if (top < 5) top = 5;
+310|                 if (top + panelH > window.innerHeight - 5) {
+311|                     if (pos === 'top') top = navRect.top - panelH - 8;
+312|                     else if (pos === 'bottom') top = navRect.bottom + 8;
+313|                     else top = window.innerHeight - panelH - 5;
+314|                 }
+315| 
+316|                 panel.style.top = top + 'px';
+317|                 panel.style.left = left + 'px';
+318|             }
+319| 
+320|             function openPanel() {
+321|                 if (!panel) return;
+322|                 panel.style.display = 'flex';
+323|                 isPanelOpen = true;
+324|                 setPanelOrientation();
+325|                 positionPanel();
+326|             }
+327| 
+328|             function closePanel() {
+329|                 if (!panel) return;
+330|                 panel.style.display = 'none';
+331|                 isPanelOpen = false;
+332|                 if (animationTimer) clearTimeout(animationTimer);
+333|             }
+334| 
+335|             function togglePanel(e) {
+336|                 e.stopPropagation();
+337|                 if (isPanelOpen) closePanel();
+338|                 else openPanel();
+339|             }
+340| 
+341|             function setNavPosition(position) {
+342|                 if (!nav) return;
+343|                 nav.setAttribute('data-position', position);
+344|                 localStorage.setItem('mobileNavPosition', position);
+345|                 if (isPanelOpen) {
+346|                     if (animationTimer) clearTimeout(animationTimer);
+347|                     animationTimer = setTimeout(() => {
+348|                         setPanelOrientation();
+349|                         positionPanel();
+350|                         animationTimer = null;
+351|                     }, 320);
+352|                 }
+353|             }
+354| 
+355|             function loadSavedSettings() {
+356|                 const savedPos = localStorage.getItem('mobileNavPosition');
+357|                 if (savedPos && ['top', 'bottom', 'left', 'right'].includes(savedPos)) {
+358|                     nav.setAttribute('data-position', savedPos);
+359|                 } else {
+360|                     nav.setAttribute('data-position', 'bottom');
+361|                 }
+362|                 const savedVis = localStorage.getItem('mobileNavVisible');
+363|                 if (savedVis === 'true') navButtons.forEach(btn => btn.classList.add('hidden'));
+364|                 else if (savedVis === 'false') navButtons.forEach(btn => btn.classList.remove('hidden'));
+365|             }
+366| 
+367|             function resetAll() {
+368|                 closePanel();
+369|                 localStorage.removeItem('mobileNavPosition');
+370|                 localStorage.removeItem('mobileNavVisible');
+371|                 location.reload();
+372|             }
+373| 
+374|             function handleClickOutside(e) {
+375|                 if (!isPanelOpen) return;
+376|                 if (!nav.contains(e.target) && !panel.contains(e.target)) closePanel();
+377|             }
+378| 
+379|             function scrollToTarget(e) {
+380|                 const btn = e.currentTarget;
+381|                 const targetId = btn.getAttribute('data-target');
+382|                 if (!targetId) return;
+383|                 e.preventDefault();
+384|                 const target = document.getElementById(targetId);
+385|                 if (target) {
+386|                     closePanel();
+387|                     const offset = nav.getAttribute('data-position') === 'top' ? nav.offsetHeight + 20 : 80;
+388|                     const pos = target.getBoundingClientRect().top + window.scrollY - offset;
+389|                     window.scrollTo({ top: pos, behavior: 'smooth' });
+390|                 }
+391|             }
+392| 
+393|             if (nav && panel) {
+394|                 loadSavedSettings();
+395|                 if (settingsBtn) settingsBtn.onclick = togglePanel;
+396|                 document.getElementById('navPosTop')?.addEventListener('click', () => setNavPosition('top'));
+397|                 document.getElementById('navPosBottom')?.addEventListener('click', () => setNavPosition('bottom'));
+398|                 document.getElementById('navPosLeft')?.addEventListener('click', () => setNavPosition('left'));
+399|                 document.getElementById('navPosRight')?.addEventListener('click', () => setNavPosition('right'));
+400|                 document.getElementById('navReset')?.addEventListener('click', resetAll);
+401|                 document.querySelectorAll('[data-target]').forEach(btn => {
+402|                     btn.addEventListener('click', scrollToTarget);
+403|                 });
+404|                 document.addEventListener('click', handleClickOutside);
+405|                 window.addEventListener('resize', () => { if (isPanelOpen) positionPanel(); });
+406|             }
+407|         }
+408| 
+409|         // === VERSION MOBILE (très petits écrans) ===
+410|         function initMobileVersion() {
+411|             const oldNav = document.getElementById('mobileNav');
+412|             if (oldNav) oldNav.style.display = 'none';
+413| 
+414|             let menuBtn = document.getElementById('mobileMenuBtn');
+415|             if (!menuBtn) {
+416|                 menuBtn = document.createElement('button');
+417|                 menuBtn.id = 'mobileMenuBtn';
+418|                 menuBtn.innerHTML = '☰';
+419|                 document.body.appendChild(menuBtn);
+420|             }
+421| 
+422|             let panel = document.getElementById('mobileNavPanel');
+423|             if (!panel) {
+424|                 panel = document.createElement('div');
+425|                 panel.id = 'mobileNavPanel';
+426|                 panel.innerHTML = `
+427|                 <div class="mobile-panel-buttons">
+428|                     <button data-target="connectes">👥<span>Connectés</span></button>
+429|                     <button data-target="chat">💬<span>Chat</span></button>
+430|                     <button data-target="new-window">📦<span>Nouveau</span></button>
+431|                     <button data-target="menus">📋<span>Menus</span></button>
+432|                 </div>
+433|             `;
+434|                 document.body.appendChild(panel);
+435|             }
+436| 
+437|             let isOpen = false;
+438| 
+439|             function openPanel() {
+440|                 panel.classList.add('open');
+441|                 isOpen = true;
+442|             }
+443| 
+444|             function closePanel() {
+445|                 panel.classList.remove('open');
+446|                 isOpen = false;
+447|             }
+448| 
+449|             function togglePanel() {
+450|                 if (isOpen) closePanel();
+451|                 else openPanel();
+452|             }
+453| 
+454|             function scrollToTarget(e) {
+455|                 const btn = e.currentTarget;
+456|                 const targetId = btn.getAttribute('data-target');
+457|                 if (!targetId) return;
+458|                 e.preventDefault();
+459|                 const target = document.getElementById(targetId);
+460|                 if (target) {
+461|                     const pos = target.getBoundingClientRect().top + window.scrollY - 70;
+462|                     window.scrollTo({ top: pos, behavior: 'smooth' });
+463|                 }
+464|             }
+465| 
+466|             menuBtn.addEventListener('click', togglePanel);
+467|             document.querySelectorAll('#mobileNavPanel [data-target]').forEach(btn => {
+468|                 btn.addEventListener('click', scrollToTarget);
+469|             });
+470| 
+471|             document.addEventListener('click', function (e) {
+472|                 if (isOpen && !panel.contains(e.target) && e.target !== menuBtn) {
+473|                     closePanel();
+474|                 }
+475|             });
+476|         }
+477| 
+478|         // === LANCEMENT (basé sur les media queries CSS) ===
+479|         function detectAndInit() {
+480|             if (mobileMQ.matches) {
+481|                 initMobileVersion();
+482|             } else {
+483|                 initDesktopVersion();
+484|             }
+485|         }
+486| 
+487|         detectAndInit();
+488| 
+489|         // === REDIMENSIONNEMENT ===
+490|         let resizeTimer;
+491|         desktopMQ.addEventListener('change', function () {
+492|             if (resizeTimer) clearTimeout(resizeTimer);
+493|             resizeTimer = setTimeout(() => location.reload(), 150);
+494|         });
+495|         mobileMQ.addEventListener('change', function () {
+496|             if (resizeTimer) clearTimeout(resizeTimer);
+497|             resizeTimer = setTimeout(() => location.reload(), 150);
+498|         });
+499|     })();
+500| 
+501| })();   
+
+# ============================================
+# FILE: public\js\common.js
+# ============================================
+
+1| ﻿// ========== COMMON - MeetGay ==========
+2| // Fonctions et détecteurs partagés entre les pages (login, chat, etc.)
+3| 
+4| (function () {
+5|     // ========== 1. Détection de la résolution d'écran ==========
+6|     function detectResolution() {
+7|         const width = window.innerWidth;
+8|         const height = window.innerHeight;
+9|         const resolution = `${width}x${height}`;
+10|         sessionStorage.setItem('screen_resolution', resolution);
+11|         console.log(`📱 Résolution détectée : ${resolution}`);
+12|         return resolution;
+13|     }
+14| 
+15|     // ========== 2. Échapper le HTML (sécurité) ==========
+16|     function escapeHtml(str) {
+17|         if (!str) return '';
+18|         return str.replace(/[&<>]/g, (m) => {
+19|             if (m === '&') return '&amp;';
+20|             if (m === '<') return '&lt;';
+21|             if (m === '>') return '&gt;';
+22|             return m;
+23|         });
+24|     }
+25| 
+26|     // ========== 3. Formater l'heure (HH:MM) ==========
+27|     function formatTime(date) {
+28|         if (!date) return '';
+29|         const d = new Date(date);
+30|         return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+31|     }
+32| 
+33|     // ========== 4. Exécuter la détection au chargement ==========
+34|     if (document.readyState === 'loading') {
+35|         document.addEventListener('DOMContentLoaded', detectResolution);
+36|     } else {
+37|         detectResolution();
+38|     }
+39| 
+40|     // ========== 5. Exposer les fonctions globalement ==========
+41|     window.common = {
+42|         escapeHtml: escapeHtml,
+43|         formatTime: formatTime,
+44|         detectResolution: detectResolution,
+45|         getResolution: () => sessionStorage.getItem('screen_resolution')
+46|     };
+47| 
+48|     // Fonction pour afficher la localisation de manière cohérente (utilisée par le badge ET la liste des connectés)
+49|     window.getDisplayLocation = function (userData) {
+50|         if (!userData) return '?';
+51| 
+52|         let locationCity = userData.locationCity || userData.location_city || null;
+53|         let locationCommune = userData.locationCommune || userData.location_commune || null;
+54|         let locationCode = userData.locationCode || userData.location_code || '';
+55| 
+56|         // Si on a une commune précise différente de la ville, on combine
+57|         if (locationCommune && locationCommune !== 'null' && locationCommune !== 'undefined' && locationCommune !== locationCity) {
+58|             return `${locationCommune} - ${locationCity}`;
+59|         }
+60| 
+61|         // Sinon on affiche juste la ville
+62|         if (locationCity && locationCity !== 'null' && locationCity !== 'undefined') {
+63|             return locationCity;
+64|         }
+65| 
+66|         // Fallback : code de la liste déroulante
+67|         if (locationCode && locationCode !== 'null' && locationCode !== 'undefined' && locationCode !== 'GPS') {
+68|             return locationCode;
+69|         }
+70| 
+71|         return '?';
+72|     };
+73| })();
 
