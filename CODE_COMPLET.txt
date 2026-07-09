@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET
-# Généré le 2026-07-09 11:20:56
+# Généré le 2026-07-09 11:24:41
 # 8 fichier(s) inclus
 
 # ========== SOMMAIRE ==========
@@ -303,406 +303,391 @@
 8|             if (!userInfo || !userInfo.pseudo) {
 9|                 socket.emit('join error', { error: 'Pseudo requis pour rejoindre' });
 10|                 return;
-11| 
-12|             }
-13| 
-14|             // Récupérer l'IP du client
-15|             const clientIp = socket.handshake.headers['x-forwarded-for']
-16|                 ? socket.handshake.headers['x-forwarded-for'].split(',')[0]
-17|                 : socket.conn.remoteAddress;
-18| 
-19|             console.log(`📡 Connexion de ${userInfo.pseudo} depuis IP: ${clientIp}`);
-20| 
-21| 
-22|             // ♻️ ANNUULATION DU MINUTEUR DE SUPPRESSION (Cas du F5)
-23|             // Le système de session-manager gère maintenant les reconnexions
-24|             // On nettoie simplement l'ancien état si l'utilisateur se reconnecte
-25|             if (users[socket.id]) {
-26|                 // Si l'utilisateur était marqué, on annule le marquage
-27|                 if (users[socket.id].markedForDeletion) {
-28|                     delete users[socket.id].markedForDeletion;
-29|                     delete users[socket.id].markedForDeletionTime;
-30|                 }
-31|                 console.log(`♻️ Reconnexion rapide (F5) détectée pour ${userInfo.pseudo}. Session préservée.`);
-32|             }
-33| 
-34|             // Récupérer la date de création depuis la base
-35|             let firstConnectedAt = Date.now();
-36|             try {
-37|                 const result = await pool.query(
-38|                     `SELECT first_connected_at FROM users WHERE pseudo = $1`,
-39|                     [userInfo.pseudo]
-40|                 );
-41|                 if (result.rows.length > 0 && result.rows[0].first_connected_at) {
-42|                     firstConnectedAt = new Date(result.rows[0].first_connected_at).getTime();
-43|                 } else {
-44|                     // Si first_connected_at est NULL, on le met à jour avec l’heure actuelle
-45|                     await pool.query(
-46|                         `UPDATE users SET first_connected_at = NOW() WHERE pseudo = $1`,
-47|                         [userInfo.pseudo]
-48|                     );
-49|                 }
-50|             } catch (err) {
-51|                 console.error('Erreur récupération first_connected_at:', err.message);
-52|             }
-53| 
-54|             // Nettoyer les anciennes sockets du même pseudo (DÉJÀ FAIT LIGNE 49-55)
-55|             // Mais on le refait pour être sûr
-56|             Object.keys(users).forEach((id) => {
-57|                 if (users[id].pseudo === userInfo.pseudo) {
-58|                     console.log(`🧹 Suppression de l'ancienne socket ${id} de ${userInfo.pseudo}`);
-59|                     delete users[id];
-60|                 }
-61|             });
-62| 
-63|             // Assigner le nouvel utilisateur
-64|             users[socket.id] = {
-65|                 ...userInfo,
-66|                 socketId: socket.id,
-67|                 connectedAt: Date.now(),
-68|                 firstConnectedAt: firstConnectedAt,
-69|                 ip: clientIp,
-70|                 locationCity: userInfo.locationCity || null,
-71|                 locationCommune: userInfo.locationCommune || null,
-72|                 locationPostalCode: userInfo.locationPostalCode || null,
-73|                 locationProvince: userInfo.locationProvince || null,
-74|                 locationRegion: userInfo.locationRegion || null,
-75|                 locationCountry: userInfo.locationCountry || null,
-76|                 locationNeighborhood: userInfo.locationNeighborhood || null,
-77|                 locationPostcodeLocalities: userInfo.locationPostcodeLocalities || null,
-78|                 locationSublocalityLevel1: userInfo.locationSublocalityLevel1 || null,
-79|                 locationSublocalityLevel2: userInfo.locationSublocalityLevel2 || null,
-80|                 locationSublocalityLevel3: userInfo.locationSublocalityLevel3 || null,
-81|                 locationSublocalityLevel4: userInfo.locationSublocalityLevel4 || null,
-82|                 locationSublocalityLevel5: userInfo.locationSublocalityLevel5 || null,
-83|                 locationAdminLevel3: userInfo.locationAdminLevel3 || null,
-84|                 locationAdminLevel4: userInfo.locationAdminLevel4 || null,
-85|                 locationAdminLevel5: userInfo.locationAdminLevel5 || null,
-86|                 locationAdminLevel6: userInfo.locationAdminLevel6 || null,
-87|                 locationAdminLevel7: userInfo.locationAdminLevel7 || null,
-88|                 locationColloquialArea: userInfo.locationColloquialArea || null,
-89|                 locationIntersection: userInfo.locationIntersection || null,
-90|                 locationLat: userInfo.locationLat || null,
-91|                 locationLng: userInfo.locationLng || null,
-92|             };
-93| 
-94|             console.log(`✅ ${userInfo.pseudo} a rejoint (${socket.id})`);
-95|             console.log('📍 STOCKAGE SOCKET - locationCity:', userInfo.locationCity);
-96|             console.log('📍 STOCKAGE SOCKET - locationCommune:', userInfo.locationCommune);
-97|             console.log('💾 users stocké pour', userInfo.pseudo, ':', {
-98|                 gender: users[socket.id].gender,
-99|                 tendencies: users[socket.id].tendencies,
-100|                 origine: users[socket.id].origine,
-101|                 purpose: users[socket.id].purpose
-102|             });
-103|             updateActivity(socket.id);
-104|             console.log(`✅ ${userInfo.pseudo} a rejoint (${socket.id})`);
-105|             updateActivity(socket.id);
-106|             console.log('💾 SOCKET - origine STOCKÉE pour', userInfo.pseudo, ':', users[socket.id].origine);
-107| 
-108|             // Stocker le fingerprint et l'IP dans la base
-109|             if (userInfo.fingerprint) {
-110|                 try {
-111|                     // Vérifier si le fingerprint existe déjà
-112|                     const existingFp = await pool.query(
-113|                         'SELECT id FROM fingerprints WHERE fingerprint_hash = $1',
-114|                         [userInfo.fingerprint]
-115|                     );
-116| 
-117|                     let fingerprintId;
-118|                     if (existingFp.rows.length > 0) {
-119|                         fingerprintId = existingFp.rows[0].id;
-120|                         // Mettre à jour last_seen et notes
-121|                         await pool.query(
-122|                             `UPDATE fingerprints 
-123|                              SET last_seen = NOW(), 
-124|                                  notes = CASE 
-125|                                      WHEN notes IS NULL THEN $1
-126|                                      ELSE notes || ' | ' || $1
-127|                                  END
-128|                              WHERE id = $2`,
-129|                             [`IP: ${clientIp}`, fingerprintId]
-130|                         );
-131|                     } else {
-132|                         // Créer un nouveau fingerprint
-133|                         const newFp = await pool.query(
-134|                             `INSERT INTO fingerprints (fingerprint_hash, first_seen, last_seen, notes) 
-135|                              VALUES ($1, NOW(), NOW(), $2)
-136|                              RETURNING id`,
-137|                             [userInfo.fingerprint, `IP: ${clientIp}`]
-138|                         );
-139|                         fingerprintId = newFp.rows[0].id;
-140|                     }
-141| 
-142|                     // Lier le fingerprint à l'utilisateur
-143|                     await pool.query(
-144|                         'UPDATE users SET fingerprint_id = $1, last_ip = $2 WHERE pseudo = $3',
-145|                         [fingerprintId, clientIp, userInfo.pseudo]
-146|                     );
-147| 
-148| 
-149|                     console.log(`🔒 Fingerprint lié pour ${userInfo.pseudo} (ID: ${fingerprintId})`);
-150|                 } catch (err) {
-151|                     console.error('Erreur stockage fingerprint/IP:', err);
-152|                 }
-153|             } else {
-154|                 console.warn(`⚠️ Pas de fingerprint pour ${userInfo.pseudo}`);
-155|             }
-156| 
-157|             // Tri par date de première connexion (plus ancien en bas, plus récent en haut)
-158|             const usersList = Object.values(users).sort((a, b) => (b.firstConnectedAt || 0) - (a.firstConnectedAt || 0)).map(u => ({
-159|                 pseudo: u.pseudo,
-160|                 age: u.age,
-161|                 origine: (u.origine && u.origine !== 'undefined' && u.origine !== 'null') ? u.origine : 'NC',
-162|                 tendencies: u.tendencies,
-163|                 gender: u.gender,
-164|                 purpose: u.purpose,
-165|                 bio: u.bio || 'Aucune présentation',
-166|                 locationCity: u.locationCity || null,
-167|                 locationCommune: u.locationCommune || null,
-168|                 locationPostalCode: u.locationPostalCode || null,
-169|                 locationProvince: u.locationProvince || null,
-170|                 locationRegion: u.locationRegion || null,
-171|                 locationCountry: u.locationCountry || null,
-172|                 locationNeighborhood: u.locationNeighborhood || null,
-173|                 locationPostcodeLocalities: u.locationPostcodeLocalities || null,
-174|                 locationSublocalityLevel1: u.locationSublocalityLevel1 || null,
-175|                 locationSublocalityLevel2: u.locationSublocalityLevel2 || null,
-176|                 locationSublocalityLevel3: u.locationSublocalityLevel3 || null,
-177|                 locationSublocalityLevel4: u.locationSublocalityLevel4 || null,
-178|                 locationSublocalityLevel5: u.locationSublocalityLevel5 || null,
-179|                 locationAdminLevel3: u.locationAdminLevel3 || null,
-180|                 locationAdminLevel4: u.locationAdminLevel4 || null,
-181|                 locationAdminLevel5: u.locationAdminLevel5 || null,
-182|                 locationAdminLevel6: u.locationAdminLevel6 || null,
-183|                 locationAdminLevel7: u.locationAdminLevel7 || null,
-184|                 locationColloquialArea: u.locationColloquialArea || null,
-185|                 locationIntersection: u.locationIntersection || null,
-186|                 locationLat: u.locationLat || null,
-187|                 locationLng: u.locationLng || null,
-188|                 socketId: u.socketId,
-189|                 connectedAt: u.connectedAt || 0
-190|             }));
+11|             }
+12| 
+13|             // Récupérer l'IP du client
+14|             const clientIp = socket.handshake.headers['x-forwarded-for']
+15|                 ? socket.handshake.headers['x-forwarded-for'].split(',')[0]
+16|                 : socket.conn.remoteAddress;
+17| 
+18|             console.log(`📡 Connexion de ${userInfo.pseudo} depuis IP: ${clientIp}`);
+19| 
+20|             // Récupérer la date de création depuis la base
+21|             let firstConnectedAt = Date.now();
+22|             try {
+23|                 const result = await pool.query(
+24|                     `SELECT first_connected_at FROM users WHERE pseudo = $1`,
+25|                     [userInfo.pseudo]
+26|                 );
+27|                 if (result.rows.length > 0 && result.rows[0].first_connected_at) {
+28|                     firstConnectedAt = new Date(result.rows[0].first_connected_at).getTime();
+29|                 } else {
+30|                     await pool.query(
+31|                         `UPDATE users SET first_connected_at = NOW() WHERE pseudo = $1`,
+32|                         [userInfo.pseudo]
+33|                     );
+34|                 }
+35|             } catch (err) {
+36|                 console.error('Erreur récupération first_connected_at:', err.message);
+37|             }
+38| 
+39|             // 🔥 SUPPRESSION DES ANCIENNES SESSIONS DU MÊME PSEUDO (remplace le delete de users)
+40|             try {
+41|                 await pool.query(
+42|                     `UPDATE users SET socket_id = NULL 
+43|              WHERE pseudo = $1 AND socket_id IS NOT NULL`,
+44|                     [userInfo.pseudo]
+45|                 );
+46|                 console.log(`🧹 Ancienne socket nettoyée pour ${userInfo.pseudo}`);
+47|             } catch (err) {
+48|                 console.error('Erreur nettoyage ancienne socket:', err.message);
+49|             }
+50| 
+51|             // Stocker le fingerprint et l'IP dans la base
+52|             if (userInfo.fingerprint) {
+53|                 try {
+54|                     const existingFp = await pool.query(
+55|                         'SELECT id FROM fingerprints WHERE fingerprint_hash = $1',
+56|                         [userInfo.fingerprint]
+57|                     );
+58| 
+59|                     let fingerprintId;
+60|                     if (existingFp.rows.length > 0) {
+61|                         fingerprintId = existingFp.rows[0].id;
+62|                         await pool.query(
+63|                             `UPDATE fingerprints
+64|                      SET last_seen = NOW(),
+65|                      notes = CASE
+66|                          WHEN notes IS NULL THEN $1
+67|                          ELSE notes || ' | ' || $1
+68|                      END
+69|                      WHERE id = $2`,
+70|                             [`IP: ${clientIp}`, fingerprintId]
+71|                         );
+72|                     } else {
+73|                         const newFp = await pool.query(
+74|                             `INSERT INTO fingerprints (fingerprint_hash, first_seen, last_seen, notes)
+75|                      VALUES ($1, NOW(), NOW(), $2)
+76|                      RETURNING id`,
+77|                             [userInfo.fingerprint, `IP: ${clientIp}`]
+78|                         );
+79|                         fingerprintId = newFp.rows[0].id;
+80|                     }
+81| 
+82|                     await pool.query(
+83|                         'UPDATE users SET fingerprint_id = $1, last_ip = $2, socket_id = $3, last_seen = NOW() WHERE pseudo = $4',
+84|                         [fingerprintId, clientIp, socket.id, userInfo.pseudo]
+85|                     );
+86| 
+87|                     console.log(`🔒 Fingerprint lié pour ${userInfo.pseudo} (ID: ${fingerprintId})`);
+88|                 } catch (err) {
+89|                     console.error('Erreur stockage fingerprint/IP:', err);
+90|                 }
+91|             } else {
+92|                 // Même sans fingerprint, on met à jour socket_id
+93|                 await pool.query(
+94|                     'UPDATE users SET socket_id = $1, last_ip = $2, last_seen = NOW() WHERE pseudo = $3',
+95|                     [socket.id, clientIp, userInfo.pseudo]
+96|                 );
+97|                 console.warn(`⚠️ Pas de fingerprint pour ${userInfo.pseudo}`);
+98|             }
+99| 
+100|             // 🔥 RÉCUPÉRER LA LISTE DES CONNECTÉS DEPUIS LA BASE (remplace Object.values(users))
+101|             try {
+102|                 const result = await pool.query(`
+103|             SELECT 
+104|                 pseudo,
+105|                 age,
+106|                 COALESCE(NULLIF(origine, ''), 'NC') as origine,
+107|                 tendencies,
+108|                 gender,
+109|                 purpose,
+110|                 COALESCE(bio, 'Aucune présentation') as bio,
+111|                 location_city as "locationCity",
+112|                 location_commune as "locationCommune",
+113|                 location_postal_code as "locationPostalCode",
+114|                 location_province as "locationProvince",
+115|                 location_region as "locationRegion",
+116|                 location_country as "locationCountry",
+117|                 location_neighborhood as "locationNeighborhood",
+118|                 location_postcode_localities as "locationPostcodeLocalities",
+119|                 location_sublocality_level_1 as "locationSublocalityLevel1",
+120|                 location_sublocality_level_2 as "locationSublocalityLevel2",
+121|                 location_sublocality_level_3 as "locationSublocalityLevel3",
+122|                 location_sublocality_level_4 as "locationSublocalityLevel4",
+123|                 location_sublocality_level_5 as "locationSublocalityLevel5",
+124|                 location_admin_level_3 as "locationAdminLevel3",
+125|                 location_admin_level_4 as "locationAdminLevel4",
+126|                 location_admin_level_5 as "locationAdminLevel5",
+127|                 location_admin_level_6 as "locationAdminLevel6",
+128|                 location_admin_level_7 as "locationAdminLevel7",
+129|                 location_colloquial_area as "locationColloquialArea",
+130|                 location_intersection as "locationIntersection",
+131|                 location_lat as "locationLat",
+132|                 location_lng as "locationLng",
+133|                 socket_id as "socketId",
+134|                 EXTRACT(EPOCH FROM first_connected_at) * 1000 as "connectedAt"
+135|             FROM users 
+136|             WHERE socket_id IS NOT NULL 
+137|             AND last_seen > NOW() - INTERVAL '15 minutes'
+138|             ORDER BY first_connected_at DESC
+139|         `);
+140| 
+141|                 // Construire la liste avec la MÊME STRUCTURE qu'avant
+142|                 const usersList = result.rows.map(u => ({
+143|                     pseudo: u.pseudo,
+144|                     age: u.age,
+145|                     origine: (u.origine && u.origine !== 'undefined' && u.origine !== 'null') ? u.origine : 'NC',
+146|                     tendencies: u.tendencies,
+147|                     gender: u.gender,
+148|                     purpose: u.purpose,
+149|                     bio: u.bio || 'Aucune présentation',
+150|                     locationCity: u.locationCity || null,
+151|                     locationCommune: u.locationCommune || null,
+152|                     locationPostalCode: u.locationPostalCode || null,
+153|                     locationProvince: u.locationProvince || null,
+154|                     locationRegion: u.locationRegion || null,
+155|                     locationCountry: u.locationCountry || null,
+156|                     locationNeighborhood: u.locationNeighborhood || null,
+157|                     locationPostcodeLocalities: u.locationPostcodeLocalities || null,
+158|                     locationSublocalityLevel1: u.locationSublocalityLevel1 || null,
+159|                     locationSublocalityLevel2: u.locationSublocalityLevel2 || null,
+160|                     locationSublocalityLevel3: u.locationSublocalityLevel3 || null,
+161|                     locationSublocalityLevel4: u.locationSublocalityLevel4 || null,
+162|                     locationSublocalityLevel5: u.locationSublocalityLevel5 || null,
+163|                     locationAdminLevel3: u.locationAdminLevel3 || null,
+164|                     locationAdminLevel4: u.locationAdminLevel4 || null,
+165|                     locationAdminLevel5: u.locationAdminLevel5 || null,
+166|                     locationAdminLevel6: u.locationAdminLevel6 || null,
+167|                     locationAdminLevel7: u.locationAdminLevel7 || null,
+168|                     locationColloquialArea: u.locationColloquialArea || null,
+169|                     locationIntersection: u.locationIntersection || null,
+170|                     locationLat: u.locationLat || null,
+171|                     locationLng: u.locationLng || null,
+172|                     socketId: u.socketId,
+173|                     connectedAt: u.connectedAt || 0
+174|                 }));
+175| 
+176|                 // Envoyer la liste à TOUS les clients
+177|                 io.emit('update users', usersList);
+178| 
+179|                 console.log('📤 update users envoyé pour', userInfo.pseudo);
+180|                 console.log('📤 Envoi de join confirmed pour', userInfo.pseudo);
+181|                 socket.emit('join confirmed', { success: true, user: userInfo });
+182| 
+183|             } catch (err) {
+184|                 console.error('❌ Erreur récupération liste utilisateurs:', err);
+185|                 socket.emit('join error', { error: 'Erreur lors du chargement des utilisateurs' });
+186|             }
+187|         });
+188| 
+189| 
+190| 
 191| 
-192|             console.log('📤 update users envoyé pour', userInfo.pseudo, ':', {
-193|                 gender: usersList.find(u => u.pseudo === userInfo.pseudo)?.gender,
-194|                 tendencies: usersList.find(u => u.pseudo === userInfo.pseudo)?.tendencies,
-195|                 origine: usersList.find(u => u.pseudo === userInfo.pseudo)?.origine,
-196|                 purpose: usersList.find(u => u.pseudo === userInfo.pseudo)?.purpose
-197|             });
-198| 
-199|             //io.emit('update users', usersList);
-200|             console.log('📤 Envoi de join confirmed pour', userInfo.pseudo);
-201|             socket.emit('join confirmed', { success: true, user: userInfo });
-202|         });
-203| 
-204| 
-205| 
-206| 
+192| 
+193|         // Heartbeat pour mettre à jour lastSeen
+194|         socket.on('heartbeat', () => {
+195|             if (users[socket.id]) {
+196|                 users[socket.id].lastSeen = Date.now();
+197|             }
+198|             socket.emit('heartbeat_ack');  // ← AJOUTER CETTE LIGNE
+199|         });
+200| 
+201|         // Mise à jour de lastSeen à chaque ping reçu (natif Socket.IO)
+202|         socket.on('ping', () => {
+203|             if (users[socket.id]) {
+204|                 users[socket.id].lastSeen = Date.now();
+205|             }
+206|         });
 207| 
-208|         // Heartbeat pour mettre à jour lastSeen
-209|         socket.on('heartbeat', () => {
-210|             if (users[socket.id]) {
-211|                 users[socket.id].lastSeen = Date.now();
-212|             }
-213|             socket.emit('heartbeat_ack');  // ← AJOUTER CETTE LIGNE
-214|         });
-215| 
-216|         // Mise à jour de lastSeen à chaque ping reçu (natif Socket.IO)
-217|         socket.on('ping', () => {
-218|             if (users[socket.id]) {
-219|                 users[socket.id].lastSeen = Date.now();
-220|             }
-221|         });
-222| 
-223| 
-224|         socket.on('private message', (data) => {
-225|             const { toSocketId, message, fromPseudo } = data;
+208| 
+209|         socket.on('private message', (data) => {
+210|             const { toSocketId, message, fromPseudo } = data;
+211| 
+212|             // toSocketId est un pseudo, pas un socketId
+213|             let targetSocketId = null;
+214|             for (const [id, u] of Object.entries(users)) {
+215|                 if (u.pseudo === toSocketId) {
+216|                     targetSocketId = id;
+217|                     break;
+218|                 }
+219|             }
+220| 
+221|             if (!targetSocketId) {
+222|                 console.log(`❌ Utilisateur ${toSocketId} non trouvé`);
+223|                 socket.emit('error', { message: `Utilisateur ${toSocketId} non trouvé` });
+224|                 return;
+225|             }
 226| 
-227|             // toSocketId est un pseudo, pas un socketId
-228|             let targetSocketId = null;
-229|             for (const [id, u] of Object.entries(users)) {
-230|                 if (u.pseudo === toSocketId) {
-231|                     targetSocketId = id;
-232|                     break;
-233|                 }
-234|             }
-235| 
-236|             if (!targetSocketId) {
-237|                 console.log(`❌ Utilisateur ${toSocketId} non trouvé`);
-238|                 socket.emit('error', { message: `Utilisateur ${toSocketId} non trouvé` });
-239|                 return;
-240|             }
+227|             // Envoyer le message au destinataire
+228|             io.to(targetSocketId).emit('private message received', {
+229|                 fromPseudo: fromPseudo,
+230|                 fromSocketId: socket.id,
+231|                 message: message,
+232|                 timestamp: new Date()
+233|             });
+234| 
+235|             // Confirmer à l'expéditeur
+236|             socket.emit('message sent confirmation', {
+237|                 message: message,
+238|                 toPseudo: toSocketId,
+239|                 timestamp: new Date()
+240|             });
 241| 
-242|             // Envoyer le message au destinataire
-243|             io.to(targetSocketId).emit('private message received', {
-244|                 fromPseudo: fromPseudo,
-245|                 fromSocketId: socket.id,
-246|                 message: message,
-247|                 timestamp: new Date()
-248|             });
-249| 
-250|             // Confirmer à l'expéditeur
-251|             socket.emit('message sent confirmation', {
-252|                 message: message,
-253|                 toPseudo: toSocketId,
-254|                 timestamp: new Date()
-255|             });
-256| 
-257|             console.log(`💬 Message de ${fromPseudo} à ${toSocketId}: ${message.substring(0, 30)}...`);
-258|         });
-259| 
-260|         /*socket.on('get users list', () => {
-261|             const usersList = Object.values(users).sort((a, b) => (b.firstConnectedAt || 0) - (a.firstConnectedAt || 0)).map(u => ({
-262|                 pseudo: u.pseudo,
-263|                 age: u.age,
-264|                 origine: (u.origine && u.origine !== 'undefined' && u.origine !== 'null') ? u.origine : 'NC',
-265|                 tendencies: u.tendencies,
-266|                 gender: u.gender,
-267|                 purpose: u.purpose,
-268|                 bio: u.bio || 'Aucune présentation',
-269|                 locationCity: u.locationCity || null,
-270|                 locationCommune: u.locationCommune || null,
-271|                 locationPostalCode: u.locationPostalCode || null,
-272|                 locationProvince: u.locationProvince || null,
-273|                 locationRegion: u.locationRegion || null,
-274|                 locationCountry: u.locationCountry || null,
-275|                 locationNeighborhood: u.locationNeighborhood || null,
-276|                 locationPostcodeLocalities: u.locationPostcodeLocalities || null,
-277|                 locationSublocalityLevel1: u.locationSublocalityLevel1 || null,
-278|                 locationSublocalityLevel2: u.locationSublocalityLevel2 || null,
-279|                 locationSublocalityLevel3: u.locationSublocalityLevel3 || null,
-280|                 locationSublocalityLevel4: u.locationSublocalityLevel4 || null,
-281|                 locationSublocalityLevel5: u.locationSublocalityLevel5 || null,
-282|                 locationAdminLevel3: u.locationAdminLevel3 || null,
-283|                 locationAdminLevel4: u.locationAdminLevel4 || null,
-284|                 locationAdminLevel5: u.locationAdminLevel5 || null,
-285|                 locationAdminLevel6: u.locationAdminLevel6 || null,
-286|                 locationAdminLevel7: u.locationAdminLevel7 || null,
-287|                 locationColloquialArea: u.locationColloquialArea || null,
-288|                 locationIntersection: u.locationIntersection || null,
-289|                 locationLat: u.locationLat || null,
-290|                 locationLng: u.locationLng || null,
-291|                 socketId: u.socketId,
-292|                 connectedAt: u.connectedAt || 0
-293|             }));
-294|             socket.emit('update users', usersList);
-295|         });*/
-296| 
-297|         // Gestion des signalements utilisateur
-298|         socket.on('report user', async (data) => {
-299|             const { targetPseudo } = data;
-300| 
-301|             // Récupérer le pseudo du signaleur depuis users[socket.id]
-302|             const reporterPseudo = users[socket.id]?.pseudo;
-303|             if (!reporterPseudo) {
-304|                 socket.emit('report_error', { error: 'Utilisateur non identifié' });
-305|                 return;
-306|             }
+242|             console.log(`💬 Message de ${fromPseudo} à ${toSocketId}: ${message.substring(0, 30)}...`);
+243|         });
+244| 
+245|         /*socket.on('get users list', () => {
+246|             const usersList = Object.values(users).sort((a, b) => (b.firstConnectedAt || 0) - (a.firstConnectedAt || 0)).map(u => ({
+247|                 pseudo: u.pseudo,
+248|                 age: u.age,
+249|                 origine: (u.origine && u.origine !== 'undefined' && u.origine !== 'null') ? u.origine : 'NC',
+250|                 tendencies: u.tendencies,
+251|                 gender: u.gender,
+252|                 purpose: u.purpose,
+253|                 bio: u.bio || 'Aucune présentation',
+254|                 locationCity: u.locationCity || null,
+255|                 locationCommune: u.locationCommune || null,
+256|                 locationPostalCode: u.locationPostalCode || null,
+257|                 locationProvince: u.locationProvince || null,
+258|                 locationRegion: u.locationRegion || null,
+259|                 locationCountry: u.locationCountry || null,
+260|                 locationNeighborhood: u.locationNeighborhood || null,
+261|                 locationPostcodeLocalities: u.locationPostcodeLocalities || null,
+262|                 locationSublocalityLevel1: u.locationSublocalityLevel1 || null,
+263|                 locationSublocalityLevel2: u.locationSublocalityLevel2 || null,
+264|                 locationSublocalityLevel3: u.locationSublocalityLevel3 || null,
+265|                 locationSublocalityLevel4: u.locationSublocalityLevel4 || null,
+266|                 locationSublocalityLevel5: u.locationSublocalityLevel5 || null,
+267|                 locationAdminLevel3: u.locationAdminLevel3 || null,
+268|                 locationAdminLevel4: u.locationAdminLevel4 || null,
+269|                 locationAdminLevel5: u.locationAdminLevel5 || null,
+270|                 locationAdminLevel6: u.locationAdminLevel6 || null,
+271|                 locationAdminLevel7: u.locationAdminLevel7 || null,
+272|                 locationColloquialArea: u.locationColloquialArea || null,
+273|                 locationIntersection: u.locationIntersection || null,
+274|                 locationLat: u.locationLat || null,
+275|                 locationLng: u.locationLng || null,
+276|                 socketId: u.socketId,
+277|                 connectedAt: u.connectedAt || 0
+278|             }));
+279|             socket.emit('update users', usersList);
+280|         });*/
+281| 
+282|         // Gestion des signalements utilisateur
+283|         socket.on('report user', async (data) => {
+284|             const { targetPseudo } = data;
+285| 
+286|             // Récupérer le pseudo du signaleur depuis users[socket.id]
+287|             const reporterPseudo = users[socket.id]?.pseudo;
+288|             if (!reporterPseudo) {
+289|                 socket.emit('report_error', { error: 'Utilisateur non identifié' });
+290|                 return;
+291|             }
+292| 
+293|             if (!targetPseudo || targetPseudo === reporterPseudo) {
+294|                 socket.emit('report_error', { error: 'Signalement invalide' });
+295|                 return;
+296|             }
+297| 
+298|             try {
+299|                 // 1. Insérer le signalement
+300|                 await pool.query(
+301|                     'INSERT INTO reports (reporter_pseudo, target_pseudo) VALUES ($1, $2)',
+302|                     [reporterPseudo, targetPseudo]
+303|                 );
+304| 
+305|                 // 2. Utiliser les constantes de server.js
+306|                 const threshold = REPORTS_THRESHOLD;
 307| 
-308|             if (!targetPseudo || targetPseudo === reporterPseudo) {
-309|                 socket.emit('report_error', { error: 'Signalement invalide' });
-310|                 return;
-311|             }
-312| 
-313|             try {
-314|                 // 1. Insérer le signalement
-315|                 await pool.query(
-316|                     'INSERT INTO reports (reporter_pseudo, target_pseudo) VALUES ($1, $2)',
-317|                     [reporterPseudo, targetPseudo]
-318|                 );
-319| 
-320|                 // 2. Utiliser les constantes de server.js
-321|                 const threshold = REPORTS_THRESHOLD;
+308|                 // 3. Récupérer la date de fin du dernier ban (si existe)
+309|                 const lastBan = await pool.query(
+310|                     `SELECT expires_at FROM temp_bans 
+311|                     WHERE user_pseudo = $1 
+312|                     ORDER BY expires_at DESC LIMIT 1`,
+313|                     [targetPseudo]
+314|                 );
+315| 
+316|                 let sinceDate = `NOW() - INTERVAL '${REPORTS_WINDOW_MINUTES} minutes'`;
+317|                 if (lastBan.rows.length > 0) {
+318|                     const lastBanExpiry = lastBan.rows[0].expires_at;
+319|                     // Prendre la date la plus récente entre la fin du dernier ban et la fenêtre
+320|                     sinceDate = `GREATEST(NOW() - INTERVAL '${REPORTS_WINDOW_MINUTES} minutes', '${lastBanExpiry.toISOString()}')`;
+321|                 }
 322| 
-323|                 // 3. Récupérer la date de fin du dernier ban (si existe)
-324|                 const lastBan = await pool.query(
-325|                     `SELECT expires_at FROM temp_bans 
-326|                     WHERE user_pseudo = $1 
-327|                     ORDER BY expires_at DESC LIMIT 1`,
-328|                     [targetPseudo]
-329|                 );
+323|                 const countRes = await pool.query(
+324|                     `SELECT COUNT(DISTINCT reporter_pseudo) FROM reports 
+325|                     WHERE target_pseudo = $1 
+326|                     AND created_at > ${sinceDate}`,
+327|                     [targetPseudo]
+328|                 );
+329|                 const reportCount = parseInt(countRes.rows[0].count);
 330| 
-331|                 let sinceDate = `NOW() - INTERVAL '${REPORTS_WINDOW_MINUTES} minutes'`;
-332|                 if (lastBan.rows.length > 0) {
-333|                     const lastBanExpiry = lastBan.rows[0].expires_at;
-334|                     // Prendre la date la plus récente entre la fin du dernier ban et la fenêtre
-335|                     sinceDate = `GREATEST(NOW() - INTERVAL '${REPORTS_WINDOW_MINUTES} minutes', '${lastBanExpiry.toISOString()}')`;
-336|                 }
-337| 
-338|                 const countRes = await pool.query(
-339|                     `SELECT COUNT(DISTINCT reporter_pseudo) FROM reports 
-340|                     WHERE target_pseudo = $1 
-341|                     AND created_at > ${sinceDate}`,
-342|                     [targetPseudo]
-343|                 );
-344|                 const reportCount = parseInt(countRes.rows[0].count);
-345| 
-346|                 // 4. Confirmation au signaleur
-347|                 socket.emit('report_confirmation', {
-348|                     targetPseudo,
-349|                     reportCount,
-350|                     threshold,
-351|                     willTrigger: reportCount >= threshold
-352|                 });
-353| 
-354|                 // 5. Si seuil atteint, déclencher temp_ban (10 minutes)
-355|                 if (reportCount >= threshold) {
-356|                     const expiresAt = new Date(Date.now() + TEMP_BAN_MINUTES * 60 * 1000);
+331|                 // 4. Confirmation au signaleur
+332|                 socket.emit('report_confirmation', {
+333|                     targetPseudo,
+334|                     reportCount,
+335|                     threshold,
+336|                     willTrigger: reportCount >= threshold
+337|                 });
+338| 
+339|                 // 5. Si seuil atteint, déclencher temp_ban (10 minutes)
+340|                 if (reportCount >= threshold) {
+341|                     const expiresAt = new Date(Date.now() + TEMP_BAN_MINUTES * 60 * 1000);
+342| 
+343|                     await pool.query(
+344|                         `INSERT INTO temp_bans (user_pseudo, expires_at, reason) 
+345|                          VALUES ($1, $2, $3)
+346|                          ON CONFLICT (user_pseudo) DO UPDATE 
+347|                          SET expires_at = EXCLUDED.expires_at, reason = EXCLUDED.reason`,
+348|                         [targetPseudo, expiresAt, `${reportCount} signalements reçus`]
+349|                     );
+350| 
+351|                     // Journaliser l'action
+352|                     await pool.query(
+353|                         `INSERT INTO moderation_actions (admin_pseudo, action_type, target_pseudo, duration_minutes, reason)
+354|                          VALUES ('SYSTEM', 'temp_ban', $1, 10, $2)`,
+355|                         [targetPseudo, `Ban auto après ${reportCount} signalements`]
+356|                     );
 357| 
-358|                     await pool.query(
-359|                         `INSERT INTO temp_bans (user_pseudo, expires_at, reason) 
-360|                          VALUES ($1, $2, $3)
-361|                          ON CONFLICT (user_pseudo) DO UPDATE 
-362|                          SET expires_at = EXCLUDED.expires_at, reason = EXCLUDED.reason`,
-363|                         [targetPseudo, expiresAt, `${reportCount} signalements reçus`]
-364|                     );
-365| 
-366|                     // Journaliser l'action
-367|                     await pool.query(
-368|                         `INSERT INTO moderation_actions (admin_pseudo, action_type, target_pseudo, duration_minutes, reason)
-369|                          VALUES ('SYSTEM', 'temp_ban', $1, 10, $2)`,
-370|                         [targetPseudo, `Ban auto après ${reportCount} signalements`]
-371|                     );
-372| 
-373|                     // Déconnecter l'utilisateur cible s'il est connecté
-374|                     const targetSocketEntry = Object.entries(users).find(([id, u]) => u.pseudo === targetPseudo);
-375|                     if (targetSocketEntry) {
-376|                         const targetSocketId = targetSocketEntry[0];
-377|                         io.to(targetSocketId).emit('force logout', {
-378|                             reason: `Vous avez été banni temporairement (10 minutes) pour comportement abusif.`
-379|                         });
-380|                     }
+358|                     // Déconnecter l'utilisateur cible s'il est connecté
+359|                     const targetSocketEntry = Object.entries(users).find(([id, u]) => u.pseudo === targetPseudo);
+360|                     if (targetSocketEntry) {
+361|                         const targetSocketId = targetSocketEntry[0];
+362|                         io.to(targetSocketId).emit('force logout', {
+363|                             reason: `Vous avez été banni temporairement (10 minutes) pour comportement abusif.`
+364|                         });
+365|                     }
+366| 
+367|                     // Notifier tous les admins connectés (optionnel)
+368|                     io.emit('new_report_auto_ban', {
+369|                         targetPseudo,
+370|                         reportCount,
+371|                         duration: 10
+372|                     });
+373| 
+374|                     console.log(`🔨 Auto-ban: ${targetPseudo} banni 10 min (${reportCount} signalements)`);
+375|                 }
+376|             } catch (err) {
+377|                 console.error('Erreur lors du signalement:', err);
+378|                 socket.emit('report_error', { error: 'Erreur serveur' });
+379|             }
+380|         });
 381| 
-382|                     // Notifier tous les admins connectés (optionnel)
-383|                     io.emit('new_report_auto_ban', {
-384|                         targetPseudo,
-385|                         reportCount,
-386|                         duration: 10
-387|                     });
-388| 
-389|                     console.log(`🔨 Auto-ban: ${targetPseudo} banni 10 min (${reportCount} signalements)`);
-390|                 }
-391|             } catch (err) {
-392|                 console.error('Erreur lors du signalement:', err);
-393|                 socket.emit('report_error', { error: 'Erreur serveur' });
-394|             }
-395|         });
-396| 
-397|         socket.on('disconnect', () => {
-398|             console.log("🔥 DISCONNECT DÉCLENCHÉ pour socket:", socket.id);
-399| 
-400|             // Utiliser sessionManager pour gérer la déconnexion
-401|             const pseudo = sessionManager.handleDisconnect(socket.id);
-402|             if (pseudo) {
-403|                 console.log(`🔌 Déconnexion traitée: ${pseudo}`);
-404|             }
-405|         });
-406| 
-407|     });
-408| 
-409| 
-410| };
+382|         socket.on('disconnect', () => {
+383|             console.log("🔥 DISCONNECT DÉCLENCHÉ pour socket:", socket.id);
+384| 
+385|             // Utiliser sessionManager pour gérer la déconnexion
+386|             const pseudo = sessionManager.handleDisconnect(socket.id);
+387|             if (pseudo) {
+388|                 console.log(`🔌 Déconnexion traitée: ${pseudo}`);
+389|             }
+390|         });
+391| 
+392|     });
+393| 
+394| 
+395| };
 
 # ============================================
 # FILE: server.js
