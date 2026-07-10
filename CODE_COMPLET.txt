@@ -1,6 +1,6 @@
 # MEETGAY - CODE COMPLET
-# Généré le 2026-07-10 12:39:42
-# 8 fichier(s) inclus
+# Généré le 2026-07-10 12:56:13
+# 9 fichier(s) inclus
 
 # ========== SOMMAIRE ==========
 
@@ -12,6 +12,7 @@
 # 6. modules\session-manager.js
 # 7. public\js\chat-script.js
 # 8. public\js\common.js
+# 9. server.js
 
 # ============================================
 # FILE: public\js\chat.js
@@ -1366,21 +1367,33 @@
 1347|     });
 1348| 
 1349|     window.addEventListener('pagehide', () => {
-1350|         if (currentUserPseudo) {
-1351|             // 🔥 Nouveau : marquer pour suppression au lieu de supprimer immédiatement
-1352|             navigator.sendBeacon('/api/mark-for-deletion', JSON.stringify({ pseudo: currentUserPseudo }));
-1353|             // Fallback : si la nouvelle route échoue, on garde l'ancien mécanisme
-1354|             setTimeout(() => {
-1355|                 navigator.sendBeacon('/api/delete-user', JSON.stringify({ pseudo: currentUserPseudo }));
-1356|                 navigator.sendBeacon('/api/messages/delete-user', JSON.stringify({ pseudo: currentUserPseudo }));
-1357|             }, 100);
-1358|         }
-1359|     });
-1360| 
-1361| } // ← FIN DE startChat()
-1362| 
-1363| // ========== LANCEMENT ==========
-1364| initUser();
+1350|         // 🔥 Détecter si c'est une actualisation ou une vraie fermeture
+1351|         let isReload = false;
+1352|         if (window.performance && window.performance.navigation) {
+1353|             isReload = (window.performance.navigation.type === 1); // 1 = actualisation
+1354|         }
+1355| 
+1356|         // 🔥 Si c'est une actualisation, on ne fait rien
+1357|         if (isReload) {
+1358|             console.log('🔄 Pagehide ignoré (actualisation)');
+1359|             return;
+1360|         }
+1361| 
+1362|         // 🔥 Si c'est une vraie fermeture, on supprime
+1363|         if (currentUserPseudo) {
+1364|             console.log(`🚪 Fermeture détectée pour ${currentUserPseudo}`);
+1365|             navigator.sendBeacon('/api/mark-for-deletion', JSON.stringify({ pseudo: currentUserPseudo }));
+1366|             setTimeout(() => {
+1367|                 navigator.sendBeacon('/api/delete-user', JSON.stringify({ pseudo: currentUserPseudo }));
+1368|                 navigator.sendBeacon('/api/messages/delete-user', JSON.stringify({ pseudo: currentUserPseudo }));
+1369|             }, 100);
+1370|         }
+1371|     });
+1372| 
+1373| } // ← FIN DE startChat()
+1374| 
+1375| // ========== LANCEMENT ==========
+1376| initUser();
 
 # ============================================
 # FILE: modules\routes\api-auth.js
@@ -3590,4 +3603,233 @@
 71|         return '?';
 72|     };
 73| })();
+
+# ============================================
+# FILE: server.js
+# ============================================
+
+1| // ============================================================
+2| // server.js - Cœur du chat MeetGay (version base de données)1111
+3| // ============================================================
+4| 
+5| // ========== CHARGEMENT DES VARIABLES D'ENVIRONNEMENT ==========
+6| if (process.env.NODE_ENV !== 'production') {
+7|     try {
+8|         require('dotenv').config();
+9|         console.log('✅ dotenv chargé (environnement local)');
+10|     } catch (err) {
+11|         console.log('⚠️ dotenv non installé, utilisation des variables système');
+12|     }
+13| } else {
+14|     console.log('✅ Mode production, variables Render utilisées');
+15| }
+16| 
+17| // ========== IMPORTS ==========
+18| const express = require('express');
+19| const compression = require('compression');
+20| const http = require('http');
+21| const socketIo = require('socket.io');
+22| const jwt = require('jsonwebtoken');
+23| const { Pool } = require('pg');
+24| const { disconnectBannedUser } = require('./moderation');
+25| const path = require('path');
+26| const bcrypt = require('bcrypt');
+27| const session = require('express-session');
+28| const pgSession = require('connect-pg-simple')(session);
+29| 
+30| 
+31| // Modules internes
+32| const { cleanOldData } = require('./modules/cleanup.js');
+33| const contactRoutes = require('./modules/routes/api-contact.js');
+34| const pool = require('./modules/postgresql.js');
+35| const htmlRoutes = require('./modules/routes/html.js');
+36| const adminRoutes = require('./modules/routes/admin.js');
+37| const authRoutes = require('./modules/routes/api-auth.js');
+38| const messagesRoutes = require('./modules/routes/api-messages.js');
+39| const maintenanceMiddleware = require('./modules/middleware/maintenance.js');
+40| const socketHandlers = require('./modules/socket-handlers.js');
+41| // Route de géocodage
+42| const geocodeRoutes = require('./modules/routes/geocode');
+43| 
+44| 
+45| 
+46| // ==========  VARIABLES GLOBALES ==========
+47| const TEST_MODE = false;  // ← Désactive le fingerprint si true
+48| 
+49| // JWT_SECRET pour les utilisateurs normaux
+50| const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
+51| 
+52| // PARAMÈTRES DE MODÉRATION
+53| const REPORTS_THRESHOLD = 2;        // Nombre de signalements (personnes différentes) avant auto-ban
+54| const REPORTS_WINDOW_MINUTES = 60;  // Fenêtre de temps en minutes
+55| const TEMP_BAN_MINUTES = 10;        // Durée du bannissement temporaire
+56| 
+57| // PARAMÈTRES DE NETTOYAGE AUTO
+58| const LOGS_RETENTION_DAYS = 30;     // Garder 30 jours de journal
+59| const REPORTS_RETENTION_DAYS = 60;  // Garder 60 jours de signalements
+60| const AUTO_CLEANUP_ENABLED = false;   // Activer/désactiver le nettoyage auto 1H
+61| const VISITOR_CLEANUP_ENABLED = false; // Nettoyage visiteurs déconnectés (1 minute)
+62| const INACTIVITY_MINUTES = 10;      // Déconnexion après X minutes sans activité
+63| const CLEANUP_INTERVAL_MINUTES = 1; // Nettoyage des absents toutes les X minutes
+64| 
+65| // DESACTIVE LE CACHE SERVEUR
+66| const DEV_MODE = true;
+67| 
+68| 
+69| 
+70| 
+71| 
+72| // ==========  CONFIGURATION EXPRESS ==========
+73| const app = express();
+74| const server = http.createServer(app);
+75| 
+76| console.log('🔍 DB_USER:', process.env.DB_USER);
+77| console.log('🔍 DB_PASSWORD:', process.env.DB_PASSWORD ? '******' : 'MISSING');
+78| 
+79| // Compression
+80| app.use(compression({
+81|     level: 6,
+82|     threshold: 1024,
+83|     filter: (req, res) => {
+84|         if (req.path === '/socket.io/') return false;
+85|         return compression.filter(req, res);
+86|     }
+87| }));
+88| 
+89| app.use(express.json());
+90| app.use(express.text({ type: 'text/plain' }));
+91| 
+92| app.use(session({
+93|     store: new pgSession({
+94|         pool: pool,
+95|         tableName: 'session',
+96|         createTableIfMissing: false,
+97|         pruneSessionInterval: 60
+98|     }),
+99|     secret: 'un-super-secret-change-moi',
+100|     resave: false,
+101|     saveUninitialized: false,
+102|     cookie: {
+103|         httpOnly: true,
+104|         secure: false,
+105|         maxAge: 30 * 24 * 60 * 60 * 1000 // 30 jours
+106|     }
+107| }));
+108| 
+109| 
+110| app.use(maintenanceMiddleware(pool));
+111| contactRoutes(app);
+112| htmlRoutes(app, pool);
+113| messagesRoutes(app, pool);
+114| authRoutes(app, pool);
+115| geocodeRoutes(app);
+116| require('./modules/routes/api-block')(app, pool);
+117| 
+118| // ========== CONFIGURATION DES FICHIERS STATIQUES ==========
+119| 
+120| // 🔥 Détermine les options selon le mode
+121| const staticOptions = {
+122|     setHeaders: function (res, path) {
+123|         if (path.endsWith('.css')) {
+124|             res.setHeader('Content-Type', 'text/css');
+125|         }
+126|     }
+127| };
+128| 
+129| // 🔥 Si DEV_MODE est activé, désactive le cache
+130| if (DEV_MODE === true) {
+131|     staticOptions.etag = false;           // Désactive ETag
+132|     staticOptions.maxAge = 0;             // Pas de mise en cache
+133|     staticOptions.lastModified = false;   // Désactive Last-Modified
+134| 
+135|     // Ajoute des headers anti-cache
+136|     staticOptions.setHeaders = function (res, path) {
+137|         if (path.endsWith('.css')) {
+138|             res.setHeader('Content-Type', 'text/css');
+139|         }
+140|         // 🔥 Headers anti-cache pour TOUS les fichiers
+141|         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
+142|         res.setHeader('Pragma', 'no-cache');
+143|         res.setHeader('Expires', '0');
+144|     };
+145| 
+146|     console.log('🔥 MODE DÉVELOPPEMENT ACTIF - Cache désactivé');
+147| } else {
+148|     console.log('✅ MODE PRODUCTION - Cache activé');
+149| }
+150| 
+151| // Applique la configuration
+152| app.use(express.static('/var/www/meetgay/public', staticOptions));
+153| 
+154| app.use(express.json());
+155| 
+156| // 🔥 Middleware anti-cache (seulement en développement)
+157| if (DEV_MODE === true) {
+158|     app.use((req, res, next) => {
+159|         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
+160|         res.setHeader('Pragma', 'no-cache');
+161|         res.setHeader('Expires', '0');
+162|         next();
+163|     });
+164|     console.log('🔥 Middleware anti-cache activé');
+165| }
+166| 
+167| // ========== SOCKET.IO ==========
+168| const io = socketIo(server, {
+169|     cors: {
+170|         origin: "*",
+171|         methods: ["GET", "POST"],
+172|         credentials: true,
+173|         allowedHeaders: ["*"]
+174|     },
+175|     transports: ['websocket', 'polling'],
+176|     allowEIO3: true,
+177|     pingTimeout: 120000,    // ← 2 minutes (au lieu de 10)
+178|     pingInterval: 30000     // ← 30 secondes (au lieu de 1 minute)
+179| });
+180| 
+181| const sessionManager = require('./modules/session-manager.js')(io, pool, {
+182|     CLEANUP_INTERVAL: CLEANUP_INTERVAL_MINUTES * 60 * 1000,
+183|     INACTIVITY_THRESHOLD: INACTIVITY_MINUTES * 60 * 1000
+184| });
+185| 
+186| adminRoutes(app, pool, io);
+187| 
+188| // Gestion d'erreur (port déjà utilisé)
+189| server.on('error', (err) => {
+190|     if (err.code === 'EADDRINUSE') {
+191|         console.error(`❌ Port déjà utilisé. Tue l'autre processus et redémarre.`);
+192|         process.exit(1);
+193|     }
+194| });
+195| 
+196| // Initialiser la surveillance d’inactivité (5 minutes sans activité)
+197| const updateActivity = sessionManager.updateActivity;
+198| 
+199| // ========== LANCEMENT DES HANDLERS SOCKET (APRÈS io, users, constants) ==========
+200| socketHandlers(io, pool, sessionManager, updateActivity, REPORTS_THRESHOLD, REPORTS_WINDOW_MINUTES, TEMP_BAN_MINUTES);
+201| 
+202| // ========== NETTOYAGE AUTOMATIQUE ==========
+203| // Nettoyage des utilisateurs inactifs
+204| if (VISITOR_CLEANUP_ENABLED) {
+205|     sessionManager.startCleanup();
+206| } else {
+207|     console.log('🧹 Nettoyage des visiteurs déconnectés DÉSACTIVÉ');
+208| }
+209| 
+210| // Nettoyage auto du journal et signalements (toutes les 24h)
+211| if (AUTO_CLEANUP_ENABLED) {
+212|     setInterval(async () => {
+213|         await cleanOldData(pool, LOGS_RETENTION_DAYS, REPORTS_RETENTION_DAYS);
+214|     }, 24 * 60 * 60 * 1000);
+215|     console.log(`🧹 Nettoyage auto activé: journal ${LOGS_RETENTION_DAYS} jours, signalements ${REPORTS_RETENTION_DAYS} jours`);
+216| } else {
+217|     console.log(`🧹 Nettoyage auto DÉSACTIVÉ`);
+218| }
+219| 
+220| // ========== DÉMARRAGE ==========
+221| const PORT = process.env.PORT || 3005;
+222| server.listen(PORT, '0.0.0.0', () => {
+223|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+224| });
 
