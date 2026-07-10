@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET
-# Généré le 2026-07-10 16:06:15
+# Généré le 2026-07-10 16:17:46
 # 3 fichier(s) inclus
 
 # ========== SOMMAIRE ==========
@@ -1321,88 +1321,133 @@
 1307|     });
 1308| 
 1309|     // ============================================================
-1310|     // 2. GESTION DU RETOUR ARRIÈRE (CORRIGÉ - SANS userHasInteracted)
+1310|     // 2. GESTION DU RETOUR ARRIÈRE ET F5 (VERSION DÉFINITIVE)
 1311|     // ============================================================
-1312|     // Ajouter un état dans l'historique
-1313|     history.pushState(null, null, location.href);
-1314| 
-1315|     window.addEventListener('popstate', function (event) {
-1316|         // 1. Détecter F5
-1317|         const isReload = window.performance &&
-1318|             window.performance.navigation &&
-1319|             window.performance.navigation.type === 1;
-1320| 
-1321|         if (isReload) {
-1322|             console.log('🔄 Rechargement détecté, aucune action');
-1323|             return;
-1324|         }
+1312|     let isPageReloading = false;
+1313| 
+1314|     // Détection du rechargement via sessionStorage
+1315|     window.addEventListener('beforeunload', () => {
+1316|         sessionStorage.setItem('meetgay_is_reloading', 'true');
+1317|     });
+1318| 
+1319|     // Une fois la page chargée, on réinitialise le flag
+1320|     window.addEventListener('load', () => {
+1321|         setTimeout(() => {
+1322|             sessionStorage.removeItem('meetgay_is_reloading');
+1323|         }, 500);
+1324|     });
 1325| 
-1326|         // 🔥 SUPPRIMER LA CONDITION userHasInteracted
-1327|         // On SUPPRIME toujours l'utilisateur sur un retour arrière, point barre.
-1328| 
-1329|         // 2. Récupérer le pseudo depuis localStorage (TOUJOURS disponible)
-1330|         const storedUser = JSON.parse(localStorage.getItem('meetgay_user') || '{}');
-1331|         const pseudo = storedUser.pseudo || currentUserPseudo;
-1332| 
-1333|         if (!pseudo) {
-1334|             console.warn('⚠️ Aucun pseudo trouvé pour le retour arrière');
-1335|             window.location.href = '/login.html';
-1336|             return;
-1337|         }
-1338| 
-1339|         console.log(`⬅️ Retour arrière détecté pour ${pseudo}`);
-1340|         const data = JSON.stringify({ pseudo: pseudo });
-1341| 
-1342|         // SUPPRESSION COMPLÈTE DE LA BASE
-1343|         navigator.sendBeacon('/api/mark-for-deletion', data);
+1326|     // MAIN EVENT : popstate pour le retour arrière
+1327|     window.addEventListener('popstate', function (event) {
+1328|         // VÉRIFICATION 1 : Utiliser sessionStorage pour détecter F5
+1329|         const isReloading = sessionStorage.getItem('meetgay_is_reloading') === 'true';
+1330| 
+1331|         // VÉRIFICATION 2 : Utiliser Performance API moderne
+1332|         let isReload = false;
+1333|         try {
+1334|             const navEntries = performance.getEntriesByType('navigation');
+1335|             if (navEntries && navEntries.length > 0 && navEntries[0].type === 'reload') {
+1336|                 isReload = true;
+1337|             }
+1338|         } catch (e) {
+1339|             // Fallback pour les vieux navigateurs
+1340|             if (performance.navigation && performance.navigation.type === 1) {
+1341|                 isReload = true;
+1342|             }
+1343|         }
 1344| 
-1345|         setTimeout(() => {
-1346|             navigator.sendBeacon('/api/delete-user', data);
-1347|         }, 50);
-1348| 
-1349|         setTimeout(() => {
-1350|             navigator.sendBeacon('/api/messages/delete-user', data);
-1351|         }, 100);
+1345|         // Si l'un des deux signaux indique un rechargement, on ne fait RIEN
+1346|         if (isReloading || isReload) {
+1347|             console.log('🔄 F5 détecté, aucune suppression');
+1348|             // On nettoie le flag pour éviter qu'il ne reste bloqué
+1349|             sessionStorage.removeItem('meetgay_is_reloading');
+1350|             return;
+1351|         }
 1352| 
-1353|         // NETTOYAGE COMPLET DU NAVIGATEUR
-1354|         localStorage.removeItem('meetgay_user');
-1355|         localStorage.removeItem('meetgay_user_full');
-1356|         localStorage.removeItem('meetgay_token');
-1357|         localStorage.removeItem('meetgay_chat_history');
-1358|         sessionStorage.removeItem('last_contact');
-1359|         sessionStorage.removeItem('conversationHistory');
-1360| 
-1361|         // REDIRECTION VERS LOGIN
-1362|         setTimeout(() => {
-1363|             window.location.href = '/login.html';
-1364|         }, 200);
-1365|     });
-1366| 
-1367|     // ============================================================
-1368|     // 3. GESTION DE LA FERMETURE BRUTALE (pagehide)
-1369|     // ============================================================
-1370|     window.addEventListener('pagehide', () => {
-1371|         if (sessionStorage.getItem('meetgay_is_reloading') === 'true') {
-1372|             console.log('🔄 Pagehide ignoré (rechargement)');
-1373|             sessionStorage.removeItem('meetgay_is_reloading');
-1374|             return;
-1375|         }
-1376| 
-1377|         if (user && user.pseudo) {
-1378|             console.log(`🚪 Fermeture détectée pour ${user.pseudo}`);
-1379|             const data = JSON.stringify({ pseudo: user.pseudo });
-1380| 
-1381|             // UNIQUEMENT l'API REST, pas de signal Socket.IO
-1382|             navigator.sendBeacon('/api/delete-user', data);
-1383|             navigator.sendBeacon('/api/messages/delete-user', data);
-1384|         }
-1385|     });
-1386| 
-1387| 
-1388| } // ← FIN DE startChat()
-1389| 
-1390| // ========== LANCEMENT ==========
-1391| initUser();
+1353|         // --- ICI, c'est un VRAI retour arrière ---
+1354|         console.log('⬅️ RETOUR ARRIÈRE détecté');
+1355| 
+1356|         // Récupérer le pseudo
+1357|         const storedUser = JSON.parse(localStorage.getItem('meetgay_user') || '{}');
+1358|         const pseudo = storedUser.pseudo || currentUserPseudo;
+1359| 
+1360|         if (!pseudo) {
+1361|             console.warn('⚠️ Aucun pseudo trouvé pour le retour arrière');
+1362|             window.location.href = '/login.html';
+1363|             return;
+1364|         }
+1365| 
+1366|         console.log(`🗑️ Suppression de ${pseudo} (retour arrière)`);
+1367|         const data = JSON.stringify({ pseudo: pseudo });
+1368| 
+1369|         // Supprimer de la base
+1370|         navigator.sendBeacon('/api/mark-for-deletion', data);
+1371|         setTimeout(() => navigator.sendBeacon('/api/delete-user', data), 50);
+1372|         setTimeout(() => navigator.sendBeacon('/api/messages/delete-user', data), 100);
+1373| 
+1374|         // Nettoyer le localStorage
+1375|         localStorage.removeItem('meetgay_user');
+1376|         localStorage.removeItem('meetgay_user_full');
+1377|         localStorage.removeItem('meetgay_token');
+1378|         localStorage.removeItem('meetgay_chat_history');
+1379|         sessionStorage.removeItem('last_contact');
+1380|         sessionStorage.removeItem('conversationHistory');
+1381|         sessionStorage.removeItem('meetgay_is_reloading');
+1382| 
+1383|         // Rediriger
+1384|         setTimeout(() => {
+1385|             window.location.href = '/login.html';
+1386|         }, 200);
+1387|     });
+1388| 
+1389|     // ============================================================
+1390|     // 3. GESTION DE LA FERMETURE BRUTALE (pagehide)
+1391|     // ============================================================
+1392|     window.addEventListener('pagehide', () => {
+1393|         // NE PAS supprimer si c'est un rechargement
+1394|         if (sessionStorage.getItem('meetgay_is_reloading') === 'true') {
+1395|             console.log('🔄 Pagehide ignoré (rechargement)');
+1396|             return;
+1397|         }
+1398| 
+1399|         if (user && user.pseudo) {
+1400|             console.log(`🚪 Fermeture de l'onglet pour ${user.pseudo}`);
+1401|             const data = JSON.stringify({ pseudo: user.pseudo });
+1402|             navigator.sendBeacon('/api/delete-user', data);
+1403|             navigator.sendBeacon('/api/messages/delete-user', data);
+1404|         }
+1405|     });
+1406|     // ============================================================
+1407|     // 3. GESTION DE LA FERMETURE BRUTALE (pagehide)
+1408|     // ============================================================
+1409|     window.addEventListener('pagehide', () => {
+1410|         if (sessionStorage.getItem('meetgay_is_reloading') === 'true') {
+1411|             console.log('🔄 Pagehide ignoré (rechargement)');
+1412|             sessionStorage.removeItem('meetgay_is_reloading');
+1413|             return;
+1414|         }
+1415| 
+1416|         if (user && user.pseudo) {
+1417|             console.log(`🚪 Fermeture détectée pour ${user.pseudo}`);
+1418|             const data = JSON.stringify({ pseudo: user.pseudo });
+1419| 
+1420|             // UNIQUEMENT l'API REST, pas de signal Socket.IO
+1421|             navigator.sendBeacon('/api/delete-user', data);
+1422|             navigator.sendBeacon('/api/messages/delete-user', data);
+1423|         }
+1424|     });
+1425| 
+1426| 
+1427| } // ← FIN DE startChat()
+1428| 
+1429| 
+1430| // ========== LANCEMENT ==========
+1431| document.addEventListener('DOMContentLoaded', () => {
+1432|     console.log('🔄 DOM chargé, initialisation du chat...');
+1433|     // Ajouter un état dans l'historique UNIQUEMENT après que la page est chargée
+1434|     history.pushState(null, null, location.href);
+1435|     initUser();
+1436| });
 
 # ============================================
 # FILE: modules\socket-handlers.js
