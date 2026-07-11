@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET
-# Généré le 2026-07-11 14:21:31
+# Généré le 2026-07-11 14:57:11
 # 5 fichier(s) inclus
 
 # ========== SOMMAIRE ==========
@@ -57,13 +57,13 @@
 41| // Route de géocodage
 42| const geocodeRoutes = require('./modules/routes/geocode');
 43| 
-44| 
-45| 
-46| // ==========  VARIABLES GLOBALES ==========
-47| const TEST_MODE = false;  // ← Désactive le fingerprint si true
-48| 
-49| // JWT_SECRET pour les utilisateurs normaux
-50| const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
+44| // JWT_SECRET pour les utilisateurs normaux
+45| const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
+46| 
+47| // ==========  VARIABLES GLOBALES ==========
+48| const TEST_MODE = false;  // ← Désactive le fingerprint si true
+49| 
+50| 
 51| 
 52| // PARAMÈTRES DE MODÉRATION
 53| const REPORTS_THRESHOLD = 2;        // Nombre de signalements (personnes différentes) avant auto-ban
@@ -791,7 +791,79 @@
 546|         }
 547|     });
 548| 
-549| };
+549|     // ========== ROUTES POUR LES PARAMÈTRES DE CONFIGURATION ==========
+550| 
+551|     // Récupérer tous les paramètres
+552|     app.get('/api/admin/settings', async (req, res) => {
+553|         if (!req.session.isAdmin) {
+554|             return res.status(401).json({ error: 'Non autorisé' });
+555|         }
+556| 
+557|         try {
+558|             const result = await pool.query('SELECT key, value FROM settings');
+559|             const settings = {};
+560|             result.rows.forEach(row => {
+561|                 settings[row.key] = row.value;
+562|             });
+563|             res.json({ success: true, settings });
+564|         } catch (err) {
+565|             console.error('Erreur récupération settings:', err);
+566|             res.status(500).json({ error: 'Erreur serveur' });
+567|         }
+568|     });
+569| 
+570|     // Mettre à jour un paramètre
+571|     app.post('/api/admin/settings/update', async (req, res) => {
+572|         if (!req.session.isAdmin) {
+573|             return res.status(401).json({ error: 'Non autorisé' });
+574|         }
+575| 
+576|         const { key, value } = req.body;
+577|         if (!key) {
+578|             return res.status(400).json({ error: 'Clé requise' });
+579|         }
+580| 
+581|         try {
+582|             // Vérifier si la clé existe
+583|             const check = await pool.query('SELECT 1 FROM settings WHERE key = $1', [key]);
+584|             if (check.rows.length === 0) {
+585|                 return res.status(404).json({ error: 'Clé non trouvée' });
+586|             }
+587| 
+588|             await pool.query('UPDATE settings SET value = $1 WHERE key = $2', [value, key]);
+589|             console.log(`📝 Paramètre mis à jour: ${key} = ${value}`);
+590| 
+591|             res.json({ success: true, message: 'Paramètre mis à jour' });
+592|         } catch (err) {
+593|             console.error('Erreur mise à jour setting:', err);
+594|             res.status(500).json({ error: 'Erreur serveur' });
+595|         }
+596|     });
+597| 
+598|     // Mettre à jour plusieurs paramètres à la fois (pour le formulaire)
+599|     app.post('/api/admin/settings/update-multiple', async (req, res) => {
+600|         if (!req.session.isAdmin) {
+601|             return res.status(401).json({ error: 'Non autorisé' });
+602|         }
+603| 
+604|         const { settings } = req.body;
+605|         if (!settings || typeof settings !== 'object') {
+606|             return res.status(400).json({ error: 'Paramètres invalides' });
+607|         }
+608| 
+609|         try {
+610|             for (const [key, value] of Object.entries(settings)) {
+611|                 await pool.query('UPDATE settings SET value = $1 WHERE key = $2', [String(value), key]);
+612|             }
+613|             console.log('📝 Paramètres mis à jour en masse');
+614|             res.json({ success: true, message: 'Paramètres mis à jour' });
+615|         } catch (err) {
+616|             console.error('Erreur mise à jour settings:', err);
+617|             res.status(500).json({ error: 'Erreur serveur' });
+618|         }
+619|     });
+620| 
+621| };
 
 # ============================================
 # FILE: public\js\admin.js
@@ -2172,8 +2244,168 @@
 1373|     }
 1374| });
 1375| 
-1376| 
-1377| 
+1376| // ============================================================
+1377| // 7. CONFIGURATION (paramètres serveur)
+1378| // ============================================================
+1379| 
+1380| // Charger les paramètres depuis le serveur
+1381| async function loadSettings() {
+1382|     const container = document.getElementById('configForm');
+1383|     if (!container) return;
+1384| 
+1385|     container.innerHTML = '<div class="loading">⏳ Chargement des paramètres...</div>';
+1386| 
+1387|     try {
+1388|         const response = await fetch('/api/admin/settings');
+1389|         if (!response.ok) {
+1390|             throw new Error('Erreur chargement');
+1391|         }
+1392|         const data = await response.json();
+1393| 
+1394|         if (data.success) {
+1395|             renderSettingsForm(data.settings);
+1396|         } else {
+1397|             container.innerHTML = '<div class="loading">❌ Erreur chargement des paramètres</div>';
+1398|         }
+1399|     } catch (err) {
+1400|         console.error('Erreur loadSettings:', err);
+1401|         container.innerHTML = '<div class="loading">❌ Erreur réseau</div>';
+1402|     }
+1403| }
+1404| 
+1405| // Afficher le formulaire de configuration
+1406| function renderSettingsForm(settings) {
+1407|     const container = document.getElementById('configForm');
+1408|     if (!container) return;
+1409| 
+1410|     const configFields = [
+1411|         // Groupe : Nettoyage des visiteurs
+1412|         { key: 'visitor_cleanup_enabled', label: 'Nettoyage visiteurs déconnectés', type: 'toggle', group: 'Nettoyage' },
+1413|         { key: 'inactivity_minutes', label: 'Minutes d\'inactivité avant déconnexion', type: 'number', group: 'Nettoyage', min: 1, max: 60 },
+1414|         { key: 'cleanup_interval_minutes', label: 'Fréquence du nettoyage (minutes)', type: 'number', group: 'Nettoyage', min: 1, max: 60 },
+1415| 
+1416|         // Groupe : Nettoyage auto
+1417|         { key: 'auto_cleanup_enabled', label: 'Nettoyage auto (logs/signalements)', type: 'toggle', group: 'Nettoyage auto' },
+1418|         { key: 'logs_retention_days', label: 'Conservation du journal (jours)', type: 'number', group: 'Nettoyage auto', min: 1, max: 365 },
+1419|         { key: 'reports_retention_days', label: 'Conservation des signalements (jours)', type: 'number', group: 'Nettoyage auto', min: 1, max: 365 },
+1420| 
+1421|         // Groupe : Modération
+1422|         { key: 'reports_threshold', label: 'Signalements avant auto-ban', type: 'number', group: 'Modération', min: 1, max: 10 },
+1423|         { key: 'reports_window_minutes', label: 'Fenêtre de signalement (minutes)', type: 'number', group: 'Modération', min: 5, max: 1440 },
+1424|         { key: 'temp_ban_minutes', label: 'Durée du bannissement (minutes)', type: 'number', group: 'Modération', min: 1, max: 1440 },
+1425| 
+1426|         // Groupe : Développement
+1427|         { key: 'dev_mode', label: 'Mode développement (cache désactivé)', type: 'toggle', group: 'Développement' },
+1428|         { key: 'test_mode', label: 'Mode test (fingerprint désactivé)', type: 'toggle', group: 'Développement' },
+1429|     ];
+1430| 
+1431|     let html = `<form id="settingsForm">`;
+1432| 
+1433|     // Grouper par catégorie
+1434|     const groups = {};
+1435|     configFields.forEach(field => {
+1436|         if (!groups[field.group]) groups[field.group] = [];
+1437|         groups[field.group].push(field);
+1438|     });
+1439| 
+1440|     for (const [groupName, fields] of Object.entries(groups)) {
+1441|         html += `<div style="margin-bottom: 25px; background: #2a2a3a; padding: 15px; border-radius: 8px;">`;
+1442|         html += `<h3 style="color: #fff; margin-bottom: 15px;">📂 ${groupName}</h3>`;
+1443| 
+1444|         fields.forEach(field => {
+1445|             const value = settings[field.key] !== undefined ? settings[field.key] : '';
+1446|             html += `<div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #333;">`;
+1447|             html += `<label style="color: #ccc; cursor: pointer;">${field.label}</label>`;
+1448| 
+1449|             if (field.type === 'toggle') {
+1450|                 const checked = value === 'true';
+1451|                 html += `<label class="switch" style="position: relative; display: inline-block; width: 60px; height: 34px; flex-shrink: 0;">
+1452|                     <input type="checkbox" data-key="${field.key}" ${checked ? 'checked' : ''} style="opacity: 0; width: 0; height: 0;">
+1453|                     <span style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px;"></span>
+1454|                     <span style="position: absolute; cursor: pointer; top: 4px; left: 4px; bottom: 4px; width: 26px; background-color: white; transition: .4s; border-radius: 50%;"></span>
+1455|                 </label>`;
+1456|             } else {
+1457|                 html += `<input type="number" data-key="${field.key}" value="${value}" min="${field.min || 0}" max="${field.max || 999}" style="width: 80px; padding: 5px; background: #1e1e2e; color: #fff; border: 1px solid #444; border-radius: 4px;">`;
+1458|             }
+1459| 
+1460|             html += `</div>`;
+1461|         });
+1462| 
+1463|         html += `</div>`;
+1464|     }
+1465| 
+1466|     html += `<button type="submit" style="background: #667eea; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 16px;">💾 Enregistrer tous les paramètres</button>`;
+1467|     html += `</form>`;
+1468| 
+1469|     container.innerHTML = html;
+1470| 
+1471|     // Gérer la soumission du formulaire
+1472|     document.getElementById('settingsForm').addEventListener('submit', async (e) => {
+1473|         e.preventDefault();
+1474| 
+1475|         const formData = {};
+1476|         const inputs = document.querySelectorAll('#settingsForm input');
+1477|         inputs.forEach(input => {
+1478|             const key = input.dataset.key;
+1479|             if (input.type === 'checkbox') {
+1480|                 formData[key] = input.checked ? 'true' : 'false';
+1481|             } else {
+1482|                 formData[key] = input.value;
+1483|             }
+1484|         });
+1485| 
+1486|         try {
+1487|             const response = await fetch('/api/admin/settings/update-multiple', {
+1488|                 method: 'POST',
+1489|                 headers: { 'Content-Type': 'application/json' },
+1490|                 body: JSON.stringify({ settings: formData })
+1491|             });
+1492|             const data = await response.json();
+1493| 
+1494|             if (data.success) {
+1495|                 if (typeof MGModal !== 'undefined') {
+1496|                     MGModal.show({
+1497|                         title: '✅ Succès',
+1498|                         message: 'Paramètres enregistrés avec succès !',
+1499|                         onConfirm: () => { }
+1500|                     });
+1501|                 } else {
+1502|                     alert('✅ Paramètres enregistrés !');
+1503|                 }
+1504|             } else {
+1505|                 alert('❌ Erreur: ' + (data.error || 'Inconnue'));
+1506|             }
+1507|         } catch (err) {
+1508|             console.error('Erreur sauvegarde settings:', err);
+1509|             alert('❌ Erreur réseau');
+1510|         }
+1511|     });
+1512| }
+1513| 
+1514| // Fonction pour afficher un onglet (si elle n'existe pas déjà)
+1515| function showTab(tabName) {
+1516|     // Cacher tous les onglets
+1517|     document.querySelectorAll('.tab-content').forEach(el => el.style.display = 'none');
+1518|     // Afficher l'onglet sélectionné
+1519|     const target = document.getElementById('tab-' + tabName);
+1520|     if (target) target.style.display = 'block';
+1521| 
+1522|     // Mettre à jour les boutons d'onglets
+1523|     document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+1524|     document.querySelector(`.tab-btn[data-tab="${tabName}"]`)?.classList.add('active');
+1525| 
+1526|     // Si on ouvre l'onglet config, charger les paramètres
+1527|     if (tabName === 'config') {
+1528|         loadSettings();
+1529|     }
+1530| }
+1531| 
+1532| // Ajouter la fonction loadSettings à l'objet window
+1533| window.loadSettings = loadSettings;
+1534| window.showTab = showTab;
+1535| 
+1536| 
+1537| 
 
 # ============================================
 # FILE: modules\routes\api-auth.js
@@ -2580,46 +2812,59 @@
 86|             <button class="tab-btn" data-tab="reports"><i class="fas fa-flag"></i> Signalements</button>
 87|             <button class="tab-btn" data-tab="logs"><i class="fas fa-history"></i> Journal</button>
 88|             <button class="tab-btn" data-tab="conversations"><i class="fas fa-comments"></i> Conversations</button>
-89|             <button class="quick-btn" id="cleanReportsBtn"><i class="fas fa-broom"></i> Nettoyer signalements</button>
-90|             <button class="quick-btn" id="clearLogsBtn"><i class="fas fa-trash-alt"></i> Vider journal</button>
-91|         </div>
-92| 
-93|         <div id="tab-users" class="tab-content active">
-94|             <div class="table-container">
-95|                 <div id="usersList">Chargement des utilisateurs...</div>
-96|             </div>
-97|         </div>
-98|         <div id="tab-reports" class="tab-content">
-99|             <div class="table-container">
-100|                 <div id="reportsList">Chargement...</div>
-101|             </div>
-102|         </div>
-103|         <div id="tab-logs" class="tab-content">
-104|             <div class="table-container">
-105|                 <div id="logsList">Chargement...</div>
-106|             </div>
-107|         </div>
-108|         <div id="tab-conversations" class="tab-content">
-109|             <div class="table-container">
-110|                 <div id="conversationsList">Chargement des conversations...</div>
-111|             </div>
-112|         </div>
-113| 
-114|         <!-- ACTIONS RAPIDES -->
-115|         <div class="quick-actions">
-116|             <h3><i class="fas fa-cogs"></i> Actions rapides</h3>
-117|             <div class="actions-grid">
-118|                 <button class="quick-btn" id="maintenanceBtn"><i class="fas fa-wrench"></i> Mode maintenance</button>
-119|                 <button class="quick-btn" id="backupDbBtn"><i class="fas fa-database"></i> Sauvegarder la BDD</button>
-120|                 <button class="quick-btn danger-btn" id="cleanupBtn"><i class="fas fa-broom"></i> Nettoyage
-121|                     manuel</button>
-122|             </div>
-123|         </div>
-124|     </div>
-125|     <script src="/socket.io/socket.io.js"></script>
-126|     <script src="/js/admin.js"></script>
-127|     <script src="/js/modal-handler-admin.js"></script>
-128| </body>
-129| 
-130| </html>
+89|             <button class="tab-btn" data-tab="config" onclick="showTab('config')">⚙️ Configuration</button>
+90|             <button class="quick-btn" id="cleanReportsBtn"><i class="fas fa-broom"></i> Nettoyer signalements</button>
+91|             <button class="quick-btn" id="clearLogsBtn"><i class="fas fa-trash-alt"></i> Vider journal</button>
+92|         </div>
+93| 
+94|         <div id="tab-users" class="tab-content active">
+95|             <div class="table-container">
+96|                 <div id="usersList">Chargement des utilisateurs...</div>
+97|             </div>
+98|         </div>
+99|         <div id="tab-reports" class="tab-content">
+100|             <div class="table-container">
+101|                 <div id="reportsList">Chargement...</div>
+102|             </div>
+103|         </div>
+104|         <div id="tab-logs" class="tab-content">
+105|             <div class="table-container">
+106|                 <div id="logsList">Chargement...</div>
+107|             </div>
+108|         </div>
+109|         <div id="tab-conversations" class="tab-content">
+110|             <div class="table-container">
+111|                 <div id="conversationsList">Chargement des conversations...</div>
+112|             </div>
+113|         </div>
+114| 
+115|         <!-- ========== ONGLET CONFIGURATION ========== -->
+116|         <div id="tab-config" class="tab-content" style="display:none;">
+117|             <h2>⚙️ Configuration du serveur</h2>
+118|             <p style="color: #aaa; margin-bottom: 20px;">Modifie les paramètres de nettoyage, modération et
+119|                 développement.</p>
+120| 
+121|             <div id="configForm">
+122|                 <!-- Le contenu sera chargé par JavaScript -->
+123|                 <div class="loading">⏳ Chargement des paramètres...</div>
+124|             </div>
+125|         </div>
+126| 
+127|         <!-- ACTIONS RAPIDES -->
+128|         <div class="quick-actions">
+129|             <h3><i class="fas fa-cogs"></i> Actions rapides</h3>
+130|             <div class="actions-grid">
+131|                 <button class="quick-btn" id="maintenanceBtn"><i class="fas fa-wrench"></i> Mode maintenance</button>
+132|                 <button class="quick-btn" id="backupDbBtn"><i class="fas fa-database"></i> Sauvegarder la BDD</button>
+133|                 <button class="quick-btn danger-btn" id="cleanupBtn"><i class="fas fa-broom"></i> Nettoyage
+134|                     manuel</button>
+135|             </div>
+136|         </div>
+137|     </div>
+138|     <script src="/socket.io/socket.io.js"></script>
+139|     <script src="/js/admin.js"></script>
+140|     <script src="/js/modal-handler-admin.js"></script>
+141| </body>
+142| 
+143| </html>
 
