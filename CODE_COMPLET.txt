@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET
-# Généré le 2026-07-14 00:29:30
+# Généré le 2026-07-14 00:49:17
 # 10 fichier(s) inclus
 
 "⚠️ MODE ANALYSE TOTALE - Lecture exhaustive du code ci-dessous. 
@@ -923,29 +923,39 @@ Ne fais pas de supposition, relis attentivement tout le contenu."
 629|                 return res.status(400).json({ success: false, error: 'Pseudo manquant' });
 630|             }
 631| 
-632|             // Vérifier que l'utilisateur existe
-633|             const checkUser = await pool.query('SELECT role FROM users WHERE pseudo = $1', [pseudo]);
-634|             if (checkUser.rows.length === 0) {
-635|                 return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
-636|             }
-637| 
-638|             // Empêcher la suppression d'un admin
-639|             if (checkUser.rows[0].role === 'admin') {
-640|                 return res.status(403).json({ success: false, error: 'Impossible de supprimer un administrateur' });
-641|             }
-642| 
-643|             // Supprimer l'utilisateur
-644|             await pool.query('DELETE FROM users WHERE pseudo = $1', [pseudo]);
-645| 
-646|             res.json({ success: true, message: `Utilisateur ${pseudo} supprimé` });
-647| 
-648|         } catch (err) {
-649|             console.error('Erreur delete-user:', err);
-650|             res.status(500).json({ success: false, error: 'Erreur serveur' });
-651|         }
-652|     });
+632|             const checkUser = await pool.query('SELECT role, socket_id FROM users WHERE pseudo = $1', [pseudo]);
+633|             if (checkUser.rows.length === 0) {
+634|                 return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
+635|             }
+636| 
+637|             if (checkUser.rows[0].role === 'admin') {
+638|                 return res.status(403).json({ success: false, error: 'Impossible de supprimer un administrateur' });
+639|             }
+640| 
+641|             // 🔥 Envoyer l'événement de déconnexion
+642|             const socketId = checkUser.rows[0].socket_id;
+643|             if (socketId) {
+644|                 const socket = io.sockets.sockets.get(socketId);
+645|                 if (socket) {
+646|                     socket.emit('force logout', {
+647|                         reason: '⛔ Votre compte a été supprimé par l\'administrateur.'
+648|                     });
+649|                     // ⚠️ On NE déconnecte PAS le socket immédiatement
+650|                     // Le client gérera la redirection après le message
+651|                 }
+652|             }
 653| 
-654| };
+654|             await pool.query('DELETE FROM users WHERE pseudo = $1', [pseudo]);
+655| 
+656|             res.json({ success: true, message: `Utilisateur ${pseudo} supprimé et déconnecté` });
+657| 
+658|         } catch (err) {
+659|             console.error('Erreur delete-user:', err);
+660|             res.status(500).json({ success: false, error: 'Erreur serveur' });
+661|         }
+662|     });
+663| 
+664| };
 
 # ============================================
 # FILE: modules\routes\api-auth.js
@@ -1839,7 +1849,7 @@ Ne fais pas de supposition, relis attentivement tout le contenu."
 573|                         'UPDATE users SET last_seen = NOW(), inactivity_warning_sent = false WHERE pseudo = $1',
 574|                         [pseudo]
 575|                     );
-576|                     console.log(`🔄 Compteur d'inactivité réinitialisé pour ${pseudo}`);
+576|                     //console.log(`🔄 Compteur d'inactivité réinitialisé pour ${pseudo}`);
 577|                 } catch (err) {
 578|                     console.error('❌ Erreur reset-inactivity:', err.message);
 579|                 }
@@ -5206,440 +5216,483 @@ Ne fais pas de supposition, relis attentivement tout le contenu."
 1125|         }
 1126|     });
 1127| 
-1128|     // --------------------------------------------------------------
-1129|     // ENVELOPPE (messages reçus)
-1130|     // --------------------------------------------------------------
-1131|     envelope.onclick = async () => {
-1132|         // 1️⃣ Si l'enveloppe clignote (nouveaux messages), arrêter le clignotement
-1133|         if (envelope.classList.contains('blink')) {
-1134|             envelope.classList.remove('blink');
-1135|         }
-1136| 
-1137|         // 2️⃣ Si des messages sont en attente dans pendingMessages, les afficher
-1138|         if (pendingMessages.length > 0) {
-1139|             const msg = pendingMessages.shift();
-1140|             displayMessage(msg.message, 'received', msg.fromPseudo);
-1141|             addToHistory(msg.fromPseudo, msg.message, 'received', msg.fromPseudo, user.pseudo);
-1142|             loadHistory(msg.fromPseudo);
-1143| 
-1144|             currentTarget = msg.fromPseudo;
-1145|             currentTargetName = msg.fromPseudo;
-1146|             messageInput.disabled = false;
-1147|             sendBtn.disabled = false;
-1148|             messageInput.placeholder = `Répondre à ${msg.fromPseudo}...`;
-1149|             messageInput.focus();
-1150| 
-1151|             document.querySelectorAll('.user-item').forEach(el => {
-1152|                 if (el.textContent.includes(msg.fromPseudo) && !el.textContent.includes('(moi)')) {
-1153|                     document.querySelectorAll('.user-item').forEach(e => e.classList.remove('current-target'));
-1154|                     el.classList.add('current-target');
-1155|                 }
-1156|             });
-1157| 
-1158|             const senderInfo = usersList.find(u => u.pseudo === msg.fromPseudo);
-1159|             if (senderInfo) {
-1160|                 let fullSender = senderInfo;
-1161|                 if (typeof window.showContactInfo === 'function') {
-1162|                     window.showContactInfo(
-1163|                         fullSender.pseudo,
-1164|                         fullSender.age,
-1165|                         fullSender.origine,
-1166|                         fullSender.gender,
-1167|                         fullSender.tendencies,
-1168|                         fullSender,
-1169|                         fullSender.locationCity || fullSender.locationCode,
-1170|                         fullSender.locationCommune || null,
-1171|                         fullSender.purpose,
-1172|                         fullSender.bio || 'Pas de présentation',
-1173|                         window.blockedUsers || []
-1174|                     );
-1175|                 } else {
-1176|                     console.error('❌ showContactInfo non disponible');
-1177|                 }
-1178|             } else {
-1179|                 if (typeof window.showContactInfo === 'function') {
-1180|                     window.showContactInfo(msg.fromPseudo, '?', '', '?', '?', {}, '?', null, '?', 'Bio non disponible', []);
-1181|                 }
-1182|             }
-1183| 
-1184|             updateEnvelope(pendingMessages.length);
-1185|             if (pendingMessages.length === 0) {
-1186|                 stopBlinking();
-1187|             }
-1188|         } else {
-1189|             // 3️⃣ Sinon, ouvrir le chat normalement
-1190|             if (typeof openChat === 'function') {
-1191|                 openChat();
-1192|             }
-1193|         }
-1194|     };
-1195| 
-1196|     // --------------------------------------------------------------
-1197|     // ENVOI DE MESSAGE
-1198|     // --------------------------------------------------------------
-1199|     sendBtn.onclick = () => {
-1200|         const text = messageInput.value.trim();
-1201|         if (!text || !currentTarget) return;
-1202| 
-1203|         if (currentTargetName && window.blockedUsers.includes(currentTargetName)) {
-1204|             if (typeof MGModal !== 'undefined') {
-1205|                 MGModal.show({
-1206|                     title: '🚫 Message bloqué',
-1207|                     message: `Vous avez bloqué ${currentTargetName}. Débloquez-le d'abord.`,
-1208|                     onConfirm: () => { }
-1209|                 });
-1210|             } else {
-1211|                 alert(`Vous avez bloqué ${currentTargetName}`);
-1212|             }
-1213|             return;
-1214|         }
-1215| 
-1216|         if (currentReceivedMessage !== null) {
-1217|             clearMessageArea();
-1218|         }
-1219| 
-1220|         socket.emit('private message', {
-1221|             toSocketId: currentTarget,
-1222|             message: text,
-1223|             fromPseudo: user.pseudo
-1224|         });
-1225|     };
+1128|     socket.on('account-deleted', function (data) {
+1129|         // Créer un overlay (pas un popup)
+1130|         const overlay = document.createElement('div');
+1131|         overlay.style.cssText = `
+1132|         position: fixed;
+1133|         top: 0;
+1134|         left: 0;
+1135|         width: 100%;
+1136|         height: 100%;
+1137|         background: rgba(0,0,0,0.7);
+1138|         display: flex;
+1139|         justify-content: center;
+1140|         align-items: center;
+1141|         z-index: 9999;
+1142|         font-family: Arial, sans-serif;
+1143|     `;
+1144| 
+1145|         const messageBox = document.createElement('div');
+1146|         messageBox.style.cssText = `
+1147|         background: #1a1a2e;
+1148|         color: #eee;
+1149|         padding: 40px;
+1150|         border-radius: 16px;
+1151|         box-shadow: 0 0 50px rgba(231, 76, 60, 0.5);
+1152|         text-align: center;
+1153|         max-width: 450px;
+1154|         border: 2px solid #e74c3c;
+1155|     `;
+1156|         messageBox.innerHTML = `
+1157|         <h2 style="color: #e74c3c; margin-top: 0;">⛔ Compte supprimé</h2>
+1158|         <p style="font-size: 16px; line-height: 1.5;">${data.reason || 'Votre compte a été supprimé par l\'administrateur.'}</p>
+1159|         <p style="font-size: 14px; color: #aaa; margin-top: 20px;">Redirection dans 3 secondes...</p>
+1160|     `;
+1161| 
+1162|         overlay.appendChild(messageBox);
+1163|         document.body.appendChild(overlay);
+1164| 
+1165|         // Rediriger après 3 secondes
+1166|         setTimeout(function () {
+1167|             window.location.href = '/login.html';
+1168|         }, 3000);
+1169|     });
+1170| 
+1171|     // --------------------------------------------------------------
+1172|     // ENVELOPPE (messages reçus)
+1173|     // --------------------------------------------------------------
+1174|     envelope.onclick = async () => {
+1175|         // 1️⃣ Si l'enveloppe clignote (nouveaux messages), arrêter le clignotement
+1176|         if (envelope.classList.contains('blink')) {
+1177|             envelope.classList.remove('blink');
+1178|         }
+1179| 
+1180|         // 2️⃣ Si des messages sont en attente dans pendingMessages, les afficher
+1181|         if (pendingMessages.length > 0) {
+1182|             const msg = pendingMessages.shift();
+1183|             displayMessage(msg.message, 'received', msg.fromPseudo);
+1184|             addToHistory(msg.fromPseudo, msg.message, 'received', msg.fromPseudo, user.pseudo);
+1185|             loadHistory(msg.fromPseudo);
+1186| 
+1187|             currentTarget = msg.fromPseudo;
+1188|             currentTargetName = msg.fromPseudo;
+1189|             messageInput.disabled = false;
+1190|             sendBtn.disabled = false;
+1191|             messageInput.placeholder = `Répondre à ${msg.fromPseudo}...`;
+1192|             messageInput.focus();
+1193| 
+1194|             document.querySelectorAll('.user-item').forEach(el => {
+1195|                 if (el.textContent.includes(msg.fromPseudo) && !el.textContent.includes('(moi)')) {
+1196|                     document.querySelectorAll('.user-item').forEach(e => e.classList.remove('current-target'));
+1197|                     el.classList.add('current-target');
+1198|                 }
+1199|             });
+1200| 
+1201|             const senderInfo = usersList.find(u => u.pseudo === msg.fromPseudo);
+1202|             if (senderInfo) {
+1203|                 let fullSender = senderInfo;
+1204|                 if (typeof window.showContactInfo === 'function') {
+1205|                     window.showContactInfo(
+1206|                         fullSender.pseudo,
+1207|                         fullSender.age,
+1208|                         fullSender.origine,
+1209|                         fullSender.gender,
+1210|                         fullSender.tendencies,
+1211|                         fullSender,
+1212|                         fullSender.locationCity || fullSender.locationCode,
+1213|                         fullSender.locationCommune || null,
+1214|                         fullSender.purpose,
+1215|                         fullSender.bio || 'Pas de présentation',
+1216|                         window.blockedUsers || []
+1217|                     );
+1218|                 } else {
+1219|                     console.error('❌ showContactInfo non disponible');
+1220|                 }
+1221|             } else {
+1222|                 if (typeof window.showContactInfo === 'function') {
+1223|                     window.showContactInfo(msg.fromPseudo, '?', '', '?', '?', {}, '?', null, '?', 'Bio non disponible', []);
+1224|                 }
+1225|             }
 1226| 
-1227|     messageInput.addEventListener('keypress', (e) => {
-1228|         if (e.key === 'Enter') sendBtn.click();
-1229|     });
-1230| 
-1231|     // --------------------------------------------------------------
-1232|     // CHAT PRIVÉ (POPUP)
-1233|     // --------------------------------------------------------------
-1234|     let privateChatAvailable = {};
-1235| 
-1236|     socket.on('privateChatAvailable', (data) => {
-1237|         console.log(`🔔 Seuil atteint avec ${data.with}`);
-1238|         privateChatAvailable[data.with] = true;
-1239|         showPrivatePopup(data.with);
-1240|     });
-1241| 
-1242|     function showPrivatePopup(pseudo) {
-1243|         if (document.getElementById('privatePopup')) return;
-1244| 
-1245|         const chatPanel = document.querySelector('.chat-panel');
-1246|         if (!chatPanel) return;
-1247| 
-1248|         if (getComputedStyle(chatPanel).position !== 'relative') {
-1249|             chatPanel.style.position = 'relative';
-1250|         }
-1251| 
-1252|         const inputArea = document.querySelector('.input-area');
-1253|         if (!inputArea) return;
-1254| 
-1255|         const inputRect = inputArea.getBoundingClientRect();
-1256|         const chatRect = chatPanel.getBoundingClientRect();
-1257|         const topPosition = inputRect.bottom - chatRect.top;
+1227|             updateEnvelope(pendingMessages.length);
+1228|             if (pendingMessages.length === 0) {
+1229|                 stopBlinking();
+1230|             }
+1231|         } else {
+1232|             // 3️⃣ Sinon, ouvrir le chat normalement
+1233|             if (typeof openChat === 'function') {
+1234|                 openChat();
+1235|             }
+1236|         }
+1237|     };
+1238| 
+1239|     // --------------------------------------------------------------
+1240|     // ENVOI DE MESSAGE
+1241|     // --------------------------------------------------------------
+1242|     sendBtn.onclick = () => {
+1243|         const text = messageInput.value.trim();
+1244|         if (!text || !currentTarget) return;
+1245| 
+1246|         if (currentTargetName && window.blockedUsers.includes(currentTargetName)) {
+1247|             if (typeof MGModal !== 'undefined') {
+1248|                 MGModal.show({
+1249|                     title: '🚫 Message bloqué',
+1250|                     message: `Vous avez bloqué ${currentTargetName}. Débloquez-le d'abord.`,
+1251|                     onConfirm: () => { }
+1252|                 });
+1253|             } else {
+1254|                 alert(`Vous avez bloqué ${currentTargetName}`);
+1255|             }
+1256|             return;
+1257|         }
 1258| 
-1259|         const popup = document.createElement('div');
-1260|         popup.id = 'privatePopup';
-1261|         popup.style.cssText = `
-1262|             position: absolute;
-1263|             top: ${topPosition + 5}px;
-1264|             left: 0;
-1265|             right: 0;
-1266|             background: #2c3e50;
-1267|             color: white;
-1268|             border-radius: 8px;
-1269|             padding: 10px 12px;
-1270|             z-index: 1000;
-1271|             font-family: 'Segoe UI', sans-serif;
-1272|             font-size: 12px;
-1273|             display: flex;
-1274|             justify-content: space-between;
-1275|             align-items: center;
-1276|             flex-wrap: wrap;
-1277|             gap: 8px;
-1278|             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-1279|             opacity: 0;
-1280|             transform: translateY(-10px);
-1281|             transition: opacity 0.2s ease, transform 0.2s ease;
-1282|         `;
-1283| 
-1284|         popup.innerHTML = `
-1285|             <span>💬 <strong>${pseudo}</strong> : 3 messages échangés. Passer en privé ?</span>
-1286|             <div style="display: flex; gap: 6px;">
-1287|                 <button id="popupAccept" style="background:#27ae60; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">✅ Oui</button>
-1288|                 <button id="popupDecline" style="background:#e74c3c; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">❌ Non</button>
-1289|             </div>
-1290|         `;
-1291| 
-1292|         chatPanel.appendChild(popup);
-1293| 
-1294|         setTimeout(() => {
-1295|             popup.style.opacity = '1';
-1296|             popup.style.transform = 'translateY(0)';
-1297|         }, 10);
-1298| 
-1299|         document.getElementById('popupAccept').onclick = () => {
-1300|             socket.emit('invitePrivate', { toPseudo: pseudo, fromPseudo: user.pseudo });
-1301|             popup.remove();
-1302|         };
-1303| 
-1304|         document.getElementById('popupDecline').onclick = () => {
-1305|             popup.remove();
-1306|         };
-1307|     }
-1308| 
-1309|     socket.on('privateInviteReceived', (data) => {
-1310|         if (document.getElementById('invitePopup')) return;
-1311| 
-1312|         const chatPanel = document.querySelector('.chat-panel');
-1313|         if (!chatPanel) return;
-1314| 
-1315|         if (getComputedStyle(chatPanel).position !== 'relative') {
-1316|             chatPanel.style.position = 'relative';
-1317|         }
-1318| 
-1319|         const inputArea = document.querySelector('.input-area');
-1320|         if (!inputArea) return;
-1321| 
-1322|         const inputRect = inputArea.getBoundingClientRect();
-1323|         const chatRect = chatPanel.getBoundingClientRect();
-1324|         const topPosition = inputRect.bottom - chatRect.top;
-1325| 
-1326|         const popup = document.createElement('div');
-1327|         popup.id = 'invitePopup';
-1328|         popup.style.cssText = `
-1329|             position: absolute;
-1330|             top: ${topPosition + 5}px;
-1331|             left: 0;
-1332|             right: 0;
-1333|             background: #2c3e50;
-1334|             color: white;
-1335|             border-radius: 8px;
-1336|             padding: 10px 12px;
-1337|             z-index: 1000;
-1338|             font-family: 'Segoe UI', sans-serif;
-1339|             font-size: 12px;
-1340|             display: flex;
-1341|             justify-content: space-between;
-1342|             align-items: center;
-1343|             flex-wrap: wrap;
-1344|             gap: 8px;
-1345|             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-1346|             opacity: 0;
-1347|             transform: translateY(-10px);
-1348|             transition: opacity 0.2s ease, transform 0.2s ease;
-1349|         `;
-1350| 
-1351|         popup.innerHTML = `
-1352|             <span>🔔 <strong>${data.from}</strong> vous invite en chat privé.</span>
-1353|             <div style="display: flex; gap: 6px;">
-1354|                 <button id="inviteAccept" style="background:#27ae60; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">✅ Accepter</button>
-1355|                 <button id="inviteDecline" style="background:#e74c3c; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">❌ Refuser</button>
-1356|             </div>
-1357|         `;
-1358| 
-1359|         chatPanel.appendChild(popup);
-1360| 
-1361|         setTimeout(() => {
-1362|             popup.style.opacity = '1';
-1363|             popup.style.transform = 'translateY(0)';
-1364|         }, 10);
-1365| 
-1366|         document.getElementById('inviteAccept').onclick = () => {
-1367|             socket.emit('acceptPrivateInvite', { fromPseudo: data.from, toPseudo: user.pseudo });
-1368|             popup.remove();
-1369|             alert(`💬 Chat privé ouvert avec ${data.from} !`);
-1370|         };
-1371| 
-1372|         document.getElementById('inviteDecline').onclick = () => {
-1373|             socket.emit('declinePrivateInvite', { fromPseudo: user.pseudo, toPseudo: data.from });
-1374|             popup.remove();
-1375|         };
-1376|     });
-1377| 
-1378|     /// ============================================================
-1379|     // 1. GESTION DU RECHARGEMENT F5
-1380|     // ============================================================
-1381|     window.addEventListener('beforeunload', () => {
-1382|         // Marquer le rechargement pour le client
-1383|         sessionStorage.setItem('meetgay_is_reloading', 'true');
-1384| 
-1385|         // 🔥 ENVOYER UN SIGNAL AU SERVEUR
-1386|         if (socket && socket.connected) {
-1387|             socket.emit('reload-detected');
-1388|             console.log('🔄 Signal de rechargement envoyé au serveur');
-1389|         }
-1390|     });
-1391| 
-1392|     window.addEventListener('load', () => {
-1393|         setTimeout(() => {
-1394|             sessionStorage.removeItem('meetgay_is_reloading');
-1395|         }, 500);
-1396|     });
-1397| 
-1398|     // ============================================================
-1399|     // GESTION DU RECHARGEMENT F5 - SOLUTION ROBUSTE
-1400|     // ============================================================
+1259|         if (currentReceivedMessage !== null) {
+1260|             clearMessageArea();
+1261|         }
+1262| 
+1263|         socket.emit('private message', {
+1264|             toSocketId: currentTarget,
+1265|             message: text,
+1266|             fromPseudo: user.pseudo
+1267|         });
+1268|     };
+1269| 
+1270|     messageInput.addEventListener('keypress', (e) => {
+1271|         if (e.key === 'Enter') sendBtn.click();
+1272|     });
+1273| 
+1274|     // --------------------------------------------------------------
+1275|     // CHAT PRIVÉ (POPUP)
+1276|     // --------------------------------------------------------------
+1277|     let privateChatAvailable = {};
+1278| 
+1279|     socket.on('privateChatAvailable', (data) => {
+1280|         console.log(`🔔 Seuil atteint avec ${data.with}`);
+1281|         privateChatAvailable[data.with] = true;
+1282|         showPrivatePopup(data.with);
+1283|     });
+1284| 
+1285|     function showPrivatePopup(pseudo) {
+1286|         if (document.getElementById('privatePopup')) return;
+1287| 
+1288|         const chatPanel = document.querySelector('.chat-panel');
+1289|         if (!chatPanel) return;
+1290| 
+1291|         if (getComputedStyle(chatPanel).position !== 'relative') {
+1292|             chatPanel.style.position = 'relative';
+1293|         }
+1294| 
+1295|         const inputArea = document.querySelector('.input-area');
+1296|         if (!inputArea) return;
+1297| 
+1298|         const inputRect = inputArea.getBoundingClientRect();
+1299|         const chatRect = chatPanel.getBoundingClientRect();
+1300|         const topPosition = inputRect.bottom - chatRect.top;
+1301| 
+1302|         const popup = document.createElement('div');
+1303|         popup.id = 'privatePopup';
+1304|         popup.style.cssText = `
+1305|             position: absolute;
+1306|             top: ${topPosition + 5}px;
+1307|             left: 0;
+1308|             right: 0;
+1309|             background: #2c3e50;
+1310|             color: white;
+1311|             border-radius: 8px;
+1312|             padding: 10px 12px;
+1313|             z-index: 1000;
+1314|             font-family: 'Segoe UI', sans-serif;
+1315|             font-size: 12px;
+1316|             display: flex;
+1317|             justify-content: space-between;
+1318|             align-items: center;
+1319|             flex-wrap: wrap;
+1320|             gap: 8px;
+1321|             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+1322|             opacity: 0;
+1323|             transform: translateY(-10px);
+1324|             transition: opacity 0.2s ease, transform 0.2s ease;
+1325|         `;
+1326| 
+1327|         popup.innerHTML = `
+1328|             <span>💬 <strong>${pseudo}</strong> : 3 messages échangés. Passer en privé ?</span>
+1329|             <div style="display: flex; gap: 6px;">
+1330|                 <button id="popupAccept" style="background:#27ae60; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">✅ Oui</button>
+1331|                 <button id="popupDecline" style="background:#e74c3c; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">❌ Non</button>
+1332|             </div>
+1333|         `;
+1334| 
+1335|         chatPanel.appendChild(popup);
+1336| 
+1337|         setTimeout(() => {
+1338|             popup.style.opacity = '1';
+1339|             popup.style.transform = 'translateY(0)';
+1340|         }, 10);
+1341| 
+1342|         document.getElementById('popupAccept').onclick = () => {
+1343|             socket.emit('invitePrivate', { toPseudo: pseudo, fromPseudo: user.pseudo });
+1344|             popup.remove();
+1345|         };
+1346| 
+1347|         document.getElementById('popupDecline').onclick = () => {
+1348|             popup.remove();
+1349|         };
+1350|     }
+1351| 
+1352|     socket.on('privateInviteReceived', (data) => {
+1353|         if (document.getElementById('invitePopup')) return;
+1354| 
+1355|         const chatPanel = document.querySelector('.chat-panel');
+1356|         if (!chatPanel) return;
+1357| 
+1358|         if (getComputedStyle(chatPanel).position !== 'relative') {
+1359|             chatPanel.style.position = 'relative';
+1360|         }
+1361| 
+1362|         const inputArea = document.querySelector('.input-area');
+1363|         if (!inputArea) return;
+1364| 
+1365|         const inputRect = inputArea.getBoundingClientRect();
+1366|         const chatRect = chatPanel.getBoundingClientRect();
+1367|         const topPosition = inputRect.bottom - chatRect.top;
+1368| 
+1369|         const popup = document.createElement('div');
+1370|         popup.id = 'invitePopup';
+1371|         popup.style.cssText = `
+1372|             position: absolute;
+1373|             top: ${topPosition + 5}px;
+1374|             left: 0;
+1375|             right: 0;
+1376|             background: #2c3e50;
+1377|             color: white;
+1378|             border-radius: 8px;
+1379|             padding: 10px 12px;
+1380|             z-index: 1000;
+1381|             font-family: 'Segoe UI', sans-serif;
+1382|             font-size: 12px;
+1383|             display: flex;
+1384|             justify-content: space-between;
+1385|             align-items: center;
+1386|             flex-wrap: wrap;
+1387|             gap: 8px;
+1388|             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+1389|             opacity: 0;
+1390|             transform: translateY(-10px);
+1391|             transition: opacity 0.2s ease, transform 0.2s ease;
+1392|         `;
+1393| 
+1394|         popup.innerHTML = `
+1395|             <span>🔔 <strong>${data.from}</strong> vous invite en chat privé.</span>
+1396|             <div style="display: flex; gap: 6px;">
+1397|                 <button id="inviteAccept" style="background:#27ae60; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">✅ Accepter</button>
+1398|                 <button id="inviteDecline" style="background:#e74c3c; color:white; border:none; border-radius:4px; padding:4px 10px; cursor:pointer;">❌ Refuser</button>
+1399|             </div>
+1400|         `;
 1401| 
-1402|     // État global pour suivre le rechargement
-1403|     let isPageReloading = false;
-1404| 
-1405|     // 1. AVANT LE RECHARGEMENT (beforeunload)
-1406|     window.addEventListener('beforeunload', () => {
-1407|         console.log('🔄 beforeunload - Marque le rechargement');
-1408|         sessionStorage.setItem('meetgay_is_reloading', 'true');
-1409|         isPageReloading = true;
-1410|     });
-1411| 
-1412|     // 2. APRÈS LE CHARGEMENT (load)
-1413|     window.addEventListener('load', () => {
-1414|         console.log('🔄 Page chargée - Vérification du flag de rechargement');
-1415|         // Vérifier si le flag existe
-1416|         const reloadFlag = sessionStorage.getItem('meetgay_is_reloading');
-1417|         if (reloadFlag) {
-1418|             console.log('✅ Flag de rechargement trouvé, on le nettoie');
-1419|             // Nettoyer le flag APRÈS que la page est complètement chargée
-1420|             setTimeout(() => {
-1421|                 sessionStorage.removeItem('meetgay_is_reloading');
-1422|                 isPageReloading = false;
-1423|                 console.log('✅ Flag de rechargement nettoyé');
-1424|             }, 1500); // Attendre 1.5s pour laisser le temps à initUser() de s'exécuter
-1425|         }
-1426|     });
+1402|         chatPanel.appendChild(popup);
+1403| 
+1404|         setTimeout(() => {
+1405|             popup.style.opacity = '1';
+1406|             popup.style.transform = 'translateY(0)';
+1407|         }, 10);
+1408| 
+1409|         document.getElementById('inviteAccept').onclick = () => {
+1410|             socket.emit('acceptPrivateInvite', { fromPseudo: data.from, toPseudo: user.pseudo });
+1411|             popup.remove();
+1412|             alert(`💬 Chat privé ouvert avec ${data.from} !`);
+1413|         };
+1414| 
+1415|         document.getElementById('inviteDecline').onclick = () => {
+1416|             socket.emit('declinePrivateInvite', { fromPseudo: user.pseudo, toPseudo: data.from });
+1417|             popup.remove();
+1418|         };
+1419|     });
+1420| 
+1421|     /// ============================================================
+1422|     // 1. GESTION DU RECHARGEMENT F5
+1423|     // ============================================================
+1424|     window.addEventListener('beforeunload', () => {
+1425|         // Marquer le rechargement pour le client
+1426|         sessionStorage.setItem('meetgay_is_reloading', 'true');
 1427| 
-1428|     // 3. GESTION DU RETOUR ARRIÈRE (popstate)
-1429|     window.addEventListener('popstate', function (event) {
-1430|         console.log('🔔 popstate déclenché - Vérification en cours...');
-1431| 
-1432|         // VÉRIFICATION 1 : Flag de rechargement
-1433|         const reloadFlag = sessionStorage.getItem('meetgay_is_reloading');
-1434|         const isReloading = reloadFlag !== null || isPageReloading;
-1435| 
-1436|         // VÉRIFICATION 2 : Performance API (moderne)
-1437|         let isReload = false;
-1438|         try {
-1439|             const navEntries = performance.getEntriesByType('navigation');
-1440|             if (navEntries && navEntries.length > 0) {
-1441|                 isReload = navEntries[0].type === 'reload';
-1442|                 console.log(`📊 Type de navigation: ${navEntries[0].type}`);
-1443|             }
-1444|         } catch (e) {
-1445|             // Fallback pour les vieux navigateurs
-1446|             if (window.performance && window.performance.navigation) {
-1447|                 isReload = window.performance.navigation.type === 1;
-1448|                 console.log(`📊 Navigation type (fallback): ${window.performance.navigation.type}`);
-1449|             }
-1450|         }
-1451| 
-1452|         // SI C'EST UN RECHARGEMENT, ON IGNORE TOUT
-1453|         if (isReloading || isReload) {
-1454|             console.log(`🔄 IGNORÉ: isReloading=${isReloading}, isReload=${isReload}`);
-1455|             return;
-1456|         }
-1457| 
-1458|         // --- ICI, C'EST UN VRAI RETOUR ARRIÈRE ---
-1459|         console.log('⬅️ RETOUR ARRIÈRE DÉTECTÉ');
-1460| 
-1461|         // Récupérer le pseudo
-1462|         const storedUser = JSON.parse(localStorage.getItem('meetgay_user') || '{}');
-1463|         const pseudo = storedUser.pseudo || currentUserPseudo;
-1464| 
-1465|         if (!pseudo) {
-1466|             console.warn('⚠️ Aucun pseudo trouvé pour le retour arrière');
-1467|             window.location.href = '/login.html';
-1468|             return;
-1469|         }
+1428|         // 🔥 ENVOYER UN SIGNAL AU SERVEUR
+1429|         if (socket && socket.connected) {
+1430|             socket.emit('reload-detected');
+1431|             console.log('🔄 Signal de rechargement envoyé au serveur');
+1432|         }
+1433|     });
+1434| 
+1435|     window.addEventListener('load', () => {
+1436|         setTimeout(() => {
+1437|             sessionStorage.removeItem('meetgay_is_reloading');
+1438|         }, 500);
+1439|     });
+1440| 
+1441|     // ============================================================
+1442|     // GESTION DU RECHARGEMENT F5 - SOLUTION ROBUSTE
+1443|     // ============================================================
+1444| 
+1445|     // État global pour suivre le rechargement
+1446|     let isPageReloading = false;
+1447| 
+1448|     // 1. AVANT LE RECHARGEMENT (beforeunload)
+1449|     window.addEventListener('beforeunload', () => {
+1450|         console.log('🔄 beforeunload - Marque le rechargement');
+1451|         sessionStorage.setItem('meetgay_is_reloading', 'true');
+1452|         isPageReloading = true;
+1453|     });
+1454| 
+1455|     // 2. APRÈS LE CHARGEMENT (load)
+1456|     window.addEventListener('load', () => {
+1457|         console.log('🔄 Page chargée - Vérification du flag de rechargement');
+1458|         // Vérifier si le flag existe
+1459|         const reloadFlag = sessionStorage.getItem('meetgay_is_reloading');
+1460|         if (reloadFlag) {
+1461|             console.log('✅ Flag de rechargement trouvé, on le nettoie');
+1462|             // Nettoyer le flag APRÈS que la page est complètement chargée
+1463|             setTimeout(() => {
+1464|                 sessionStorage.removeItem('meetgay_is_reloading');
+1465|                 isPageReloading = false;
+1466|                 console.log('✅ Flag de rechargement nettoyé');
+1467|             }, 1500); // Attendre 1.5s pour laisser le temps à initUser() de s'exécuter
+1468|         }
+1469|     });
 1470| 
-1471|         console.log(`🗑️ Suppression de ${pseudo} (retour arrière)`);
-1472|         const data = JSON.stringify({ pseudo: pseudo });
-1473| 
-1474|         // Supprimer de la base (avec sendBeacon)
-1475|         navigator.sendBeacon('/api/mark-for-deletion', data);
-1476|         setTimeout(() => navigator.sendBeacon('/api/delete-user', data), 50);
-1477|         setTimeout(() => navigator.sendBeacon('/api/messages/delete-user', data), 100);
+1471|     // 3. GESTION DU RETOUR ARRIÈRE (popstate)
+1472|     window.addEventListener('popstate', function (event) {
+1473|         console.log('🔔 popstate déclenché - Vérification en cours...');
+1474| 
+1475|         // VÉRIFICATION 1 : Flag de rechargement
+1476|         const reloadFlag = sessionStorage.getItem('meetgay_is_reloading');
+1477|         const isReloading = reloadFlag !== null || isPageReloading;
 1478| 
-1479|         // Nettoyer le localStorage et sessionStorage
-1480|         localStorage.removeItem('meetgay_user');
-1481|         localStorage.removeItem('meetgay_user_full');
-1482|         localStorage.removeItem('meetgay_token');
-1483|         localStorage.removeItem('meetgay_chat_history');
-1484|         sessionStorage.removeItem('last_contact');
-1485|         sessionStorage.removeItem('conversationHistory');
-1486|         sessionStorage.removeItem('meetgay_is_reloading');
-1487| 
-1488|         // Rediriger vers login
-1489|         setTimeout(() => {
-1490|             window.location.href = '/login.html';
-1491|         }, 200);
-1492|     });
-1493| 
-1494|     // 4. GESTION DE LA FERMETURE BRUTALE (pagehide)
-1495|     window.addEventListener('pagehide', () => {
-1496|         console.log('🔔 pagehide déclenché');
-1497| 
-1498|         // Vérifier si c'est un rechargement
-1499|         const reloadFlag = sessionStorage.getItem('meetgay_is_reloading');
-1500|         if (reloadFlag !== null || isPageReloading) {
-1501|             console.log('🔄 Pagehide ignoré (rechargement)');
-1502|             return;
-1503|         }
-1504| 
-1505|         // C'est une vraie fermeture
-1506|         if (user && user.pseudo) {
-1507|             console.log(`🚪 Fermeture de l'onglet pour ${user.pseudo}`);
-1508|             const data = JSON.stringify({ pseudo: user.pseudo });
-1509|             navigator.sendBeacon('/api/delete-user', data);
-1510|             navigator.sendBeacon('/api/messages/delete-user', data);
-1511|         }
-1512|     });
+1479|         // VÉRIFICATION 2 : Performance API (moderne)
+1480|         let isReload = false;
+1481|         try {
+1482|             const navEntries = performance.getEntriesByType('navigation');
+1483|             if (navEntries && navEntries.length > 0) {
+1484|                 isReload = navEntries[0].type === 'reload';
+1485|                 console.log(`📊 Type de navigation: ${navEntries[0].type}`);
+1486|             }
+1487|         } catch (e) {
+1488|             // Fallback pour les vieux navigateurs
+1489|             if (window.performance && window.performance.navigation) {
+1490|                 isReload = window.performance.navigation.type === 1;
+1491|                 console.log(`📊 Navigation type (fallback): ${window.performance.navigation.type}`);
+1492|             }
+1493|         }
+1494| 
+1495|         // SI C'EST UN RECHARGEMENT, ON IGNORE TOUT
+1496|         if (isReloading || isReload) {
+1497|             console.log(`🔄 IGNORÉ: isReloading=${isReloading}, isReload=${isReload}`);
+1498|             return;
+1499|         }
+1500| 
+1501|         // --- ICI, C'EST UN VRAI RETOUR ARRIÈRE ---
+1502|         console.log('⬅️ RETOUR ARRIÈRE DÉTECTÉ');
+1503| 
+1504|         // Récupérer le pseudo
+1505|         const storedUser = JSON.parse(localStorage.getItem('meetgay_user') || '{}');
+1506|         const pseudo = storedUser.pseudo || currentUserPseudo;
+1507| 
+1508|         if (!pseudo) {
+1509|             console.warn('⚠️ Aucun pseudo trouvé pour le retour arrière');
+1510|             window.location.href = '/login.html';
+1511|             return;
+1512|         }
 1513| 
-1514|     // ============================================================
-1515|     // 3. GESTION DE LA FERMETURE BRUTALE (pagehide)
-1516|     // ============================================================
-1517|     window.addEventListener('pagehide', () => {
-1518|         // NE PAS supprimer si c'est un rechargement
-1519|         if (sessionStorage.getItem('meetgay_is_reloading') === 'true') {
-1520|             console.log('🔄 Pagehide ignoré (rechargement)');
-1521|             return;
-1522|         }
-1523| 
-1524|         if (user && user.pseudo) {
-1525|             console.log(`🚪 Fermeture de l'onglet pour ${user.pseudo}`);
-1526|             const data = JSON.stringify({ pseudo: user.pseudo });
-1527|             navigator.sendBeacon('/api/delete-user', data);
-1528|             navigator.sendBeacon('/api/messages/delete-user', data);
-1529|         }
-1530|     });
-1531|     // ============================================================
-1532|     // 3. GESTION DE LA FERMETURE BRUTALE (pagehide)
-1533|     // ============================================================
-1534|     window.addEventListener('pagehide', () => {
-1535|         if (sessionStorage.getItem('meetgay_is_reloading') === 'true') {
-1536|             console.log('🔄 Pagehide ignoré (rechargement)');
-1537|             sessionStorage.removeItem('meetgay_is_reloading');
-1538|             return;
-1539|         }
+1514|         console.log(`🗑️ Suppression de ${pseudo} (retour arrière)`);
+1515|         const data = JSON.stringify({ pseudo: pseudo });
+1516| 
+1517|         // Supprimer de la base (avec sendBeacon)
+1518|         navigator.sendBeacon('/api/mark-for-deletion', data);
+1519|         setTimeout(() => navigator.sendBeacon('/api/delete-user', data), 50);
+1520|         setTimeout(() => navigator.sendBeacon('/api/messages/delete-user', data), 100);
+1521| 
+1522|         // Nettoyer le localStorage et sessionStorage
+1523|         localStorage.removeItem('meetgay_user');
+1524|         localStorage.removeItem('meetgay_user_full');
+1525|         localStorage.removeItem('meetgay_token');
+1526|         localStorage.removeItem('meetgay_chat_history');
+1527|         sessionStorage.removeItem('last_contact');
+1528|         sessionStorage.removeItem('conversationHistory');
+1529|         sessionStorage.removeItem('meetgay_is_reloading');
+1530| 
+1531|         // Rediriger vers login
+1532|         setTimeout(() => {
+1533|             window.location.href = '/login.html';
+1534|         }, 200);
+1535|     });
+1536| 
+1537|     // 4. GESTION DE LA FERMETURE BRUTALE (pagehide)
+1538|     window.addEventListener('pagehide', () => {
+1539|         console.log('🔔 pagehide déclenché');
 1540| 
-1541|         if (user && user.pseudo) {
-1542|             console.log(`🚪 Fermeture détectée pour ${user.pseudo}`);
-1543|             const data = JSON.stringify({ pseudo: user.pseudo });
-1544| 
-1545|             // UNIQUEMENT l'API REST, pas de signal Socket.IO
-1546|             navigator.sendBeacon('/api/delete-user', data);
-1547|             navigator.sendBeacon('/api/messages/delete-user', data);
-1548|         }
-1549|     });
-1550| 
-1551| 
-1552| } // ← FIN DE startChat()
-1553| 
-1554| 
-1555| // ========== LANCEMENT ==========
-1556| document.addEventListener('DOMContentLoaded', () => {
-1557|     console.log('🔄 DOM chargé, initialisation du chat...');
-1558|     // Ajouter un état dans l'historique UNIQUEMENT après que la page est chargée
-1559|     history.pushState(null, null, location.href);
-1560|     initUser();
-1561| });
+1541|         // Vérifier si c'est un rechargement
+1542|         const reloadFlag = sessionStorage.getItem('meetgay_is_reloading');
+1543|         if (reloadFlag !== null || isPageReloading) {
+1544|             console.log('🔄 Pagehide ignoré (rechargement)');
+1545|             return;
+1546|         }
+1547| 
+1548|         // C'est une vraie fermeture
+1549|         if (user && user.pseudo) {
+1550|             console.log(`🚪 Fermeture de l'onglet pour ${user.pseudo}`);
+1551|             const data = JSON.stringify({ pseudo: user.pseudo });
+1552|             navigator.sendBeacon('/api/delete-user', data);
+1553|             navigator.sendBeacon('/api/messages/delete-user', data);
+1554|         }
+1555|     });
+1556| 
+1557|     // ============================================================
+1558|     // 3. GESTION DE LA FERMETURE BRUTALE (pagehide)
+1559|     // ============================================================
+1560|     window.addEventListener('pagehide', () => {
+1561|         // NE PAS supprimer si c'est un rechargement
+1562|         if (sessionStorage.getItem('meetgay_is_reloading') === 'true') {
+1563|             console.log('🔄 Pagehide ignoré (rechargement)');
+1564|             return;
+1565|         }
+1566| 
+1567|         if (user && user.pseudo) {
+1568|             console.log(`🚪 Fermeture de l'onglet pour ${user.pseudo}`);
+1569|             const data = JSON.stringify({ pseudo: user.pseudo });
+1570|             navigator.sendBeacon('/api/delete-user', data);
+1571|             navigator.sendBeacon('/api/messages/delete-user', data);
+1572|         }
+1573|     });
+1574|     // ============================================================
+1575|     // 3. GESTION DE LA FERMETURE BRUTALE (pagehide)
+1576|     // ============================================================
+1577|     window.addEventListener('pagehide', () => {
+1578|         if (sessionStorage.getItem('meetgay_is_reloading') === 'true') {
+1579|             console.log('🔄 Pagehide ignoré (rechargement)');
+1580|             sessionStorage.removeItem('meetgay_is_reloading');
+1581|             return;
+1582|         }
+1583| 
+1584|         if (user && user.pseudo) {
+1585|             console.log(`🚪 Fermeture détectée pour ${user.pseudo}`);
+1586|             const data = JSON.stringify({ pseudo: user.pseudo });
+1587| 
+1588|             // UNIQUEMENT l'API REST, pas de signal Socket.IO
+1589|             navigator.sendBeacon('/api/delete-user', data);
+1590|             navigator.sendBeacon('/api/messages/delete-user', data);
+1591|         }
+1592|     });
+1593| 
+1594| 
+1595| } // ← FIN DE startChat()
+1596| 
+1597| 
+1598| // ========== LANCEMENT ==========
+1599| document.addEventListener('DOMContentLoaded', () => {
+1600|     console.log('🔄 DOM chargé, initialisation du chat...');
+1601|     // Ajouter un état dans l'historique UNIQUEMENT après que la page est chargée
+1602|     history.pushState(null, null, location.href);
+1603|     initUser();
+1604| });
 
 # ============================================
 # FILE: public\js\chat-script.js
@@ -6227,6 +6280,6 @@ Ne fais pas de supposition, relis attentivement tout le contenu."
 
 # ============================================
 # FIN DU FICHIER - 10 fichiers inclus
-# Généré le 2026-07-14 00:29:30
+# Généré le 2026-07-14 00:49:17
 # Tous les fichiers sont complets
 # ============================================
