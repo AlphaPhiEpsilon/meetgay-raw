@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET
-# Généré le 2026-07-13 13:47:09
+# Généré le 2026-07-13 14:00:41
 # 5 fichier(s) inclus
 
 "⚠️ MODE ANALYSE TOTALE - Lecture exhaustive du code ci-dessous. 
@@ -2988,664 +2988,657 @@ Ne fais pas de supposition, relis attentivement tout le contenu."
 1| ﻿// modules/routes/admin.js
 2| const bcrypt = require('bcrypt');
 3| const { disconnectBannedUser } = require('../../moderation');
-4| 
+4| const pool = require('../db');
 5| 
-6| module.exports = function (app, pool, io, users) {
-7| 
-8|     // ========== FONCTION POUR INCREMENTER LES COMPTEURS IP ==========
-9|     async function incrementIpCounter(ip, actionType) {
-10|         if (!ip) return;
-11| 
-12|         try {
-13|             // Réinitialiser les compteurs pour les IP qui n'ont pas été vues depuis 24h
-14|             await pool.query(
-15|                 `UPDATE users 
-16|              SET kick_count = 0, ban_count = 0
-17|              WHERE last_ip = $1 
-18|              AND last_ip IS NOT NULL
-19|              AND (
-20|                  (kick_count > 0 AND last_seen < NOW() - INTERVAL '24 hours') OR
-21|                  (ban_count > 0 AND last_seen < NOW() - INTERVAL '24 hours')
-22|              )`,
-23|                 [ip]
-24|             );
-25| 
-26|             // Incrémenter le compteur
-27|             await pool.query(
-28|                 `UPDATE users 
-29|              SET ${actionType === 'kick' ? 'kick_count' : 'ban_count'} = 
-30|                  ${actionType === 'kick' ? 'kick_count' : 'ban_count'} + 1,
-31|                  last_seen = NOW()
-32|              WHERE last_ip = $1`,
-33|                 [ip]
-34|             );
-35|             console.log(`✅ Compteur ${actionType} incrémenté pour IP: ${ip}`);
-36|         } catch (err) {
-37|             console.error(`❌ Erreur incrémentation compteur ${actionType}:`, err);
-38|         }
-39|     }
-40| 
-41|     // ========== ROUTES ADMIN ==========
-42|     app.post('/api/admin/login', async (req, res) => {
-43|         const { username, password } = req.body;
-44| 
-45|         try {
-46|             const result = await pool.query(
-47|                 `SELECT id, username, password_hash, is_active FROM admins WHERE username = $1`,
-48|                 [username]
-49|             );
-50| 
-51|             if (result.rows.length === 0) {
-52|                 return res.status(401).json({ success: false, error: 'Identifiants incorrects' });
-53|             }
-54| 
-55|             const admin = result.rows[0];
-56| 
-57|             if (!admin.is_active) {
-58|                 return res.status(401).json({ success: false, error: 'Compte désactivé' });
-59|             }
-60| 
-61|             const isValid = await bcrypt.compare(password, admin.password_hash);
-62| 
-63|             if (!isValid) {
-64|                 return res.status(401).json({ success: false, error: 'Identifiants incorrects' });
-65|             }
-66| 
-67|             // CRÉER LA SESSION
-68|             req.session.adminId = admin.id;
-69|             req.session.isAdmin = true;
-70|             req.session.adminUsername = admin.username;
-71| 
-72|             // FORCER L'INSERTION DANS admin_sessions
-73|             try {
-74|                 const sessionId = req.session.id;
-75|                 console.log('📝 Tentative insertion - Session ID:', sessionId);
-76|                 console.log('📝 Tentative insertion - Admin ID:', admin.id);
-77| 
-78|                 const insertResult = await pool.query(
-79|                     `INSERT INTO admin_sessions (session_id, admin_id, is_logged_in, login_time, last_activity) 
-80|                  VALUES ($1, $2, true, NOW(), NOW())
-81|                  ON CONFLICT (session_id) DO UPDATE 
-82|                  SET is_logged_in = true, last_activity = NOW()
-83|                  RETURNING *`,
-84|                     [sessionId, admin.id]
-85|                 );
-86| 
-87|                 console.log('✅ SUCCÈS - Ligne insérée:', insertResult.rows[0]);
-88|             } catch (dbErr) {
-89|                 console.error('❌ ÉCHEC INSERTION:', dbErr.message);
-90|                 console.error('Détails:', dbErr);
-91|             }
-92| 
-93|             res.json({ success: true, admin: { id: admin.id, username: admin.username } });
-94| 
-95|         } catch (err) {
-96|             console.error('Erreur login admin:', err);
-97|             res.status(500).json({ success: false, error: 'Erreur serveur' });
-98|         }
-99|     });
-100| 
-101|     app.post('/api/admin/logout', async (req, res) => {
-102|         // Mettre à jour la table admin_sessions
-103|         if (req.session && req.session.id) {
-104|             try {
-105|                 await pool.query(
-106|                     `UPDATE admin_sessions SET is_logged_in = false, logout_time = NOW() 
-107|                  WHERE session_id = $1`,
-108|                     [req.session.id]
-109|                 );
-110|             } catch (err) {
-111|                 console.error('Erreur mise à jour session:', err.message);
-112|             }
-113|         }
-114| 
-115|         req.session.destroy((err) => {
-116|             if (err) {
-117|                 return res.status(500).json({ error: 'Erreur déconnexion' });
-118|             }
-119|             res.json({ success: true });
-120|         });
-121|     });
-122| 
-123|     app.get('/api/admin/users', async (req, res) => {
-124|         // Vérifier si un admin est connecté via la session
-125|         if (!req.session.isAdmin || !req.session.adminId) {
-126|             return res.status(403).json({ error: 'Accès non autorisé - Veuillez vous connecter' });
-127|         }
-128| 
-129|         // Si admin connecté, on exécute la requête
-130|         try {
-131|             const result = await pool.query('SELECT pseudo, age, role, warnings, is_banned, ban_reason, last_ip, kick_count, ban_count FROM users ORDER BY id');
-132|             res.json(result.rows);
-133|         } catch (err) {
-134|             console.error("Erreur admin/users:", err.message);
-135|             res.status(500).json({ error: 'Erreur serveur', details: err.message });
-136|         }
-137|     });
-138| 
-139|     app.post('/api/admin/warn', async (req, res) => {
-140|         const { pseudo } = req.body;
-141| 
-142|         try {
-143|             // 1. Incrémenter le compteur
-144|             const result = await pool.query(
-145|                 'UPDATE users SET warnings = COALESCE(warnings, 0) + 1 WHERE pseudo = $1 RETURNING warnings',
-146|                 [pseudo]
-147|             );
-148| 
-149|             const newWarnCount = result.rows[0]?.warnings || 0;
-150| 
-151|             // Enregistrer l'action dans le journal
-152|             await pool.query(
-153|                 `INSERT INTO moderation_actions (admin_pseudo, action_type, target_pseudo, reason)
-154|                 VALUES ($1, 'warn', $2, $3)`,
-155|                 [req.session.adminUsername, pseudo, `Warn automatique (total: ${newWarnCount})`]
-156|             );
-157| 
-158|             // 2. Trouver l'utilisateur dans l'objet global "users"
-159|             let targetSocketId = null;
-160|             for (const [socketId, user] of Object.entries(users)) {
-161|                 if (user.pseudo === pseudo) {
-162|                     targetSocketId = socketId;
-163|                     break;
-164|                 }
-165|             }
-166| 
-167|             // 3. Si connecté, lui envoyer un événement
-168|             if (targetSocketId && io) {
-169|                 io.to(targetSocketId).emit('userWarned', {
-170|                     warnings: newWarnCount,
-171|                     message: `⚠️ Vous avez reçu un avertissement. Total : ${newWarnCount}`
-172|                 });
-173|             }
-174| 
-175|             res.json({ success: true, warnings: newWarnCount });
-176| 
-177|         } catch (err) {
-178|             console.error('Erreur warn:', err);
-179|             res.status(500).json({ error: 'Erreur serveur' });
-180|         }
-181|     });
-182| 
-183|     // ========== KICK USER ==========
-184|     app.post('/api/admin/kick', async (req, res) => {
-185|         if (!req.session.isAdmin) {
-186|             return res.status(401).json({ error: 'Non autorisé' });
-187|         }
-188| 
-189|         const { pseudo } = req.body;
-190|         if (!pseudo) {
-191|             return res.status(400).json({ error: 'Pseudo requis' });
-192|         }
-193| 
-194|         try {
-195|             // 1. Vérifier que l'utilisateur existe et récupérer son IP
-196|             const userCheck = await pool.query(
-197|                 'SELECT pseudo, last_ip FROM users WHERE pseudo = $1',
-198|                 [pseudo]
-199|             );
-200| 
-201|             if (userCheck.rows.length === 0) {
-202|                 return res.status(404).json({ error: 'Utilisateur non trouvé' });
-203|             }
-204| 
-205|             const userIp = userCheck.rows[0].last_ip;
-206| 
-207|             // 2. 🔥 ENREGISTRER L'IP DANS L'HISTORIQUE (AVANT TOUTE ACTION)
-208|             if (userIp) {
-209|                 try {
-210|                     await pool.query(
-211|                         `INSERT INTO ip_history (ip_address, action_type, target_pseudo, admin_pseudo)
-212|                          VALUES ($1, 'kick', $2, $3)`,
-213|                         [userIp, pseudo, req.session.adminUsername]
-214|                     );
-215|                     console.log(`✅ IP ${userIp} enregistrée pour kick de ${pseudo}`);
-216|                 } catch (err) {
-217|                     console.error('❌ Erreur enregistrement IP history (kick):', err);
-218|                 }
-219|             } else {
-220|                 console.warn(`⚠️ Pas d'IP pour ${pseudo}, impossible d'enregistrer l'historique`);
-221|             }
-222| 
-223|             // 3. Trouver le socket de l'utilisateur
-224|             let targetSocketId = null;
-225|             for (const [socketId, user] of Object.entries(users)) {
-226|                 if (user.pseudo === pseudo) {
-227|                     targetSocketId = socketId;
-228|                     break;
-229|                 }
-230|             }
-231| 
-232|             // 4. Si connecté, lui envoyer un événement de kick
-233|             if (targetSocketId && io) {
-234|                 io.to(targetSocketId).emit('kicked', {
-235|                     message: '🦵 Vous avez été expulsé par un administrateur.'
-236|                 });
-237| 
-238|                 setTimeout(() => {
-239|                     const socket = io.sockets.sockets.get(targetSocketId);
-240|                     if (socket) {
-241|                         socket.disconnect(true);
-242|                     }
-243|                 }, 500);
-244|             }
-245| 
-246|             // 5. Supprimer l'utilisateur de la base de données
-247|             await pool.query('DELETE FROM users WHERE pseudo = $1', [pseudo]);
-248| 
-249|             // 6. Logger l'action dans le journal de modération
-250|             await pool.query(
-251|                 `INSERT INTO moderation_actions (admin_pseudo, action_type, target_pseudo, reason)
-252|                  VALUES ($1, 'kick', $2, 'Expulsé par administrateur')`,
-253|                 [req.session.adminUsername, pseudo]
-254|             );
-255| 
-256|             // 7. Notifier le panel admin
-257|             io.emit('new_moderation_action', {
-258|                 type: 'kick',
-259|                 target: pseudo,
-260|                 admin: req.session.adminUsername,
-261|                 timestamp: new Date()
-262|             });
-263| 
-264|             res.json({
-265|                 success: true,
-266|                 message: `${pseudo} a été expulsé et supprimé de la base`
-267|             });
-268| 
-269|         } catch (err) {
-270|             console.error('Erreur kick:', err);
-271|             res.status(500).json({ error: 'Erreur serveur lors de l\'expulsion' });
-272|         }
-273|     });
-274| 
+6| 
+7| module.exports = function (app, pool, io, users) {
+8| 
+9|     // ========== FONCTION POUR INCREMENTER LES COMPTEURS IP ==========
+10|     async function incrementIpCounter(ip, actionType) {
+11|         if (!ip) return;
+12| 
+13|         try {
+14|             // Réinitialiser les compteurs pour les IP qui n'ont pas été vues depuis 24h
+15|             await pool.query(
+16|                 `UPDATE users 
+17|              SET kick_count = 0, ban_count = 0
+18|              WHERE last_ip = $1 
+19|              AND last_ip IS NOT NULL
+20|              AND (
+21|                  (kick_count > 0 AND last_seen < NOW() - INTERVAL '24 hours') OR
+22|                  (ban_count > 0 AND last_seen < NOW() - INTERVAL '24 hours')
+23|              )`,
+24|                 [ip]
+25|             );
+26| 
+27|             // Incrémenter le compteur
+28|             await pool.query(
+29|                 `UPDATE users 
+30|              SET ${actionType === 'kick' ? 'kick_count' : 'ban_count'} = 
+31|                  ${actionType === 'kick' ? 'kick_count' : 'ban_count'} + 1,
+32|                  last_seen = NOW()
+33|              WHERE last_ip = $1`,
+34|                 [ip]
+35|             );
+36|             console.log(`✅ Compteur ${actionType} incrémenté pour IP: ${ip}`);
+37|         } catch (err) {
+38|             console.error(`❌ Erreur incrémentation compteur ${actionType}:`, err);
+39|         }
+40|     }
+41| 
+42|     // ========== ROUTES ADMIN ==========
+43|     app.post('/api/admin/login', async (req, res) => {
+44|         const { username, password } = req.body;
+45| 
+46|         try {
+47|             const result = await pool.query(
+48|                 `SELECT id, username, password_hash, is_active FROM admins WHERE username = $1`,
+49|                 [username]
+50|             );
+51| 
+52|             if (result.rows.length === 0) {
+53|                 return res.status(401).json({ success: false, error: 'Identifiants incorrects' });
+54|             }
+55| 
+56|             const admin = result.rows[0];
+57| 
+58|             if (!admin.is_active) {
+59|                 return res.status(401).json({ success: false, error: 'Compte désactivé' });
+60|             }
+61| 
+62|             const isValid = await bcrypt.compare(password, admin.password_hash);
+63| 
+64|             if (!isValid) {
+65|                 return res.status(401).json({ success: false, error: 'Identifiants incorrects' });
+66|             }
+67| 
+68|             // CRÉER LA SESSION
+69|             req.session.adminId = admin.id;
+70|             req.session.isAdmin = true;
+71|             req.session.adminUsername = admin.username;
+72| 
+73|             // FORCER L'INSERTION DANS admin_sessions
+74|             try {
+75|                 const sessionId = req.session.id;
+76|                 console.log('📝 Tentative insertion - Session ID:', sessionId);
+77|                 console.log('📝 Tentative insertion - Admin ID:', admin.id);
+78| 
+79|                 const insertResult = await pool.query(
+80|                     `INSERT INTO admin_sessions (session_id, admin_id, is_logged_in, login_time, last_activity) 
+81|                  VALUES ($1, $2, true, NOW(), NOW())
+82|                  ON CONFLICT (session_id) DO UPDATE 
+83|                  SET is_logged_in = true, last_activity = NOW()
+84|                  RETURNING *`,
+85|                     [sessionId, admin.id]
+86|                 );
+87| 
+88|                 console.log('✅ SUCCÈS - Ligne insérée:', insertResult.rows[0]);
+89|             } catch (dbErr) {
+90|                 console.error('❌ ÉCHEC INSERTION:', dbErr.message);
+91|                 console.error('Détails:', dbErr);
+92|             }
+93| 
+94|             res.json({ success: true, admin: { id: admin.id, username: admin.username } });
+95| 
+96|         } catch (err) {
+97|             console.error('Erreur login admin:', err);
+98|             res.status(500).json({ success: false, error: 'Erreur serveur' });
+99|         }
+100|     });
+101| 
+102|     app.post('/api/admin/logout', async (req, res) => {
+103|         // Mettre à jour la table admin_sessions
+104|         if (req.session && req.session.id) {
+105|             try {
+106|                 await pool.query(
+107|                     `UPDATE admin_sessions SET is_logged_in = false, logout_time = NOW() 
+108|                  WHERE session_id = $1`,
+109|                     [req.session.id]
+110|                 );
+111|             } catch (err) {
+112|                 console.error('Erreur mise à jour session:', err.message);
+113|             }
+114|         }
+115| 
+116|         req.session.destroy((err) => {
+117|             if (err) {
+118|                 return res.status(500).json({ error: 'Erreur déconnexion' });
+119|             }
+120|             res.json({ success: true });
+121|         });
+122|     });
+123| 
+124|     app.get('/api/admin/users', async (req, res) => {
+125|         // Vérifier si un admin est connecté via la session
+126|         if (!req.session.isAdmin || !req.session.adminId) {
+127|             return res.status(403).json({ error: 'Accès non autorisé - Veuillez vous connecter' });
+128|         }
+129| 
+130|         // Si admin connecté, on exécute la requête
+131|         try {
+132|             const result = await pool.query('SELECT pseudo, age, role, warnings, is_banned, ban_reason, last_ip, kick_count, ban_count FROM users ORDER BY id');
+133|             res.json(result.rows);
+134|         } catch (err) {
+135|             console.error("Erreur admin/users:", err.message);
+136|             res.status(500).json({ error: 'Erreur serveur', details: err.message });
+137|         }
+138|     });
+139| 
+140|     app.post('/api/admin/warn', async (req, res) => {
+141|         const { pseudo } = req.body;
+142| 
+143|         try {
+144|             // 1. Incrémenter le compteur
+145|             const result = await pool.query(
+146|                 'UPDATE users SET warnings = COALESCE(warnings, 0) + 1 WHERE pseudo = $1 RETURNING warnings',
+147|                 [pseudo]
+148|             );
+149| 
+150|             const newWarnCount = result.rows[0]?.warnings || 0;
+151| 
+152|             // Enregistrer l'action dans le journal
+153|             await pool.query(
+154|                 `INSERT INTO moderation_actions (admin_pseudo, action_type, target_pseudo, reason)
+155|                 VALUES ($1, 'warn', $2, $3)`,
+156|                 [req.session.adminUsername, pseudo, `Warn automatique (total: ${newWarnCount})`]
+157|             );
+158| 
+159|             // 2. Trouver l'utilisateur dans l'objet global "users"
+160|             let targetSocketId = null;
+161|             for (const [socketId, user] of Object.entries(users)) {
+162|                 if (user.pseudo === pseudo) {
+163|                     targetSocketId = socketId;
+164|                     break;
+165|                 }
+166|             }
+167| 
+168|             // 3. Si connecté, lui envoyer un événement
+169|             if (targetSocketId && io) {
+170|                 io.to(targetSocketId).emit('userWarned', {
+171|                     warnings: newWarnCount,
+172|                     message: `⚠️ Vous avez reçu un avertissement. Total : ${newWarnCount}`
+173|                 });
+174|             }
+175| 
+176|             res.json({ success: true, warnings: newWarnCount });
+177| 
+178|         } catch (err) {
+179|             console.error('Erreur warn:', err);
+180|             res.status(500).json({ error: 'Erreur serveur' });
+181|         }
+182|     });
+183| 
+184|     // ========== KICK USER ==========
+185|     app.post('/api/admin/kick', async (req, res) => {
+186|         if (!req.session.isAdmin) {
+187|             return res.status(401).json({ error: 'Non autorisé' });
+188|         }
+189| 
+190|         const { pseudo } = req.body;
+191|         if (!pseudo) {
+192|             return res.status(400).json({ error: 'Pseudo requis' });
+193|         }
+194| 
+195|         try {
+196|             // 1. Vérifier que l'utilisateur existe et récupérer son IP
+197|             const userCheck = await pool.query(
+198|                 'SELECT pseudo, last_ip FROM users WHERE pseudo = $1',
+199|                 [pseudo]
+200|             );
+201| 
+202|             if (userCheck.rows.length === 0) {
+203|                 return res.status(404).json({ error: 'Utilisateur non trouvé' });
+204|             }
+205| 
+206|             const userIp = userCheck.rows[0].last_ip;
+207| 
+208|             // 2. 🔥 ENREGISTRER L'IP DANS L'HISTORIQUE (AVANT TOUTE ACTION)
+209|             if (userIp) {
+210|                 try {
+211|                     await pool.query(
+212|                         `INSERT INTO ip_history (ip_address, action_type, target_pseudo, admin_pseudo)
+213|                          VALUES ($1, 'kick', $2, $3)`,
+214|                         [userIp, pseudo, req.session.adminUsername]
+215|                     );
+216|                     console.log(`✅ IP ${userIp} enregistrée pour kick de ${pseudo}`);
+217|                 } catch (err) {
+218|                     console.error('❌ Erreur enregistrement IP history (kick):', err);
+219|                 }
+220|             } else {
+221|                 console.warn(`⚠️ Pas d'IP pour ${pseudo}, impossible d'enregistrer l'historique`);
+222|             }
+223| 
+224|             // 3. Trouver le socket de l'utilisateur
+225|             let targetSocketId = null;
+226|             for (const [socketId, user] of Object.entries(users)) {
+227|                 if (user.pseudo === pseudo) {
+228|                     targetSocketId = socketId;
+229|                     break;
+230|                 }
+231|             }
+232| 
+233|             // 4. Si connecté, lui envoyer un événement de kick
+234|             if (targetSocketId && io) {
+235|                 io.to(targetSocketId).emit('kicked', {
+236|                     message: '🦵 Vous avez été expulsé par un administrateur.'
+237|                 });
+238| 
+239|                 setTimeout(() => {
+240|                     const socket = io.sockets.sockets.get(targetSocketId);
+241|                     if (socket) {
+242|                         socket.disconnect(true);
+243|                     }
+244|                 }, 500);
+245|             }
+246| 
+247|             // 5. Supprimer l'utilisateur de la base de données
+248|             await pool.query('DELETE FROM users WHERE pseudo = $1', [pseudo]);
+249| 
+250|             // 6. Logger l'action dans le journal de modération
+251|             await pool.query(
+252|                 `INSERT INTO moderation_actions (admin_pseudo, action_type, target_pseudo, reason)
+253|                  VALUES ($1, 'kick', $2, 'Expulsé par administrateur')`,
+254|                 [req.session.adminUsername, pseudo]
+255|             );
+256| 
+257|             // 7. Notifier le panel admin
+258|             io.emit('new_moderation_action', {
+259|                 type: 'kick',
+260|                 target: pseudo,
+261|                 admin: req.session.adminUsername,
+262|                 timestamp: new Date()
+263|             });
+264| 
+265|             res.json({
+266|                 success: true,
+267|                 message: `${pseudo} a été expulsé et supprimé de la base`
+268|             });
+269| 
+270|         } catch (err) {
+271|             console.error('Erreur kick:', err);
+272|             res.status(500).json({ error: 'Erreur serveur lors de l\'expulsion' });
+273|         }
+274|     });
 275| 
-276|     // ========== BAN USER ==========
-277|     app.post('/api/admin/ban', async (req, res) => {
-278|         const { pseudo, reason } = req.body;
-279| 
-280|         try {
-281|             // 1. Récupérer l'IP de l'utilisateur AVANT de le bannir
-282|             const userCheck = await pool.query(
-283|                 'SELECT last_ip FROM users WHERE pseudo = $1',
-284|                 [pseudo]
-285|             );
-286| 
-287|             const userIp = userCheck.rows[0]?.last_ip;
-288| 
-289|             // 2. 🔥 ENREGISTRER L'IP DANS L'HISTORIQUE (AVANT LE BAN)
-290|             if (userIp) {
-291|                 try {
-292|                     await pool.query(
-293|                         `INSERT INTO ip_history (ip_address, action_type, target_pseudo, admin_pseudo)
-294|                          VALUES ($1, 'ban', $2, $3)`,
-295|                         [userIp, pseudo, req.session.adminUsername]
-296|                     );
-297|                     console.log(`✅ IP ${userIp} enregistrée pour ban de ${pseudo}`);
-298|                 } catch (err) {
-299|                     console.error('❌ Erreur enregistrement IP history (ban):', err);
-300|                 }
-301|             } else {
-302|                 console.warn(`⚠️ Pas d'IP pour ${pseudo}, impossible d'enregistrer l'historique de ban`);
-303|             }
-304| 
-305|             // 3. Bannir l'utilisateur
-306|             await pool.query('UPDATE users SET is_banned = true, ban_reason = $1 WHERE pseudo = $2', [reason, pseudo]);
-307| 
-308|             // 4. Déconnecter l'utilisateur
-309|             disconnectBannedUser(io, users, pseudo, reason);
-310| 
-311|             // 5. Notifier le panel admin
-312|             io.emit('new_moderation_action', {
-313|                 type: 'ban',
-314|                 target: pseudo,
-315|                 admin: req.session.adminUsername,
-316|                 timestamp: new Date()
-317|             });
-318| 
-319|             res.json({ success: true });
-320| 
-321|         } catch (err) {
-322|             console.error('Erreur ban:', err);
-323|             res.status(500).json({ error: 'Erreur lors du bannissement' });
-324|         }
-325|     });
-326| 
+276| 
+277|     // ========== BAN USER ==========
+278|     app.post('/api/admin/ban', async (req, res) => {
+279|         const { pseudo, reason } = req.body;
+280| 
+281|         try {
+282|             // 1. Récupérer l'IP de l'utilisateur AVANT de le bannir
+283|             const userCheck = await pool.query(
+284|                 'SELECT last_ip FROM users WHERE pseudo = $1',
+285|                 [pseudo]
+286|             );
+287| 
+288|             const userIp = userCheck.rows[0]?.last_ip;
+289| 
+290|             // 2. 🔥 ENREGISTRER L'IP DANS L'HISTORIQUE (AVANT LE BAN)
+291|             if (userIp) {
+292|                 try {
+293|                     await pool.query(
+294|                         `INSERT INTO ip_history (ip_address, action_type, target_pseudo, admin_pseudo)
+295|                          VALUES ($1, 'ban', $2, $3)`,
+296|                         [userIp, pseudo, req.session.adminUsername]
+297|                     );
+298|                     console.log(`✅ IP ${userIp} enregistrée pour ban de ${pseudo}`);
+299|                 } catch (err) {
+300|                     console.error('❌ Erreur enregistrement IP history (ban):', err);
+301|                 }
+302|             } else {
+303|                 console.warn(`⚠️ Pas d'IP pour ${pseudo}, impossible d'enregistrer l'historique de ban`);
+304|             }
+305| 
+306|             // 3. Bannir l'utilisateur
+307|             await pool.query('UPDATE users SET is_banned = true, ban_reason = $1 WHERE pseudo = $2', [reason, pseudo]);
+308| 
+309|             // 4. Déconnecter l'utilisateur
+310|             disconnectBannedUser(io, users, pseudo, reason);
+311| 
+312|             // 5. Notifier le panel admin
+313|             io.emit('new_moderation_action', {
+314|                 type: 'ban',
+315|                 target: pseudo,
+316|                 admin: req.session.adminUsername,
+317|                 timestamp: new Date()
+318|             });
+319| 
+320|             res.json({ success: true });
+321| 
+322|         } catch (err) {
+323|             console.error('Erreur ban:', err);
+324|             res.status(500).json({ error: 'Erreur lors du bannissement' });
+325|         }
+326|     });
 327| 
 328| 
-329|     // GET /api/admin/reports - Liste des signalements
-330|     app.get('/api/admin/reports', async (req, res) => {
-331|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
-332| 
-333|         try {
-334|             const result = await pool.query(`
-335|             SELECT r.*, 
-336|                    u1.pseudo as reporter_exists,
-337|                    u2.pseudo as target_exists
-338|             FROM reports r
-339|             LEFT JOIN users u1 ON u1.pseudo = r.reporter_pseudo
-340|             LEFT JOIN users u2 ON u2.pseudo = r.target_pseudo
-341|             ORDER BY r.created_at DESC
-342|             LIMIT 100
-343|         `);
-344|             res.json(result.rows);
-345|         } catch (err) {
-346|             console.error('Erreur reports:', err);
-347|             res.status(500).json({ error: 'Erreur serveur' });
-348|         }
-349|     });
-350| 
+329| 
+330|     // GET /api/admin/reports - Liste des signalements
+331|     app.get('/api/admin/reports', async (req, res) => {
+332|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
+333| 
+334|         try {
+335|             const result = await pool.query(`
+336|             SELECT r.*, 
+337|                    u1.pseudo as reporter_exists,
+338|                    u2.pseudo as target_exists
+339|             FROM reports r
+340|             LEFT JOIN users u1 ON u1.pseudo = r.reporter_pseudo
+341|             LEFT JOIN users u2 ON u2.pseudo = r.target_pseudo
+342|             ORDER BY r.created_at DESC
+343|             LIMIT 100
+344|         `);
+345|             res.json(result.rows);
+346|         } catch (err) {
+347|             console.error('Erreur reports:', err);
+348|             res.status(500).json({ error: 'Erreur serveur' });
+349|         }
+350|     });
 351| 
 352| 
-353|     // GET /api/admin/moderation-logs - Journal des actions
-354|     app.get('/api/admin/moderation-logs', async (req, res) => {
-355|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
-356| 
-357|         try {
-358|             const result = await pool.query(`
-359|             SELECT * FROM moderation_actions 
-360|             ORDER BY created_at DESC 
-361|             LIMIT 100
-362|         `);
-363|             res.json(result.rows);
-364|         } catch (err) {
-365|             console.error('Erreur logs:', err);
-366|             res.status(500).json({ error: 'Erreur serveur' });
-367|         }
-368|     });
-369| 
-370|     // POST /api/admin/ignore-report - Ignorer un signalement
-371|     app.post('/api/admin/ignore-report', async (req, res) => {
-372|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
-373| 
-374|         const { reportId } = req.body;
-375|         if (!reportId) return res.status(400).json({ error: 'ID requis' });
-376| 
-377|         try {
-378|             await pool.query('DELETE FROM reports WHERE id = $1', [reportId]);
-379|             res.json({ success: true });
-380|         } catch (err) {
-381|             console.error('Erreur ignore report:', err);
-382|             res.status(500).json({ error: 'Erreur serveur' });
-383|         }
-384|     });
-385| 
+353| 
+354|     // GET /api/admin/moderation-logs - Journal des actions
+355|     app.get('/api/admin/moderation-logs', async (req, res) => {
+356|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
+357| 
+358|         try {
+359|             const result = await pool.query(`
+360|             SELECT * FROM moderation_actions 
+361|             ORDER BY created_at DESC 
+362|             LIMIT 100
+363|         `);
+364|             res.json(result.rows);
+365|         } catch (err) {
+366|             console.error('Erreur logs:', err);
+367|             res.status(500).json({ error: 'Erreur serveur' });
+368|         }
+369|     });
+370| 
+371|     // POST /api/admin/ignore-report - Ignorer un signalement
+372|     app.post('/api/admin/ignore-report', async (req, res) => {
+373|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
+374| 
+375|         const { reportId } = req.body;
+376|         if (!reportId) return res.status(400).json({ error: 'ID requis' });
+377| 
+378|         try {
+379|             await pool.query('DELETE FROM reports WHERE id = $1', [reportId]);
+380|             res.json({ success: true });
+381|         } catch (err) {
+382|             console.error('Erreur ignore report:', err);
+383|             res.status(500).json({ error: 'Erreur serveur' });
+384|         }
+385|     });
 386| 
 387| 
-388|     // ========== MAINTENANCE MODE ==========
-389|     app.get('/api/admin/maintenance', async (req, res) => {
-390|         try {
-391|             const result = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
-392|             res.json({ enabled: result.rows[0]?.value === 'true' });
-393|         } catch (err) {
-394|             res.status(500).json({ error: 'Erreur' });
-395|         }
-396|     });
-397| 
-398|     app.post('/api/admin/maintenance', async (req, res) => {
-399|         const { enabled } = req.body;
-400|         if (typeof enabled !== 'boolean') {
-401|             return res.status(400).json({ error: 'enabled doit être true/false' });
-402|         }
-403|         try {
-404|             await pool.query("UPDATE settings SET value = $1 WHERE key = 'maintenance_mode'", [enabled ? 'true' : 'false']);
-405|             res.json({ success: true, enabled });
-406|         } catch (err) {
-407|             res.status(500).json({ error: 'Erreur' });
-408|         }
-409|     });
-410| 
-411|     // ========== VIDAGE MANUEL (API) ==========
-412| 
-413|     // POST /api/admin/clear-logs - Vider TOUT le journal
-414|     app.post('/api/admin/clear-logs', async (req, res) => {
-415|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
-416| 
-417|         try {
-418|             const result = await pool.query('DELETE FROM moderation_actions');
-419|             res.json({ success: true, deleted: result.rowCount });
-420|         } catch (err) {
-421|             console.error('Erreur clear logs:', err);
-422|             res.status(500).json({ error: 'Erreur serveur' });
-423|         }
-424|     });
-425| 
-426|     // POST /api/admin/clean-reports - Nettoyer les anciens signalements
-427|     app.post('/api/admin/clean-reports', async (req, res) => {
-428|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
-429| 
-430|         const { days = 60 } = req.body;
-431|         try {
-432|             const result = await pool.query(
-433|                 `DELETE FROM reports WHERE created_at < NOW() - INTERVAL '${days} days'`
-434|             );
-435|             res.json({ success: true, deleted: result.rowCount });
-436|         } catch (err) {
-437|             console.error('Erreur clean reports:', err);
-438|             res.status(500).json({ error: 'Erreur serveur' });
-439|         }
-440|     });
-441| 
-442|     // ========== RÉCUPÉRER L'HISTORIQUE IP ==========
-443|     app.post('/api/admin/ip-history', async (req, res) => {
-444|         if (!req.session.isAdmin) {
-445|             return res.status(401).json({ error: 'Non autorisé' });
-446|         }
-447| 
-448|         const { ip } = req.body;
-449|         if (!ip) {
-450|             return res.status(400).json({ error: 'IP requise' });
-451|         }
-452| 
-453|         try {
-454|             // Compter les kicks et bans sur les dernières 24h
-455|             const result = await pool.query(
-456|                 `SELECT 
-457|                     COUNT(CASE WHEN action_type = 'kick' THEN 1 END) as kick_count,
-458|                     COUNT(CASE WHEN action_type = 'ban' THEN 1 END) as ban_count
-459|                  FROM ip_history 
-460|                  WHERE ip_address = $1 
-461|                  AND created_at > NOW() - INTERVAL '24 hours'`,
-462|                 [ip]
-463|             );
-464| 
-465|             const responseData = {
-466|                 success: true,
-467|                 ip: ip,
-468|                 kick_count: parseInt(result.rows[0].kick_count) || 0,
-469|                 ban_count: parseInt(result.rows[0].ban_count) || 0
-470|             };
-471|             console.log(`📤 Envoi historique IP pour ${ip}:`, responseData);
-472|             res.json(responseData);
-473|         } catch (err) {
-474|             console.error('Erreur ip-history:', err);
-475|             res.status(500).json({ error: 'Erreur serveur' });
-476|         }
-477|     });
-478| 
-479|     // ========== ADMIN : CONVERSATIONS ==========
-480| 
-481|     // Récupérer toutes les conversations
-482|     app.get('/api/admin/conversations', async (req, res) => {
-483|         if (!req.session.isAdmin) {
-484|             return res.status(401).json({ error: 'Non autorisé' });
-485|         }
-486| 
-487|         try {
-488|             const result = await pool.query(`
-489|                 SELECT 
-490|                     c.id,
-491|                     c.user1,
-492|                     c.user2,
-493|                     c.created_at,
-494|                     c.last_message_at,
-495|                     COUNT(m.id) as message_count
-496|                 FROM conversations c
-497|                 LEFT JOIN messages m ON m.conversation_id = c.id
-498|                 GROUP BY c.id
-499|                 ORDER BY c.last_message_at DESC
-500|             `);
-501|             res.json(result.rows);
-502|         } catch (err) {
-503|             console.error('Erreur conversations:', err);
-504|             res.status(500).json({ error: 'Erreur serveur' });
-505|         }
-506|     });
-507| 
-508|     // Récupérer les messages d'une conversation (messages + archive)
-509|     app.get('/api/admin/conversations/:id/messages', async (req, res) => {
-510|         if (!req.session.isAdmin) {
-511|             return res.status(401).json({ error: 'Non autorisé' });
-512|         }
-513| 
-514|         const { id } = req.params;
-515|         try {
-516|             // 👇 UNION DES DEUX TABLES
-517|             const result = await pool.query(`
-518|             SELECT 
-519|                 id,
-520|                 from_pseudo,
-521|                 to_pseudo,
-522|                 message,
-523|                 created_at,
-524|                 'live' as source
-525|             FROM messages 
-526|             WHERE conversation_id = $1
-527|             
-528|             UNION ALL
-529|             
-530|             SELECT 
-531|                 id,
-532|                 from_pseudo,
-533|                 to_pseudo,
-534|                 message,
-535|                 created_at,
-536|                 'archive' as source
-537|             FROM messages_archive 
-538|             WHERE conversation_id = $1
-539|             
-540|             ORDER BY created_at ASC
-541|         `, [id]);
-542| 
-543|             res.json(result.rows);
-544|         } catch (err) {
-545|             console.error('Erreur messages conversation:', err);
-546|             res.status(500).json({ error: 'Erreur serveur' });
-547|         }
-548|     });
-549| 
-550|     // ========== ROUTES POUR LES PARAMÈTRES DE CONFIGURATION ==========
-551| 
-552|     // Récupérer tous les paramètres
-553|     app.get('/api/admin/settings', async (req, res) => {
-554|         if (!req.session.isAdmin) {
-555|             return res.status(401).json({ error: 'Non autorisé' });
-556|         }
-557| 
-558|         try {
-559|             const result = await pool.query('SELECT key, value FROM settings');
-560|             const settings = {};
-561|             result.rows.forEach(row => {
-562|                 settings[row.key] = row.value;
-563|             });
-564|             res.json({ success: true, settings });
-565|         } catch (err) {
-566|             console.error('Erreur récupération settings:', err);
-567|             res.status(500).json({ error: 'Erreur serveur' });
-568|         }
-569|     });
-570| 
-571|     // Mettre à jour un paramètre
-572|     app.post('/api/admin/settings/update', async (req, res) => {
-573|         if (!req.session.isAdmin) {
-574|             return res.status(401).json({ error: 'Non autorisé' });
-575|         }
-576| 
-577|         const { key, value } = req.body;
-578|         if (!key) {
-579|             return res.status(400).json({ error: 'Clé requise' });
-580|         }
-581| 
-582|         try {
-583|             // Vérifier si la clé existe
-584|             const check = await pool.query('SELECT 1 FROM settings WHERE key = $1', [key]);
-585|             if (check.rows.length === 0) {
-586|                 return res.status(404).json({ error: 'Clé non trouvée' });
-587|             }
-588| 
-589|             await pool.query('UPDATE settings SET value = $1 WHERE key = $2', [value, key]);
-590|             console.log(`📝 Paramètre mis à jour: ${key} = ${value}`);
-591| 
-592|             res.json({ success: true, message: 'Paramètre mis à jour' });
-593|         } catch (err) {
-594|             console.error('Erreur mise à jour setting:', err);
-595|             res.status(500).json({ error: 'Erreur serveur' });
-596|         }
-597|     });
-598| 
-599|     // Mettre à jour plusieurs paramètres à la fois (pour le formulaire)
-600|     app.post('/api/admin/settings/update-multiple', async (req, res) => {
-601|         if (!req.session.isAdmin) {
-602|             return res.status(401).json({ error: 'Non autorisé' });
-603|         }
-604| 
-605|         const { settings } = req.body;
-606|         if (!settings || typeof settings !== 'object') {
-607|             return res.status(400).json({ error: 'Paramètres invalides' });
-608|         }
-609| 
-610|         try {
-611|             for (const [key, value] of Object.entries(settings)) {
-612|                 await pool.query('UPDATE settings SET value = $1 WHERE key = $2', [String(value), key]);
-613|             }
-614|             console.log('📝 Paramètres mis à jour en masse');
-615|             res.json({ success: true, message: 'Paramètres mis à jour' });
-616|         } catch (err) {
-617|             console.error('Erreur mise à jour settings:', err);
-618|             res.status(500).json({ error: 'Erreur serveur' });
-619|         }
-620|     });
-621| 
-622|     // ========== SUPPRESSION DÉFINITIVE D'UN UTILISATEUR ==========
-623|     app.delete('/delete-user', async (req, res) => {
-624|         const { pseudo } = req.body;
-625| 
-626|         // Vérifier que le pseudo est fourni
-627|         if (!pseudo) {
-628|             return res.status(400).json({ success: false, error: 'Pseudo manquant' });
-629|         }
-630| 
-631|         try {
+388| 
+389|     // ========== MAINTENANCE MODE ==========
+390|     app.get('/api/admin/maintenance', async (req, res) => {
+391|         try {
+392|             const result = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
+393|             res.json({ enabled: result.rows[0]?.value === 'true' });
+394|         } catch (err) {
+395|             res.status(500).json({ error: 'Erreur' });
+396|         }
+397|     });
+398| 
+399|     app.post('/api/admin/maintenance', async (req, res) => {
+400|         const { enabled } = req.body;
+401|         if (typeof enabled !== 'boolean') {
+402|             return res.status(400).json({ error: 'enabled doit être true/false' });
+403|         }
+404|         try {
+405|             await pool.query("UPDATE settings SET value = $1 WHERE key = 'maintenance_mode'", [enabled ? 'true' : 'false']);
+406|             res.json({ success: true, enabled });
+407|         } catch (err) {
+408|             res.status(500).json({ error: 'Erreur' });
+409|         }
+410|     });
+411| 
+412|     // ========== VIDAGE MANUEL (API) ==========
+413| 
+414|     // POST /api/admin/clear-logs - Vider TOUT le journal
+415|     app.post('/api/admin/clear-logs', async (req, res) => {
+416|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
+417| 
+418|         try {
+419|             const result = await pool.query('DELETE FROM moderation_actions');
+420|             res.json({ success: true, deleted: result.rowCount });
+421|         } catch (err) {
+422|             console.error('Erreur clear logs:', err);
+423|             res.status(500).json({ error: 'Erreur serveur' });
+424|         }
+425|     });
+426| 
+427|     // POST /api/admin/clean-reports - Nettoyer les anciens signalements
+428|     app.post('/api/admin/clean-reports', async (req, res) => {
+429|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
+430| 
+431|         const { days = 60 } = req.body;
+432|         try {
+433|             const result = await pool.query(
+434|                 `DELETE FROM reports WHERE created_at < NOW() - INTERVAL '${days} days'`
+435|             );
+436|             res.json({ success: true, deleted: result.rowCount });
+437|         } catch (err) {
+438|             console.error('Erreur clean reports:', err);
+439|             res.status(500).json({ error: 'Erreur serveur' });
+440|         }
+441|     });
+442| 
+443|     // ========== RÉCUPÉRER L'HISTORIQUE IP ==========
+444|     app.post('/api/admin/ip-history', async (req, res) => {
+445|         if (!req.session.isAdmin) {
+446|             return res.status(401).json({ error: 'Non autorisé' });
+447|         }
+448| 
+449|         const { ip } = req.body;
+450|         if (!ip) {
+451|             return res.status(400).json({ error: 'IP requise' });
+452|         }
+453| 
+454|         try {
+455|             // Compter les kicks et bans sur les dernières 24h
+456|             const result = await pool.query(
+457|                 `SELECT 
+458|                     COUNT(CASE WHEN action_type = 'kick' THEN 1 END) as kick_count,
+459|                     COUNT(CASE WHEN action_type = 'ban' THEN 1 END) as ban_count
+460|                  FROM ip_history 
+461|                  WHERE ip_address = $1 
+462|                  AND created_at > NOW() - INTERVAL '24 hours'`,
+463|                 [ip]
+464|             );
+465| 
+466|             const responseData = {
+467|                 success: true,
+468|                 ip: ip,
+469|                 kick_count: parseInt(result.rows[0].kick_count) || 0,
+470|                 ban_count: parseInt(result.rows[0].ban_count) || 0
+471|             };
+472|             console.log(`📤 Envoi historique IP pour ${ip}:`, responseData);
+473|             res.json(responseData);
+474|         } catch (err) {
+475|             console.error('Erreur ip-history:', err);
+476|             res.status(500).json({ error: 'Erreur serveur' });
+477|         }
+478|     });
+479| 
+480|     // ========== ADMIN : CONVERSATIONS ==========
+481| 
+482|     // Récupérer toutes les conversations
+483|     app.get('/api/admin/conversations', async (req, res) => {
+484|         if (!req.session.isAdmin) {
+485|             return res.status(401).json({ error: 'Non autorisé' });
+486|         }
+487| 
+488|         try {
+489|             const result = await pool.query(`
+490|                 SELECT 
+491|                     c.id,
+492|                     c.user1,
+493|                     c.user2,
+494|                     c.created_at,
+495|                     c.last_message_at,
+496|                     COUNT(m.id) as message_count
+497|                 FROM conversations c
+498|                 LEFT JOIN messages m ON m.conversation_id = c.id
+499|                 GROUP BY c.id
+500|                 ORDER BY c.last_message_at DESC
+501|             `);
+502|             res.json(result.rows);
+503|         } catch (err) {
+504|             console.error('Erreur conversations:', err);
+505|             res.status(500).json({ error: 'Erreur serveur' });
+506|         }
+507|     });
+508| 
+509|     // Récupérer les messages d'une conversation (messages + archive)
+510|     app.get('/api/admin/conversations/:id/messages', async (req, res) => {
+511|         if (!req.session.isAdmin) {
+512|             return res.status(401).json({ error: 'Non autorisé' });
+513|         }
+514| 
+515|         const { id } = req.params;
+516|         try {
+517|             // 👇 UNION DES DEUX TABLES
+518|             const result = await pool.query(`
+519|             SELECT 
+520|                 id,
+521|                 from_pseudo,
+522|                 to_pseudo,
+523|                 message,
+524|                 created_at,
+525|                 'live' as source
+526|             FROM messages 
+527|             WHERE conversation_id = $1
+528|             
+529|             UNION ALL
+530|             
+531|             SELECT 
+532|                 id,
+533|                 from_pseudo,
+534|                 to_pseudo,
+535|                 message,
+536|                 created_at,
+537|                 'archive' as source
+538|             FROM messages_archive 
+539|             WHERE conversation_id = $1
+540|             
+541|             ORDER BY created_at ASC
+542|         `, [id]);
+543| 
+544|             res.json(result.rows);
+545|         } catch (err) {
+546|             console.error('Erreur messages conversation:', err);
+547|             res.status(500).json({ error: 'Erreur serveur' });
+548|         }
+549|     });
+550| 
+551|     // ========== ROUTES POUR LES PARAMÈTRES DE CONFIGURATION ==========
+552| 
+553|     // Récupérer tous les paramètres
+554|     app.get('/api/admin/settings', async (req, res) => {
+555|         if (!req.session.isAdmin) {
+556|             return res.status(401).json({ error: 'Non autorisé' });
+557|         }
+558| 
+559|         try {
+560|             const result = await pool.query('SELECT key, value FROM settings');
+561|             const settings = {};
+562|             result.rows.forEach(row => {
+563|                 settings[row.key] = row.value;
+564|             });
+565|             res.json({ success: true, settings });
+566|         } catch (err) {
+567|             console.error('Erreur récupération settings:', err);
+568|             res.status(500).json({ error: 'Erreur serveur' });
+569|         }
+570|     });
+571| 
+572|     // Mettre à jour un paramètre
+573|     app.post('/api/admin/settings/update', async (req, res) => {
+574|         if (!req.session.isAdmin) {
+575|             return res.status(401).json({ error: 'Non autorisé' });
+576|         }
+577| 
+578|         const { key, value } = req.body;
+579|         if (!key) {
+580|             return res.status(400).json({ error: 'Clé requise' });
+581|         }
+582| 
+583|         try {
+584|             // Vérifier si la clé existe
+585|             const check = await pool.query('SELECT 1 FROM settings WHERE key = $1', [key]);
+586|             if (check.rows.length === 0) {
+587|                 return res.status(404).json({ error: 'Clé non trouvée' });
+588|             }
+589| 
+590|             await pool.query('UPDATE settings SET value = $1 WHERE key = $2', [value, key]);
+591|             console.log(`📝 Paramètre mis à jour: ${key} = ${value}`);
+592| 
+593|             res.json({ success: true, message: 'Paramètre mis à jour' });
+594|         } catch (err) {
+595|             console.error('Erreur mise à jour setting:', err);
+596|             res.status(500).json({ error: 'Erreur serveur' });
+597|         }
+598|     });
+599| 
+600|     // Mettre à jour plusieurs paramètres à la fois (pour le formulaire)
+601|     app.post('/api/admin/settings/update-multiple', async (req, res) => {
+602|         if (!req.session.isAdmin) {
+603|             return res.status(401).json({ error: 'Non autorisé' });
+604|         }
+605| 
+606|         const { settings } = req.body;
+607|         if (!settings || typeof settings !== 'object') {
+608|             return res.status(400).json({ error: 'Paramètres invalides' });
+609|         }
+610| 
+611|         try {
+612|             for (const [key, value] of Object.entries(settings)) {
+613|                 await pool.query('UPDATE settings SET value = $1 WHERE key = $2', [String(value), key]);
+614|             }
+615|             console.log('📝 Paramètres mis à jour en masse');
+616|             res.json({ success: true, message: 'Paramètres mis à jour' });
+617|         } catch (err) {
+618|             console.error('Erreur mise à jour settings:', err);
+619|             res.status(500).json({ error: 'Erreur serveur' });
+620|         }
+621|     });
+622| 
+623|     // ========== SUPPRESSION DÉFINITIVE D'UN UTILISATEUR ==========
+624|     app.delete('/delete-user', async (req, res) => {
+625|         try {
+626|             const { pseudo } = req.body;
+627| 
+628|             if (!pseudo) {
+629|                 return res.status(400).json({ success: false, error: 'Pseudo manquant' });
+630|             }
+631| 
 632|             // Vérifier que l'utilisateur existe
-633|             const checkUser = await db.query('SELECT role FROM users WHERE pseudo = $1', [pseudo]);
+633|             const checkUser = await pool.query('SELECT role FROM users WHERE pseudo = $1', [pseudo]);
 634|             if (checkUser.rows.length === 0) {
 635|                 return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
 636|             }
 637| 
-638|             // Empêcher la suppression d'un admin (protection)
+638|             // Empêcher la suppression d'un admin
 639|             if (checkUser.rows[0].role === 'admin') {
 640|                 return res.status(403).json({ success: false, error: 'Impossible de supprimer un administrateur' });
 641|             }
 642| 
 643|             // Supprimer l'utilisateur
-644|             await db.query('DELETE FROM users WHERE pseudo = $1', [pseudo]);
+644|             await pool.query('DELETE FROM users WHERE pseudo = $1', [pseudo]);
 645| 
-646|             // Optionnel : enregistrer dans le journal de modération
-647|             // (si vous avez une table logs)
-648|             await db.query(
-649|                 'INSERT INTO moderation_logs (admin_pseudo, action_type, target_pseudo, created_at) VALUES ($1, $2, $3, NOW())',
-650|                 [req.session.pseudo || 'admin', 'delete_user', pseudo]
-651|             );
-652| 
-653|             res.json({ success: true, message: `Utilisateur ${pseudo} supprimé` });
-654| 
-655|         } catch (err) {
-656|             console.error('Erreur delete-user:', err);
-657|             res.status(500).json({ success: false, error: 'Erreur serveur' });
-658|         }
-659|     });
-660| 
-661| };
+646|             res.json({ success: true, message: `Utilisateur ${pseudo} supprimé` });
+647| 
+648|         } catch (err) {
+649|             console.error('Erreur delete-user:', err);
+650|             res.status(500).json({ success: false, error: 'Erreur serveur' });
+651|         }
+652|     });
+653| 
+654| };
 
 # ============================================
 # FILE: server.js
@@ -3913,6 +3906,6 @@ Ne fais pas de supposition, relis attentivement tout le contenu."
 
 # ============================================
 # FIN DU FICHIER - 5 fichiers inclus
-# Généré le 2026-07-13 13:47:09
+# Généré le 2026-07-13 14:00:41
 # Tous les fichiers sont complets
 # ============================================
