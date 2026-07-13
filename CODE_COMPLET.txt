@@ -1,6 +1,6 @@
 # MEETGAY - CODE COMPLET
-# Généré le 2026-07-13 13:34:25
-# 4 fichier(s) inclus
+# Généré le 2026-07-13 13:35:19
+# 5 fichier(s) inclus
 
 "⚠️ MODE ANALYSE TOTALE - Lecture exhaustive du code ci-dessous. 
 Vérifie chaque fichier listé dans le sommaire. 
@@ -12,6 +12,7 @@ Ne fais pas de supposition, relis attentivement tout le contenu."
 # 2. public\css\pages\admin.css
 # 3. protected\admin.html
 # 4. modules\routes\admin.js
+# 5. server.js
 
 # ============================================
 # FILE: public\js\admin.js
@@ -3648,7 +3649,271 @@ Ne fais pas de supposition, relis attentivement tout le contenu."
 661| };
 
 # ============================================
-# FIN DU FICHIER - 4 fichiers inclus
-# Généré le 2026-07-13 13:34:25
+# FILE: server.js
+# ============================================
+
+1| // ============================================================
+2| // server.js - Cœur du chat MeetGay (version base de données)1111
+3| // ============================================================
+4| 
+5| // ========== CHARGEMENT DES VARIABLES D'ENVIRONNEMENT ==========
+6| if (process.env.NODE_ENV !== 'production') {
+7|     try {
+8|         require('dotenv').config();
+9|         console.log('✅ dotenv chargé (environnement local)');
+10|     } catch (err) {
+11|         console.log('⚠️ dotenv non installé, utilisation des variables système');
+12|     }
+13| } else {
+14|     console.log('✅ Mode production, variables Render utilisées');
+15| }
+16| 
+17| // ========== IMPORTS ==========
+18| const express = require('express');
+19| const compression = require('compression');
+20| const http = require('http');
+21| const socketIo = require('socket.io');
+22| const jwt = require('jsonwebtoken');
+23| const { Pool } = require('pg');
+24| const { disconnectBannedUser } = require('./moderation');
+25| const path = require('path');
+26| const bcrypt = require('bcrypt');
+27| const session = require('express-session');
+28| const pgSession = require('connect-pg-simple')(session);
+29| 
+30| 
+31| // Modules internes
+32| const { cleanOldData } = require('./modules/cleanup.js');
+33| const contactRoutes = require('./modules/routes/api-contact.js');
+34| const pool = require('./modules/postgresql.js');
+35| const htmlRoutes = require('./modules/routes/html.js');
+36| const adminRoutes = require('./modules/routes/admin.js');
+37| const authRoutes = require('./modules/routes/api-auth.js');
+38| const messagesRoutes = require('./modules/routes/api-messages.js');
+39| const maintenanceMiddleware = require('./modules/middleware/maintenance.js');
+40| const socketHandlers = require('./modules/socket-handlers.js');
+41| // Route de géocodage
+42| const geocodeRoutes = require('./modules/routes/geocode');
+43| 
+44| // JWT_SECRET pour les utilisateurs normaux
+45| const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
+46| 
+47| // ==========  VARIABLES GLOBALES (chargées depuis la base) ==========
+48| // Ces valeurs sont des "fallbacks" en cas d'erreur de lecture de la base
+49| let TEST_MODE = false;
+50| let REPORTS_THRESHOLD = 2;
+51| let REPORTS_WINDOW_MINUTES = 60;
+52| let TEMP_BAN_MINUTES = 10;
+53| let LOGS_RETENTION_DAYS = 30;
+54| let REPORTS_RETENTION_DAYS = 60;
+55| let AUTO_CLEANUP_ENABLED = true;
+56| let VISITOR_CLEANUP_ENABLED = false;
+57| let INACTIVITY_MINUTES = 2;
+58| let CLEANUP_INTERVAL_MINUTES = 1;
+59| let DEV_MODE = true;
+60| 
+61| // Fonction pour charger la config depuis la base de données
+62| async function loadConfigFromDatabase() {
+63|     try {
+64|         console.log('📂 Chargement des paramètres depuis la base de données...');
+65|         const result = await pool.query('SELECT key, value FROM settings');
+66| 
+67|         if (result.rows.length === 0) {
+68|             console.warn('⚠️ Aucun paramètre trouvé dans la base, utilisation des valeurs par défaut.');
+69|             return;
+70|         }
+71| 
+72|         const settings = {};
+73|         result.rows.forEach(row => {
+74|             settings[row.key] = row.value;
+75|         });
+76| 
+77|         // Mettre à jour les variables globales
+78|         if (settings.test_mode !== undefined) TEST_MODE = settings.test_mode === 'true';
+79|         if (settings.reports_threshold !== undefined) REPORTS_THRESHOLD = parseInt(settings.reports_threshold) || 2;
+80|         if (settings.reports_window_minutes !== undefined) REPORTS_WINDOW_MINUTES = parseInt(settings.reports_window_minutes) || 60;
+81|         if (settings.temp_ban_minutes !== undefined) TEMP_BAN_MINUTES = parseInt(settings.temp_ban_minutes) || 10;
+82|         if (settings.logs_retention_days !== undefined) LOGS_RETENTION_DAYS = parseInt(settings.logs_retention_days) || 30;
+83|         if (settings.reports_retention_days !== undefined) REPORTS_RETENTION_DAYS = parseInt(settings.reports_retention_days) || 60;
+84|         if (settings.auto_cleanup_enabled !== undefined) AUTO_CLEANUP_ENABLED = settings.auto_cleanup_enabled === 'true';
+85|         if (settings.visitor_cleanup_enabled !== undefined) VISITOR_CLEANUP_ENABLED = settings.visitor_cleanup_enabled === 'true';
+86|         if (settings.inactivity_minutes !== undefined) INACTIVITY_MINUTES = parseInt(settings.inactivity_minutes) || 2;
+87|         if (settings.cleanup_interval_minutes !== undefined) CLEANUP_INTERVAL_MINUTES = parseInt(settings.cleanup_interval_minutes) || 1;
+88|         if (settings.dev_mode !== undefined) DEV_MODE = settings.dev_mode === 'true';
+89| 
+90|         console.log('✅ Paramètres chargés avec succès !');
+91|         console.log('   - DEV_MODE:', DEV_MODE);
+92|         console.log('   - VISITOR_CLEANUP_ENABLED:', VISITOR_CLEANUP_ENABLED);
+93|         console.log('   - INACTIVITY_MINUTES:', INACTIVITY_MINUTES);
+94|         console.log('   - REPORTS_THRESHOLD:', REPORTS_THRESHOLD);
+95|         // Afficher quelques autres paramètres clés
+96| 
+97|     } catch (err) {
+98|         console.error('❌ Erreur lors du chargement des paramètres :', err.message);
+99|         console.warn('⚠️ Utilisation des valeurs par défaut (fallback).');
+100|     }
+101| }
+102| 
+103| 
+104| 
+105| 
+106| 
+107| // ==========  CONFIGURATION EXPRESS ==========
+108| const app = express();
+109| const server = http.createServer(app);
+110| 
+111| console.log('🔍 DB_USER:', process.env.DB_USER);
+112| console.log('🔍 DB_PASSWORD:', process.env.DB_PASSWORD ? '******' : 'MISSING');
+113| 
+114| // Compression
+115| app.use(compression({
+116|     level: 6,
+117|     threshold: 1024,
+118|     filter: (req, res) => {
+119|         if (req.path === '/socket.io/') return false;
+120|         return compression.filter(req, res);
+121|     }
+122| }));
+123| 
+124| app.use(express.json());
+125| app.use(express.text({ type: 'text/plain' }));
+126| 
+127| app.use(session({
+128|     store: new pgSession({
+129|         pool: pool,
+130|         tableName: 'session',
+131|         createTableIfMissing: false,
+132|         pruneSessionInterval: 60
+133|     }),
+134|     secret: 'un-super-secret-change-moi',
+135|     resave: false,
+136|     saveUninitialized: false,
+137|     cookie: {
+138|         httpOnly: true,
+139|         secure: false,
+140|         maxAge: 30 * 24 * 60 * 60 * 1000 // 30 jours
+141|     }
+142| }));
+143| 
+144| 
+145| app.use(maintenanceMiddleware(pool));
+146| contactRoutes(app);
+147| htmlRoutes(app, pool);
+148| messagesRoutes(app, pool);
+149| authRoutes(app, pool);
+150| geocodeRoutes(app);
+151| require('./modules/routes/api-block')(app, pool);
+152| 
+153| // ========== CONFIGURATION DES FICHIERS STATIQUES ==========
+154| 
+155| // 🔥 Détermine les options selon le mode
+156| const staticOptions = {
+157|     setHeaders: function (res, path) {
+158|         if (path.endsWith('.css')) {
+159|             res.setHeader('Content-Type', 'text/css');
+160|         }
+161|     }
+162| };
+163| 
+164| // 🔥 Si DEV_MODE est activé, désactive le cache
+165| if (DEV_MODE === true) {
+166|     staticOptions.etag = false;           // Désactive ETag
+167|     staticOptions.maxAge = 0;             // Pas de mise en cache
+168|     staticOptions.lastModified = false;   // Désactive Last-Modified
+169| 
+170|     // Ajoute des headers anti-cache
+171|     staticOptions.setHeaders = function (res, path) {
+172|         if (path.endsWith('.css')) {
+173|             res.setHeader('Content-Type', 'text/css');
+174|         }
+175|         // 🔥 Headers anti-cache pour TOUS les fichiers
+176|         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
+177|         res.setHeader('Pragma', 'no-cache');
+178|         res.setHeader('Expires', '0');
+179|     };
+180| 
+181|     console.log('🔥 MODE DÉVELOPPEMENT ACTIF - Cache désactivé');
+182| } else {
+183|     console.log('✅ MODE PRODUCTION - Cache activé');
+184| }
+185| 
+186| // Applique la configuration
+187| app.use(express.static('/var/www/meetgay/public', staticOptions));
+188| 
+189| app.use(express.json());
+190| 
+191| // 🔥 Middleware anti-cache (seulement en développement)
+192| if (DEV_MODE === true) {
+193|     app.use((req, res, next) => {
+194|         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
+195|         res.setHeader('Pragma', 'no-cache');
+196|         res.setHeader('Expires', '0');
+197|         next();
+198|     });
+199|     console.log('🔥 Middleware anti-cache activé');
+200| }
+201| 
+202| // ========== SOCKET.IO ==========
+203| const io = socketIo(server, {
+204|     cors: {
+205|         origin: "*",
+206|         methods: ["GET", "POST"],
+207|         credentials: true,
+208|         allowedHeaders: ["*"]
+209|     },
+210|     transports: ['websocket', 'polling'],
+211|     allowEIO3: true,
+212|     pingTimeout: 120000,    // ← 2 minutes (au lieu de 10)
+213|     pingInterval: 30000     // ← 30 secondes (au lieu de 1 minute)
+214| });
+215| 
+216| const sessionManager = require('./modules/session-manager.js')(io, pool, {
+217|     CLEANUP_INTERVAL: CLEANUP_INTERVAL_MINUTES * 60 * 1000,
+218|     INACTIVITY_THRESHOLD: INACTIVITY_MINUTES * 60 * 1000
+219| });
+220| 
+221| adminRoutes(app, pool, io);
+222| 
+223| // Gestion d'erreur (port déjà utilisé)
+224| server.on('error', (err) => {
+225|     if (err.code === 'EADDRINUSE') {
+226|         console.error(`❌ Port déjà utilisé. Tue l'autre processus et redémarre.`);
+227|         process.exit(1);
+228|     }
+229| });
+230| 
+231| // Initialiser la surveillance d’inactivité (5 minutes sans activité)
+232| const updateActivity = sessionManager.updateActivity;
+233| 
+234| // ========== LANCEMENT DES HANDLERS SOCKET (APRÈS io, users, constants) ==========
+235| socketHandlers(io, pool, sessionManager, updateActivity, REPORTS_THRESHOLD, REPORTS_WINDOW_MINUTES, TEMP_BAN_MINUTES);
+236| 
+237| // ========== NETTOYAGE AUTOMATIQUE ==========
+238| // Nettoyage des utilisateurs inactifs
+239| if (VISITOR_CLEANUP_ENABLED) {
+240|     sessionManager.startCleanup();
+241| } else {
+242|     console.log('🧹 Nettoyage des visiteurs déconnectés DÉSACTIVÉ');
+243| }
+244| 
+245| // Nettoyage auto du journal et signalements (toutes les 24h)
+246| if (AUTO_CLEANUP_ENABLED) {
+247|     setInterval(async () => {
+248|         await cleanOldData(pool, LOGS_RETENTION_DAYS, REPORTS_RETENTION_DAYS);
+249|     }, 24 * 60 * 60 * 1000);
+250|     console.log(`🧹 Nettoyage auto activé: journal ${LOGS_RETENTION_DAYS} jours, signalements ${REPORTS_RETENTION_DAYS} jours`);
+251| } else {
+252|     console.log(`🧹 Nettoyage auto DÉSACTIVÉ`);
+253| }
+254| 
+255| // ========== DÉMARRAGE ==========
+256| const PORT = process.env.PORT || 3005;
+257| server.listen(PORT, '0.0.0.0', () => {
+258|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+259| });
+
+# ============================================
+# FIN DU FICHIER - 5 fichiers inclus
+# Généré le 2026-07-13 13:35:19
 # Tous les fichiers sont complets
 # ============================================
