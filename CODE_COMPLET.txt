@@ -1,6 +1,6 @@
 # MEETGAY - CODE COMPLET
-# Généré le 2026-07-15 15:56:02
-# 4 fichier(s) inclus
+# Généré le 2026-07-15 15:56:26
+# 3 fichier(s) inclus
 
 "⚠️ MODE ANALYSE TOTALE - Lecture exhaustive du code ci-dessous. 
 Vérifie chaque fichier listé dans le sommaire. 
@@ -8,568 +8,9 @@ Ne fais pas de supposition, relis attentivement tout le contenu."
 
 # ========== SOMMAIRE ==========
 
-# 1. public\js\common.js
+# 1. public\js\chat.js
 # 2. public\js\chat-script.js
-# 3. public\js\chat.js
-# 4. public\chat.html
-
-# ============================================
-# FILE: public\js\common.js
-# ============================================
-
-1| ﻿// ========== COMMON - MeetGay ==========
-2| // Fonctions et détecteurs partagés entre les pages (login, chat, etc.)
-3| 
-4| (function () {
-5|     // ========== 1. Détection de la résolution d'écran ==========
-6|     function detectResolution() {
-7|         const width = window.innerWidth;
-8|         const height = window.innerHeight;
-9|         const resolution = `${width}x${height}`;
-10|         sessionStorage.setItem('screen_resolution', resolution);
-11|         console.log(`📱 Résolution détectée : ${resolution}`);
-12|         return resolution;
-13|     }
-14| 
-15|     // ========== 2. Échapper le HTML (sécurité) ==========
-16|     function escapeHtml(str) {
-17|         if (!str) return '';
-18|         return str.replace(/[&<>]/g, (m) => {
-19|             if (m === '&') return '&amp;';
-20|             if (m === '<') return '&lt;';
-21|             if (m === '>') return '&gt;';
-22|             return m;
-23|         });
-24|     }
-25| 
-26|     // ========== 3. Formater l'heure (HH:MM) ==========
-27|     function formatTime(date) {
-28|         if (!date) return '';
-29|         const d = new Date(date);
-30|         return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
-31|     }
-32| 
-33|     // ========== 4. Exécuter la détection au chargement ==========
-34|     if (document.readyState === 'loading') {
-35|         document.addEventListener('DOMContentLoaded', detectResolution);
-36|     } else {
-37|         detectResolution();
-38|     }
-39| 
-40|     // ========== 5. Exposer les fonctions globalement ==========
-41|     window.common = {
-42|         escapeHtml: escapeHtml,
-43|         formatTime: formatTime,
-44|         detectResolution: detectResolution,
-45|         getResolution: () => sessionStorage.getItem('screen_resolution')
-46|     };
-47| 
-48|     // Fonction pour afficher la localisation de manière cohérente (utilisée par le badge ET la liste des connectés)
-49|     window.getDisplayLocation = function (userData) {
-50|         if (!userData) return '?';
-51| 
-52|         let locationCity = userData.locationCity || userData.location_city || null;
-53|         let locationCommune = userData.locationCommune || userData.location_commune || null;
-54|         let locationCode = userData.locationCode || userData.location_code || '';
-55| 
-56|         // Si on a une commune précise différente de la ville, on combine
-57|         if (locationCommune && locationCommune !== 'null' && locationCommune !== 'undefined' && locationCommune !== locationCity) {
-58|             return `${locationCommune} - ${locationCity}`;
-59|         }
-60| 
-61|         // Sinon on affiche juste la ville
-62|         if (locationCity && locationCity !== 'null' && locationCity !== 'undefined') {
-63|             return locationCity;
-64|         }
-65| 
-66|         // Fallback : code de la liste déroulante
-67|         if (locationCode && locationCode !== 'null' && locationCode !== 'undefined' && locationCode !== 'GPS') {
-68|             return locationCode;
-69|         }
-70| 
-71|         return '?';
-72|     };
-73| })();
-
-# ============================================
-# FILE: public\js\chat-script.js
-# ============================================
-
-1| ﻿// ========== CHAT SCRIPT - MeetGay ==========
-2| // Centralise toute la logique restante du chat (fingerprint, historique coulissant, menus)
-3| 
-4| (function () {
-5|     // ========== 1. Fingerprint (si non déjà fait par fp-bundle.js) ==========
-6|     (async function () {
-7|         let fingerprint = sessionStorage.getItem('fingerprint');
-8|         if (!fingerprint) {
-9|             try {
-10|                 // Si FingerprintJS est déjà chargé globalement, on l'utilise
-11|                 if (typeof FingerprintJS !== 'undefined') {
-12|                     const fp = await FingerprintJS.load();
-13|                     const result = await fp.get();
-14|                     fingerprint = result.visitorId;
-15|                 } else {
-16|                     console.warn('FingerprintJS non trouvé, utilisation d\'un identifiant aléatoire');
-17|                     fingerprint = 'fp_' + Math.random().toString(36).substring(2);
-18|                 }
-19|                 sessionStorage.setItem('fingerprint', fingerprint);
-20|                 window.currentFingerprint = fingerprint;
-21|             } catch (err) {
-22|                 console.error('❌ Fingerprint impossible à générer:', err);
-23|                 fingerprint = 'fallback_' + Math.random().toString(36).substring(2);
-24|                 sessionStorage.setItem('fingerprint', fingerprint);
-25|                 window.currentFingerprint = fingerprint;
-26|             }
-27|         } else {
-28|             window.currentFingerprint = fingerprint;
-29|         }
-30|     })();
-31| 
-32|     // ========== 2. Vérifier si l'utilisateur est en session ==========
-33|     {
-34|         let user = localStorage.getItem('meetgay_user');
-35|         if (!user) {
-36|             window.location.href = '/login.html';
-37|             return;
-38|         }
-39|     }
-40| 
-41|     // ========== 3. Initialisation des textes dynamiques ==========
-42|     // TRADUCTION : Utilisation du nouveau système
-43|     document.addEventListener('DOMContentLoaded', () => {
-44|         const msgArea = document.getElementById('messageArea');
-45|         if (msgArea) msgArea.innerHTML = `<div class="empty-message"><i class="fas fa-comment"></i> ${Translator.t('chat.empty_message')}</div>`;
-46| 
-47|         const historyDiv = document.getElementById('historyList');
-48|         if (historyDiv) historyDiv.innerHTML = `<div class="empty-message" style="padding: 20px;"><i class="fas fa-comment-slash"></i> ${Translator.t('chat.no_conversation')}</div>`;
-49| 
-50|         const sendBtn = document.getElementById('sendBtn');
-51|         if (sendBtn) sendBtn.innerHTML = `<i class="fas fa-paper-plane"></i> ${Translator.t('chat.send_btn')}`;
-52| 
-53|         const messageInput = document.getElementById('messageInput');
-54|         if (messageInput) messageInput.placeholder = Translator.t('chat.placeholder_input');
-55|     });
-56| 
-57|     // ========== 4. Gestion de l'historique coulissant ==========
-58|     document.addEventListener('DOMContentLoaded', function () {
-59|         const historyInner = document.getElementById('historyInner');
-60|         const historyTab = document.getElementById('historyTab');
-61|         const closeBtn = document.getElementById('closeInnerSlider');
-62| 
-63|         // État du décalage du bouton (false = position normale)
-64|         let tabOffset = false;
-65| 
-66|         // Fonction pour décaler ou remettre le bouton
-67|         function toggleTabOffset() {
-68|             if (!historyTab) return;
-69|             if (tabOffset) {
-70|                 historyTab.style.right = '0';
-71|                 tabOffset = false;
-72|             } else {
-73|                 historyTab.style.right = '-10px';
-74|                 tabOffset = true;
-75|             }
-76|         }
-77| 
-78|         if (historyInner) {
-79|             historyInner.classList.remove('open');
-80|         }
-81| 
-82|         if (historyTab && historyInner) {
-83|             historyTab.addEventListener('click', function (e) {
-84|                 e.stopPropagation();
-85|                 historyInner.classList.toggle('open');
-86|                 toggleTabOffset(); // ← décaler/remettre le bouton au clic
-87|             });
-88|         }
-89| 
-90|         if (closeBtn && historyInner) {
-91|             closeBtn.addEventListener('click', function () {
-92|                 historyInner.classList.remove('open');
-93|                 // Quand on ferme avec la croix, on remet aussi le bouton
-94|                 if (historyTab) historyTab.style.right = '0';
-95|                 tabOffset = false;
-96|             });
-97|         }
-98|     });
-99| 
-100|     // ========== 5. GÉNÉRATION DES MENUS ==========
-101|     (function initMenus() {
-102|         const menuList = document.getElementById('newMenusList');
-103|         const windowContent = document.getElementById('windowContent');
-104|         const windowPlaceholder = document.getElementById('windowPlaceholder');
-105| 
-106|         if (!menuList) {
-107|             setTimeout(initMenus, 500);
-108|             return;
-109|         }
-110| 
-111|         // Fonction pour créer les menus
-112|         function displayMenus() {
-113|             // Vérifier que les données existent
-114|             if (!window.MENUS_DATA || !window.CONTENTS_DATA) {
-115|                 console.error('❌ Données des menus non chargées');
-116|                 return;
-117|             }
-118| 
-119|             menuList.innerHTML = '';
-120| 
-121|             window.MENUS_DATA.forEach(menu => {
-122|                 const item = document.createElement('div');
-123|                 item.className = 'new-menu-item';
-124|                 item.innerHTML = `<i class="fas ${menu.icon}"></i><span>${menu.title}</span>`;
-125| 
-126|                 item.onclick = function () {
-127|                     // Afficher le contenu
-128|                     if (windowPlaceholder) windowPlaceholder.style.display = 'none';
-129|                     if (windowContent) {
-130|                         windowContent.style.display = 'block';
-131|                         windowContent.innerHTML = window.CONTENTS_DATA[menu.id] ||
-132|                             `<div class="dynamic-content"><h3>${Translator.t('chat.content_coming')}</h3></div>`;
-133|                     }
-134| 
-135|                     // Fermer le hamburger sur mobile
-136|                     const menuContainer = document.getElementById('menus');
-137|                     const toggleBtn = document.getElementById('menuToggleBtn');
-138|                     if (window.innerWidth <= 710 && menuContainer && toggleBtn) {
-139|                         menuContainer.classList.remove('open');
-140|                         toggleBtn.classList.remove('open');
-141|                         toggleBtn.textContent = '☰';
-142|                     }
-143|                 };
-144| 
-145|                 menuList.appendChild(item);
-146|             });
-147| 
-148|             console.log('✅ Menus chargés :', window.MENUS_DATA.length);
-149|         }
-150| 
-151|         // Vérifier si les données sont déjà chargées
-152|         if (window.MENUS_DATA && window.CONTENTS_DATA) {
-153|             displayMenus();
-154|             return;
-155|         }
-156| 
-157|         // Sinon charger le fichier
-158|         const script = document.createElement('script');
-159|         script.src = '/js/menus-data.js';
-160|         script.onload = function () {
-161|             // Attendre que les données soient disponibles
-162|             let attempts = 0;
-163|             const checkData = setInterval(() => {
-164|                 if (window.MENUS_DATA && window.CONTENTS_DATA) {
-165|                     clearInterval(checkData);
-166|                     displayMenus();
-167|                 } else if (attempts > 20) {
-168|                     clearInterval(checkData);
-169|                     console.error('❌ Impossible de charger les données');
-170|                 }
-171|                 attempts++;
-172|             }, 100);
-173|         };
-174|         script.onerror = function () {
-175|             console.error('❌ Fichier menus-data.js introuvable');
-176|         };
-177|         document.head.appendChild(script);
-178|     })();
-179| 
-180|     // ========== HAMBURGER ==========
-181|     (function initHamburger() {
-182|         const toggleBtn = document.getElementById('menuToggleBtn');
-183|         const menu = document.getElementById('menus');
-184| 
-185|         if (!toggleBtn || !menu) return;
-186| 
-187|         toggleBtn.addEventListener('click', function (e) {
-188|             e.stopPropagation();
-189|             menu.classList.toggle('open');
-190|             toggleBtn.classList.toggle('open');
-191|             toggleBtn.textContent = menu.classList.contains('open') ? '✕' : '☰';
-192|         });
-193| 
-194|         document.addEventListener('click', function (e) {
-195|             if (menu.classList.contains('open') &&
-196|                 !menu.contains(e.target) &&
-197|                 !toggleBtn.contains(e.target)) {
-198|                 menu.classList.remove('open');
-199|                 toggleBtn.classList.remove('open');
-200|                 toggleBtn.textContent = '☰';
-201|             }
-202|         });
-203|     })();
-204| 
-205| 
-206|     (function () {
-207|         'use strict';
-208| 
-209|         // Lecture des media queries CSS (vous les modifiez dans le CSS)
-210|         const desktopMQ = window.matchMedia('(min-width: 1081px)');
-211|         const mobileMQ = window.matchMedia('(max-width: 350px)');
-212|         // Entre 351px et 1080px = mode desktop également
-213| 
-214|         // === VERSION DESKTOP ===
-215|         function initDesktopVersion() {
-216|             const nav = document.getElementById('mobileNav');
-217|             const panel = document.getElementById('navSettingsPanel');
-218|             const settingsBtn = document.getElementById('navSettingsBtn');
-219|             const navButtons = document.querySelectorAll('.mobile-nav button:not(#toggleNavBtn)');
-220| 
-221|             let isPanelOpen = false;
-222|             let animationTimer = null;
-223| 
-224|             if (nav) nav.style.display = 'flex';
-225| 
-226|             // Bouton bleu
-227|             const oldToggleBtn = document.getElementById('toggleNavBtn');
-228|             if (oldToggleBtn) {
-229|                 const newToggleBtn = oldToggleBtn.cloneNode(true);
-230|                 oldToggleBtn.parentNode.replaceChild(newToggleBtn, oldToggleBtn);
-231|                 newToggleBtn.onclick = function (e) {
-232|                     e.preventDefault();
-233|                     const isVisible = navButtons[0]?.classList.contains('hidden');
-234|                     navButtons.forEach(btn => {
-235|                         if (isVisible) btn.classList.remove('hidden');
-236|                         else btn.classList.add('hidden');
-237|                     });
-238|                     localStorage.setItem('mobileNavVisible', !isVisible);
-239|                 };
-240|             }
-241| 
-242|             function setPanelOrientation() {
-243|                 if (!panel || !nav) return;
-244|                 const pos = nav.getAttribute('data-position') || 'bottom';
-245|                 panel.classList.remove('horizontal', 'vertical');
-246|                 if (pos === 'left' || pos === 'right') {
-247|                     panel.classList.add('vertical');
-248|                 } else {
-249|                     panel.classList.add('horizontal');
-250|                 }
-251|             }
-252| 
-253|             function positionPanel() {
-254|                 if (!panel || !nav) return;
-255|                 const navRect = nav.getBoundingClientRect();
-256|                 const panelW = panel.offsetWidth;
-257|                 const panelH = panel.offsetHeight;
-258|                 const pos = nav.getAttribute('data-position') || 'bottom';
-259|                 if (panelW === 0 || panelH === 0) return;
-260| 
-261|                 let top, left;
-262|                 switch (pos) {
-263|                     case 'left':
-264|                         left = navRect.right + 8;
-265|                         top = navRect.top + (navRect.height / 2) - (panelH / 2);
-266|                         break;
-267|                     case 'right':
-268|                         left = navRect.left - panelW - 8;
-269|                         top = navRect.top + (navRect.height / 2) - (panelH / 2);
-270|                         break;
-271|                     case 'top':
-272|                         left = navRect.left;
-273|                         top = navRect.bottom + 8;
-274|                         break;
-275|                     default:
-276|                         left = navRect.left;
-277|                         top = navRect.top - panelH - 8;
-278|                         break;
-279|                 }
-280| 
-281|                 if (left < 5) left = 5;
-282|                 if (left + panelW > window.innerWidth - 5) left = window.innerWidth - panelW - 5;
-283|                 if (top < 5) top = 5;
-284|                 if (top + panelH > window.innerHeight - 5) {
-285|                     if (pos === 'top') top = navRect.top - panelH - 8;
-286|                     else if (pos === 'bottom') top = navRect.bottom + 8;
-287|                     else top = window.innerHeight - panelH - 5;
-288|                 }
-289| 
-290|                 panel.style.top = top + 'px';
-291|                 panel.style.left = left + 'px';
-292|             }
-293| 
-294|             function openPanel() {
-295|                 if (!panel) return;
-296|                 panel.style.display = 'flex';
-297|                 isPanelOpen = true;
-298|                 setPanelOrientation();
-299|                 positionPanel();
-300|             }
-301| 
-302|             function closePanel() {
-303|                 if (!panel) return;
-304|                 panel.style.display = 'none';
-305|                 isPanelOpen = false;
-306|                 if (animationTimer) clearTimeout(animationTimer);
-307|             }
-308| 
-309|             function togglePanel(e) {
-310|                 e.stopPropagation();
-311|                 if (isPanelOpen) closePanel();
-312|                 else openPanel();
-313|             }
-314| 
-315|             function setNavPosition(position) {
-316|                 if (!nav) return;
-317|                 nav.setAttribute('data-position', position);
-318|                 localStorage.setItem('mobileNavPosition', position);
-319|                 if (isPanelOpen) {
-320|                     if (animationTimer) clearTimeout(animationTimer);
-321|                     animationTimer = setTimeout(() => {
-322|                         setPanelOrientation();
-323|                         positionPanel();
-324|                         animationTimer = null;
-325|                     }, 320);
-326|                 }
-327|             }
-328| 
-329|             function loadSavedSettings() {
-330|                 const savedPos = localStorage.getItem('mobileNavPosition');
-331|                 if (savedPos && ['top', 'bottom', 'left', 'right'].includes(savedPos)) {
-332|                     nav.setAttribute('data-position', savedPos);
-333|                 } else {
-334|                     nav.setAttribute('data-position', 'bottom');
-335|                 }
-336|                 const savedVis = localStorage.getItem('mobileNavVisible');
-337|                 if (savedVis === 'true') navButtons.forEach(btn => btn.classList.add('hidden'));
-338|                 else if (savedVis === 'false') navButtons.forEach(btn => btn.classList.remove('hidden'));
-339|             }
-340| 
-341|             function resetAll() {
-342|                 closePanel();
-343|                 localStorage.removeItem('mobileNavPosition');
-344|                 localStorage.removeItem('mobileNavVisible');
-345|                 location.reload();
-346|             }
-347| 
-348|             function handleClickOutside(e) {
-349|                 if (!isPanelOpen) return;
-350|                 if (!nav.contains(e.target) && !panel.contains(e.target)) closePanel();
-351|             }
-352| 
-353|             function scrollToTarget(e) {
-354|                 const btn = e.currentTarget;
-355|                 const targetId = btn.getAttribute('data-target');
-356|                 if (!targetId) return;
-357|                 e.preventDefault();
-358|                 const target = document.getElementById(targetId);
-359|                 if (target) {
-360|                     closePanel();
-361|                     const offset = nav.getAttribute('data-position') === 'top' ? nav.offsetHeight + 20 : 80;
-362|                     const pos = target.getBoundingClientRect().top + window.scrollY - offset;
-363|                     window.scrollTo({ top: pos, behavior: 'smooth' });
-364|                 }
-365|             }
-366| 
-367|             if (nav && panel) {
-368|                 loadSavedSettings();
-369|                 if (settingsBtn) settingsBtn.onclick = togglePanel;
-370|                 document.getElementById('navPosTop')?.addEventListener('click', () => setNavPosition('top'));
-371|                 document.getElementById('navPosBottom')?.addEventListener('click', () => setNavPosition('bottom'));
-372|                 document.getElementById('navPosLeft')?.addEventListener('click', () => setNavPosition('left'));
-373|                 document.getElementById('navPosRight')?.addEventListener('click', () => setNavPosition('right'));
-374|                 document.getElementById('navReset')?.addEventListener('click', resetAll);
-375|                 document.querySelectorAll('[data-target]').forEach(btn => {
-376|                     btn.addEventListener('click', scrollToTarget);
-377|                 });
-378|                 document.addEventListener('click', handleClickOutside);
-379|                 window.addEventListener('resize', () => { if (isPanelOpen) positionPanel(); });
-380|             }
-381|         }
-382| 
-383|         // === VERSION MOBILE (très petits écrans) ===
-384|         function initMobileVersion() {
-385|             const oldNav = document.getElementById('mobileNav');
-386|             if (oldNav) oldNav.style.display = 'none';
-387| 
-388|             let menuBtn = document.getElementById('mobileMenuBtn');
-389|             if (!menuBtn) {
-390|                 menuBtn = document.createElement('button');
-391|                 menuBtn.id = 'mobileMenuBtn';
-392|                 menuBtn.innerHTML = '☰';
-393|                 document.body.appendChild(menuBtn);
-394|             }
-395| 
-396|             let panel = document.getElementById('mobileNavPanel');
-397|             if (!panel) {
-398|                 panel = document.createElement('div');
-399|                 panel.id = 'mobileNavPanel';
-400|                 panel.innerHTML = `
-401|                 <div class="mobile-panel-buttons">
-402|                     <button data-target="connectes">👥<span>${Translator.t('chat.connected_btn')}</span></button>
-403|                     <button data-target="chat">💬<span>${Translator.t('chat.chat_btn')}</span></button>
-404|                     <button data-target="new-window">📦<span>${Translator.t('chat.new_btn')}</span></button>
-405|                     <button data-target="menus">📋<span>${Translator.t('chat.menus_btn')}</span></button>
-406|                 </div>
-407|             `;
-408|                 document.body.appendChild(panel);
-409|             }
-410| 
-411|             let isOpen = false;
-412| 
-413|             function openPanel() {
-414|                 panel.classList.add('open');
-415|                 isOpen = true;
-416|             }
-417| 
-418|             function closePanel() {
-419|                 panel.classList.remove('open');
-420|                 isOpen = false;
-421|             }
-422| 
-423|             function togglePanel() {
-424|                 if (isOpen) closePanel();
-425|                 else openPanel();
-426|             }
-427| 
-428|             function scrollToTarget(e) {
-429|                 const btn = e.currentTarget;
-430|                 const targetId = btn.getAttribute('data-target');
-431|                 if (!targetId) return;
-432|                 e.preventDefault();
-433|                 const target = document.getElementById(targetId);
-434|                 if (target) {
-435|                     const pos = target.getBoundingClientRect().top + window.scrollY - 70;
-436|                     window.scrollTo({ top: pos, behavior: 'smooth' });
-437|                 }
-438|             }
-439| 
-440|             menuBtn.addEventListener('click', togglePanel);
-441|             document.querySelectorAll('#mobileNavPanel [data-target]').forEach(btn => {
-442|                 btn.addEventListener('click', scrollToTarget);
-443|             });
-444| 
-445|             document.addEventListener('click', function (e) {
-446|                 if (isOpen && !panel.contains(e.target) && e.target !== menuBtn) {
-447|                     closePanel();
-448|                 }
-449|             });
-450|         }
-451| 
-452|         // === LANCEMENT (basé sur les media queries CSS) ===
-453|         function detectAndInit() {
-454|             if (mobileMQ.matches) {
-455|                 initMobileVersion();
-456|             } else {
-457|                 initDesktopVersion();
-458|             }
-459|         }
-460| 
-461|         detectAndInit();
-462| 
-463|         // === REDIMENSIONNEMENT ===
-464|         let resizeTimer;
-465|         desktopMQ.addEventListener('change', function () {
-466|             if (resizeTimer) clearTimeout(resizeTimer);
-467|             resizeTimer = setTimeout(() => location.reload(), 150);
-468|         });
-469|         mobileMQ.addEventListener('change', function () {
-470|             if (resizeTimer) clearTimeout(resizeTimer);
-471|             resizeTimer = setTimeout(() => location.reload(), 150);
-472|         });
-473|     })();
-474| 
-475| })();
+# 3. public\chat.html
 
 # ============================================
 # FILE: public\js\chat.js
@@ -2179,6 +1620,486 @@ Ne fais pas de supposition, relis attentivement tout le contenu."
 1602| });
 
 # ============================================
+# FILE: public\js\chat-script.js
+# ============================================
+
+1| ﻿// ========== CHAT SCRIPT - MeetGay ==========
+2| // Centralise toute la logique restante du chat (fingerprint, historique coulissant, menus)
+3| 
+4| (function () {
+5|     // ========== 1. Fingerprint (si non déjà fait par fp-bundle.js) ==========
+6|     (async function () {
+7|         let fingerprint = sessionStorage.getItem('fingerprint');
+8|         if (!fingerprint) {
+9|             try {
+10|                 // Si FingerprintJS est déjà chargé globalement, on l'utilise
+11|                 if (typeof FingerprintJS !== 'undefined') {
+12|                     const fp = await FingerprintJS.load();
+13|                     const result = await fp.get();
+14|                     fingerprint = result.visitorId;
+15|                 } else {
+16|                     console.warn('FingerprintJS non trouvé, utilisation d\'un identifiant aléatoire');
+17|                     fingerprint = 'fp_' + Math.random().toString(36).substring(2);
+18|                 }
+19|                 sessionStorage.setItem('fingerprint', fingerprint);
+20|                 window.currentFingerprint = fingerprint;
+21|             } catch (err) {
+22|                 console.error('❌ Fingerprint impossible à générer:', err);
+23|                 fingerprint = 'fallback_' + Math.random().toString(36).substring(2);
+24|                 sessionStorage.setItem('fingerprint', fingerprint);
+25|                 window.currentFingerprint = fingerprint;
+26|             }
+27|         } else {
+28|             window.currentFingerprint = fingerprint;
+29|         }
+30|     })();
+31| 
+32|     // ========== 2. Vérifier si l'utilisateur est en session ==========
+33|     {
+34|         let user = localStorage.getItem('meetgay_user');
+35|         if (!user) {
+36|             window.location.href = '/login.html';
+37|             return;
+38|         }
+39|     }
+40| 
+41|     // ========== 3. Initialisation des textes dynamiques ==========
+42|     // TRADUCTION : Utilisation du nouveau système
+43|     document.addEventListener('DOMContentLoaded', () => {
+44|         const msgArea = document.getElementById('messageArea');
+45|         if (msgArea) msgArea.innerHTML = `<div class="empty-message"><i class="fas fa-comment"></i> ${Translator.t('chat.empty_message')}</div>`;
+46| 
+47|         const historyDiv = document.getElementById('historyList');
+48|         if (historyDiv) historyDiv.innerHTML = `<div class="empty-message" style="padding: 20px;"><i class="fas fa-comment-slash"></i> ${Translator.t('chat.no_conversation')}</div>`;
+49| 
+50|         const sendBtn = document.getElementById('sendBtn');
+51|         if (sendBtn) sendBtn.innerHTML = `<i class="fas fa-paper-plane"></i> ${Translator.t('chat.send_btn')}`;
+52| 
+53|         const messageInput = document.getElementById('messageInput');
+54|         if (messageInput) messageInput.placeholder = Translator.t('chat.placeholder_input');
+55|     });
+56| 
+57|     // ========== 4. Gestion de l'historique coulissant ==========
+58|     document.addEventListener('DOMContentLoaded', function () {
+59|         const historyInner = document.getElementById('historyInner');
+60|         const historyTab = document.getElementById('historyTab');
+61|         const closeBtn = document.getElementById('closeInnerSlider');
+62| 
+63|         // État du décalage du bouton (false = position normale)
+64|         let tabOffset = false;
+65| 
+66|         // Fonction pour décaler ou remettre le bouton
+67|         function toggleTabOffset() {
+68|             if (!historyTab) return;
+69|             if (tabOffset) {
+70|                 historyTab.style.right = '0';
+71|                 tabOffset = false;
+72|             } else {
+73|                 historyTab.style.right = '-10px';
+74|                 tabOffset = true;
+75|             }
+76|         }
+77| 
+78|         if (historyInner) {
+79|             historyInner.classList.remove('open');
+80|         }
+81| 
+82|         if (historyTab && historyInner) {
+83|             historyTab.addEventListener('click', function (e) {
+84|                 e.stopPropagation();
+85|                 historyInner.classList.toggle('open');
+86|                 toggleTabOffset(); // ← décaler/remettre le bouton au clic
+87|             });
+88|         }
+89| 
+90|         if (closeBtn && historyInner) {
+91|             closeBtn.addEventListener('click', function () {
+92|                 historyInner.classList.remove('open');
+93|                 // Quand on ferme avec la croix, on remet aussi le bouton
+94|                 if (historyTab) historyTab.style.right = '0';
+95|                 tabOffset = false;
+96|             });
+97|         }
+98|     });
+99| 
+100|     // ========== 5. GÉNÉRATION DES MENUS ==========
+101|     (function initMenus() {
+102|         const menuList = document.getElementById('newMenusList');
+103|         const windowContent = document.getElementById('windowContent');
+104|         const windowPlaceholder = document.getElementById('windowPlaceholder');
+105| 
+106|         if (!menuList) {
+107|             setTimeout(initMenus, 500);
+108|             return;
+109|         }
+110| 
+111|         // Fonction pour créer les menus
+112|         function displayMenus() {
+113|             // Vérifier que les données existent
+114|             if (!window.MENUS_DATA || !window.CONTENTS_DATA) {
+115|                 console.error('❌ Données des menus non chargées');
+116|                 return;
+117|             }
+118| 
+119|             menuList.innerHTML = '';
+120| 
+121|             window.MENUS_DATA.forEach(menu => {
+122|                 const item = document.createElement('div');
+123|                 item.className = 'new-menu-item';
+124|                 item.innerHTML = `<i class="fas ${menu.icon}"></i><span>${menu.title}</span>`;
+125| 
+126|                 item.onclick = function () {
+127|                     // Afficher le contenu
+128|                     if (windowPlaceholder) windowPlaceholder.style.display = 'none';
+129|                     if (windowContent) {
+130|                         windowContent.style.display = 'block';
+131|                         windowContent.innerHTML = window.CONTENTS_DATA[menu.id] ||
+132|                             `<div class="dynamic-content"><h3>${Translator.t('chat.content_coming')}</h3></div>`;
+133|                     }
+134| 
+135|                     // Fermer le hamburger sur mobile
+136|                     const menuContainer = document.getElementById('menus');
+137|                     const toggleBtn = document.getElementById('menuToggleBtn');
+138|                     if (window.innerWidth <= 710 && menuContainer && toggleBtn) {
+139|                         menuContainer.classList.remove('open');
+140|                         toggleBtn.classList.remove('open');
+141|                         toggleBtn.textContent = '☰';
+142|                     }
+143|                 };
+144| 
+145|                 menuList.appendChild(item);
+146|             });
+147| 
+148|             console.log('✅ Menus chargés :', window.MENUS_DATA.length);
+149|         }
+150| 
+151|         // Vérifier si les données sont déjà chargées
+152|         if (window.MENUS_DATA && window.CONTENTS_DATA) {
+153|             displayMenus();
+154|             return;
+155|         }
+156| 
+157|         // Sinon charger le fichier
+158|         const script = document.createElement('script');
+159|         script.src = '/js/menus-data.js';
+160|         script.onload = function () {
+161|             // Attendre que les données soient disponibles
+162|             let attempts = 0;
+163|             const checkData = setInterval(() => {
+164|                 if (window.MENUS_DATA && window.CONTENTS_DATA) {
+165|                     clearInterval(checkData);
+166|                     displayMenus();
+167|                 } else if (attempts > 20) {
+168|                     clearInterval(checkData);
+169|                     console.error('❌ Impossible de charger les données');
+170|                 }
+171|                 attempts++;
+172|             }, 100);
+173|         };
+174|         script.onerror = function () {
+175|             console.error('❌ Fichier menus-data.js introuvable');
+176|         };
+177|         document.head.appendChild(script);
+178|     })();
+179| 
+180|     // ========== HAMBURGER ==========
+181|     (function initHamburger() {
+182|         const toggleBtn = document.getElementById('menuToggleBtn');
+183|         const menu = document.getElementById('menus');
+184| 
+185|         if (!toggleBtn || !menu) return;
+186| 
+187|         toggleBtn.addEventListener('click', function (e) {
+188|             e.stopPropagation();
+189|             menu.classList.toggle('open');
+190|             toggleBtn.classList.toggle('open');
+191|             toggleBtn.textContent = menu.classList.contains('open') ? '✕' : '☰';
+192|         });
+193| 
+194|         document.addEventListener('click', function (e) {
+195|             if (menu.classList.contains('open') &&
+196|                 !menu.contains(e.target) &&
+197|                 !toggleBtn.contains(e.target)) {
+198|                 menu.classList.remove('open');
+199|                 toggleBtn.classList.remove('open');
+200|                 toggleBtn.textContent = '☰';
+201|             }
+202|         });
+203|     })();
+204| 
+205| 
+206|     (function () {
+207|         'use strict';
+208| 
+209|         // Lecture des media queries CSS (vous les modifiez dans le CSS)
+210|         const desktopMQ = window.matchMedia('(min-width: 1081px)');
+211|         const mobileMQ = window.matchMedia('(max-width: 350px)');
+212|         // Entre 351px et 1080px = mode desktop également
+213| 
+214|         // === VERSION DESKTOP ===
+215|         function initDesktopVersion() {
+216|             const nav = document.getElementById('mobileNav');
+217|             const panel = document.getElementById('navSettingsPanel');
+218|             const settingsBtn = document.getElementById('navSettingsBtn');
+219|             const navButtons = document.querySelectorAll('.mobile-nav button:not(#toggleNavBtn)');
+220| 
+221|             let isPanelOpen = false;
+222|             let animationTimer = null;
+223| 
+224|             if (nav) nav.style.display = 'flex';
+225| 
+226|             // Bouton bleu
+227|             const oldToggleBtn = document.getElementById('toggleNavBtn');
+228|             if (oldToggleBtn) {
+229|                 const newToggleBtn = oldToggleBtn.cloneNode(true);
+230|                 oldToggleBtn.parentNode.replaceChild(newToggleBtn, oldToggleBtn);
+231|                 newToggleBtn.onclick = function (e) {
+232|                     e.preventDefault();
+233|                     const isVisible = navButtons[0]?.classList.contains('hidden');
+234|                     navButtons.forEach(btn => {
+235|                         if (isVisible) btn.classList.remove('hidden');
+236|                         else btn.classList.add('hidden');
+237|                     });
+238|                     localStorage.setItem('mobileNavVisible', !isVisible);
+239|                 };
+240|             }
+241| 
+242|             function setPanelOrientation() {
+243|                 if (!panel || !nav) return;
+244|                 const pos = nav.getAttribute('data-position') || 'bottom';
+245|                 panel.classList.remove('horizontal', 'vertical');
+246|                 if (pos === 'left' || pos === 'right') {
+247|                     panel.classList.add('vertical');
+248|                 } else {
+249|                     panel.classList.add('horizontal');
+250|                 }
+251|             }
+252| 
+253|             function positionPanel() {
+254|                 if (!panel || !nav) return;
+255|                 const navRect = nav.getBoundingClientRect();
+256|                 const panelW = panel.offsetWidth;
+257|                 const panelH = panel.offsetHeight;
+258|                 const pos = nav.getAttribute('data-position') || 'bottom';
+259|                 if (panelW === 0 || panelH === 0) return;
+260| 
+261|                 let top, left;
+262|                 switch (pos) {
+263|                     case 'left':
+264|                         left = navRect.right + 8;
+265|                         top = navRect.top + (navRect.height / 2) - (panelH / 2);
+266|                         break;
+267|                     case 'right':
+268|                         left = navRect.left - panelW - 8;
+269|                         top = navRect.top + (navRect.height / 2) - (panelH / 2);
+270|                         break;
+271|                     case 'top':
+272|                         left = navRect.left;
+273|                         top = navRect.bottom + 8;
+274|                         break;
+275|                     default:
+276|                         left = navRect.left;
+277|                         top = navRect.top - panelH - 8;
+278|                         break;
+279|                 }
+280| 
+281|                 if (left < 5) left = 5;
+282|                 if (left + panelW > window.innerWidth - 5) left = window.innerWidth - panelW - 5;
+283|                 if (top < 5) top = 5;
+284|                 if (top + panelH > window.innerHeight - 5) {
+285|                     if (pos === 'top') top = navRect.top - panelH - 8;
+286|                     else if (pos === 'bottom') top = navRect.bottom + 8;
+287|                     else top = window.innerHeight - panelH - 5;
+288|                 }
+289| 
+290|                 panel.style.top = top + 'px';
+291|                 panel.style.left = left + 'px';
+292|             }
+293| 
+294|             function openPanel() {
+295|                 if (!panel) return;
+296|                 panel.style.display = 'flex';
+297|                 isPanelOpen = true;
+298|                 setPanelOrientation();
+299|                 positionPanel();
+300|             }
+301| 
+302|             function closePanel() {
+303|                 if (!panel) return;
+304|                 panel.style.display = 'none';
+305|                 isPanelOpen = false;
+306|                 if (animationTimer) clearTimeout(animationTimer);
+307|             }
+308| 
+309|             function togglePanel(e) {
+310|                 e.stopPropagation();
+311|                 if (isPanelOpen) closePanel();
+312|                 else openPanel();
+313|             }
+314| 
+315|             function setNavPosition(position) {
+316|                 if (!nav) return;
+317|                 nav.setAttribute('data-position', position);
+318|                 localStorage.setItem('mobileNavPosition', position);
+319|                 if (isPanelOpen) {
+320|                     if (animationTimer) clearTimeout(animationTimer);
+321|                     animationTimer = setTimeout(() => {
+322|                         setPanelOrientation();
+323|                         positionPanel();
+324|                         animationTimer = null;
+325|                     }, 320);
+326|                 }
+327|             }
+328| 
+329|             function loadSavedSettings() {
+330|                 const savedPos = localStorage.getItem('mobileNavPosition');
+331|                 if (savedPos && ['top', 'bottom', 'left', 'right'].includes(savedPos)) {
+332|                     nav.setAttribute('data-position', savedPos);
+333|                 } else {
+334|                     nav.setAttribute('data-position', 'bottom');
+335|                 }
+336|                 const savedVis = localStorage.getItem('mobileNavVisible');
+337|                 if (savedVis === 'true') navButtons.forEach(btn => btn.classList.add('hidden'));
+338|                 else if (savedVis === 'false') navButtons.forEach(btn => btn.classList.remove('hidden'));
+339|             }
+340| 
+341|             function resetAll() {
+342|                 closePanel();
+343|                 localStorage.removeItem('mobileNavPosition');
+344|                 localStorage.removeItem('mobileNavVisible');
+345|                 location.reload();
+346|             }
+347| 
+348|             function handleClickOutside(e) {
+349|                 if (!isPanelOpen) return;
+350|                 if (!nav.contains(e.target) && !panel.contains(e.target)) closePanel();
+351|             }
+352| 
+353|             function scrollToTarget(e) {
+354|                 const btn = e.currentTarget;
+355|                 const targetId = btn.getAttribute('data-target');
+356|                 if (!targetId) return;
+357|                 e.preventDefault();
+358|                 const target = document.getElementById(targetId);
+359|                 if (target) {
+360|                     closePanel();
+361|                     const offset = nav.getAttribute('data-position') === 'top' ? nav.offsetHeight + 20 : 80;
+362|                     const pos = target.getBoundingClientRect().top + window.scrollY - offset;
+363|                     window.scrollTo({ top: pos, behavior: 'smooth' });
+364|                 }
+365|             }
+366| 
+367|             if (nav && panel) {
+368|                 loadSavedSettings();
+369|                 if (settingsBtn) settingsBtn.onclick = togglePanel;
+370|                 document.getElementById('navPosTop')?.addEventListener('click', () => setNavPosition('top'));
+371|                 document.getElementById('navPosBottom')?.addEventListener('click', () => setNavPosition('bottom'));
+372|                 document.getElementById('navPosLeft')?.addEventListener('click', () => setNavPosition('left'));
+373|                 document.getElementById('navPosRight')?.addEventListener('click', () => setNavPosition('right'));
+374|                 document.getElementById('navReset')?.addEventListener('click', resetAll);
+375|                 document.querySelectorAll('[data-target]').forEach(btn => {
+376|                     btn.addEventListener('click', scrollToTarget);
+377|                 });
+378|                 document.addEventListener('click', handleClickOutside);
+379|                 window.addEventListener('resize', () => { if (isPanelOpen) positionPanel(); });
+380|             }
+381|         }
+382| 
+383|         // === VERSION MOBILE (très petits écrans) ===
+384|         function initMobileVersion() {
+385|             const oldNav = document.getElementById('mobileNav');
+386|             if (oldNav) oldNav.style.display = 'none';
+387| 
+388|             let menuBtn = document.getElementById('mobileMenuBtn');
+389|             if (!menuBtn) {
+390|                 menuBtn = document.createElement('button');
+391|                 menuBtn.id = 'mobileMenuBtn';
+392|                 menuBtn.innerHTML = '☰';
+393|                 document.body.appendChild(menuBtn);
+394|             }
+395| 
+396|             let panel = document.getElementById('mobileNavPanel');
+397|             if (!panel) {
+398|                 panel = document.createElement('div');
+399|                 panel.id = 'mobileNavPanel';
+400|                 panel.innerHTML = `
+401|                 <div class="mobile-panel-buttons">
+402|                     <button data-target="connectes">👥<span>${Translator.t('chat.connected_btn')}</span></button>
+403|                     <button data-target="chat">💬<span>${Translator.t('chat.chat_btn')}</span></button>
+404|                     <button data-target="new-window">📦<span>${Translator.t('chat.new_btn')}</span></button>
+405|                     <button data-target="menus">📋<span>${Translator.t('chat.menus_btn')}</span></button>
+406|                 </div>
+407|             `;
+408|                 document.body.appendChild(panel);
+409|             }
+410| 
+411|             let isOpen = false;
+412| 
+413|             function openPanel() {
+414|                 panel.classList.add('open');
+415|                 isOpen = true;
+416|             }
+417| 
+418|             function closePanel() {
+419|                 panel.classList.remove('open');
+420|                 isOpen = false;
+421|             }
+422| 
+423|             function togglePanel() {
+424|                 if (isOpen) closePanel();
+425|                 else openPanel();
+426|             }
+427| 
+428|             function scrollToTarget(e) {
+429|                 const btn = e.currentTarget;
+430|                 const targetId = btn.getAttribute('data-target');
+431|                 if (!targetId) return;
+432|                 e.preventDefault();
+433|                 const target = document.getElementById(targetId);
+434|                 if (target) {
+435|                     const pos = target.getBoundingClientRect().top + window.scrollY - 70;
+436|                     window.scrollTo({ top: pos, behavior: 'smooth' });
+437|                 }
+438|             }
+439| 
+440|             menuBtn.addEventListener('click', togglePanel);
+441|             document.querySelectorAll('#mobileNavPanel [data-target]').forEach(btn => {
+442|                 btn.addEventListener('click', scrollToTarget);
+443|             });
+444| 
+445|             document.addEventListener('click', function (e) {
+446|                 if (isOpen && !panel.contains(e.target) && e.target !== menuBtn) {
+447|                     closePanel();
+448|                 }
+449|             });
+450|         }
+451| 
+452|         // === LANCEMENT (basé sur les media queries CSS) ===
+453|         function detectAndInit() {
+454|             if (mobileMQ.matches) {
+455|                 initMobileVersion();
+456|             } else {
+457|                 initDesktopVersion();
+458|             }
+459|         }
+460| 
+461|         detectAndInit();
+462| 
+463|         // === REDIMENSIONNEMENT ===
+464|         let resizeTimer;
+465|         desktopMQ.addEventListener('change', function () {
+466|             if (resizeTimer) clearTimeout(resizeTimer);
+467|             resizeTimer = setTimeout(() => location.reload(), 150);
+468|         });
+469|         mobileMQ.addEventListener('change', function () {
+470|             if (resizeTimer) clearTimeout(resizeTimer);
+471|             resizeTimer = setTimeout(() => location.reload(), 150);
+472|         });
+473|     })();
+474| 
+475| })();
+
+# ============================================
 # FILE: public\chat.html
 # ============================================
 
@@ -2383,7 +2304,7 @@ Ne fais pas de supposition, relis attentivement tout le contenu."
 199| </html>
 
 # ============================================
-# FIN DU FICHIER - 4 fichiers inclus
-# Généré le 2026-07-15 15:56:02
+# FIN DU FICHIER - 3 fichiers inclus
+# Généré le 2026-07-15 15:56:26
 # Tous les fichiers sont complets
 # ============================================
