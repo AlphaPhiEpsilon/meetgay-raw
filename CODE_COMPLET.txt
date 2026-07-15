@@ -1,6 +1,6 @@
 # MEETGAY - CODE COMPLET
-# Généré le 2026-07-15 13:43:34
-# 2 fichier(s) inclus
+# Généré le 2026-07-15 13:57:39
+# 6 fichier(s) inclus
 
 "⚠️ MODE ANALYSE TOTALE - Lecture exhaustive du code ci-dessous. 
 Vérifie chaque fichier listé dans le sommaire. 
@@ -8,135 +8,281 @@ Ne fais pas de supposition, relis attentivement tout le contenu."
 
 # ========== SOMMAIRE ==========
 
-# 1. public\index.html
+# 1. server.js
 # 2. public\js\login-script.js
+# 3. public\js\chat-script.js
+# 4. public\index.html
+# 5. public\login.html
+# 6. public\chat.html
 
 # ============================================
-# FILE: public\index.html
+# FILE: server.js
 # ============================================
 
-1| <!DOCTYPE html>
-2| <html lang="fr">
-3| 
-4| <head>
-5|     <meta charset="UTF-8">
-6|     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-7|     <link rel="icon" type="image/png" href="/favicon-16x16.png">
-8|     <link rel="icon"
-9|         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>">
-10|     <link rel="stylesheet" href="/css/common/reset.css">
-11|     <link rel="stylesheet" href="/css/layouts/footer.css">
-12|     <link rel="stylesheet" href="/css/pages/index.css">
-13|     <link rel="stylesheet" href="/fontawesome/css/all.min.css">
-14|     <title>MeetGay - Chat Belgique</title>
-15| </head>
-16| 
-17| <body>
-18|     <script>
-19|         // Stocker le token admin dans cookie pour que le serveur le voie
-20|         const token = localStorage.getItem('admin_token') || new URLSearchParams(window.location.search).get('token');
-21|         if (token) {
-22|             document.cookie = `admin_token=${token}; path=/`;
-23|             if (!localStorage.getItem('admin_token')) {
-24|                 localStorage.setItem('admin_token', token);
-25|             }
-26|         }
-27|     </script>
-28|     <div class="container">
-29|         <div class="welcome-box">
-30|             <h1><i class="fas fa-comment-dots"></i> MeetGay</h1>
-31|             <div class="subtitle"><i class="fas fa-map-marker-alt"></i> Belgique - Rencontres et discussions</div>
-32| 
-33|             <div class="lang-buttons">
-34|                 <button class="lang-btn fr" id="btnFr" disabled><i class="fas fa-flag-checkered"></i> Français</button>
-35|                 <button class="lang-btn nl" id="btnNl" disabled><i class="fas fa-flag-checkered"></i>
-36|                     Nederlands</button>
-37|             </div>
-38| 
-39|             <div class="features">
-40|                 <div class="feature"><i class="fas fa-envelope"></i> Messages privés</div>
-41|                 <div class="feature"><i class="fas fa-users"></i> Rencontres gay</div>
-42|                 <div class="feature"><i class="fas fa-comment-dots"></i> Chat instantané</div>
-43|             </div>
+1| // ============================================================
+2| // server.js - Cœur du chat MeetGay (version base de données)
+3| // ROLE: Point d'entrée - Monte les routes et lance le serveur
+4| // ============================================================
+5| 
+6| // ========== CHARGEMENT DES VARIABLES D'ENVIRONNEMENT ==========
+7| if (process.env.NODE_ENV !== 'production') {
+8|     try {
+9|         require('dotenv').config();
+10|         console.log('✅ dotenv chargé (environnement local)');
+11|     } catch (err) {
+12|         console.log('⚠️ dotenv non installé, utilisation des variables système');
+13|     }
+14| } else {
+15|     console.log('✅ Mode production, variables Render utilisées');
+16| }
+17| 
+18| // ========== IMPORTS ==========
+19| const express = require('express');
+20| const compression = require('compression');
+21| const http = require('http');
+22| const socketIo = require('socket.io');
+23| const jwt = require('jsonwebtoken');
+24| const { Pool } = require('pg');
+25| const { disconnectBannedUser } = require('./moderation');
+26| const path = require('path');
+27| const bcrypt = require('bcrypt');
+28| const session = require('express-session');
+29| const pgSession = require('connect-pg-simple')(session);
+30| 
+31| 
+32| // Modules internes
+33| const { cleanOldData } = require('./modules/cleanup.js');
+34| const contactRoutes = require('./modules/routes/api-contact.js');
+35| const pool = require('./modules/postgresql.js');
+36| const htmlRoutes = require('./modules/routes/html.js');
+37| const adminRoutes = require('./modules/routes/admin.js');
+38| const authRoutes = require('./modules/routes/api-auth.js');
+39| const messagesRoutes = require('./modules/routes/api-messages.js');
+40| const maintenanceMiddleware = require('./modules/middleware/maintenance.js');
+41| const socketHandlers = require('./modules/socket-handlers.js');
+42| // Route de géocodage
+43| const geocodeRoutes = require('./modules/routes/geocode');
 44| 
-45|             <div class="age-warning">
-46|                 <i class="fas fa-exclamation-triangle"></i> Site réservé aux personnes majeures (18+)
-47|             </div>
-48| 
-49|             <div class="age-verification-bottom">
-50|                 <div class="age-selector-small">
-51|                     <label><i class="fas fa-id-card"></i> Vérification âge :</label>
-52|                     <select id="ageSelect">
-53|                         <option value="">-- Sélectionner --</option>
-54|                         <option value="18plus"><i class="fas fa-check-circle"></i> J'ai +18 ans</option>
-55|                         <option value="18moins"><i class="fas fa-times-circle"></i> J'ai -18 ans</option>
-56|                     </select>
-57|                     <div id="ageError" class="age-error-small">
-58|                         <i class="fas fa-ban"></i> Désolé, site réservé aux 18+
-59|                     </div>
-60|                 </div>
-61|             </div>
-62|         </div>
-63|     </div>
-64|     <footer class="site-footer">
-65|         <div class="footer-content">
-66|             <i class="far fa-copyright"></i> 2026 MeetGay - Chat Belgique -
-67|             <a href="/mentions-legales.html"><i class="fas fa-gavel"></i> Mentions légales</a> -
-68|             <a href="/cgu.html"><i class="fas fa-file-contract"></i> CGU</a> -
-69|             <a href="/contact.html"><i class="fas fa-envelope"></i> Contact</a>
-70|         </div>
-71|     </footer>
+45| // JWT_SECRET pour les utilisateurs normaux
+46| const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
+47| 
+48| // ==========  VARIABLES GLOBALES (chargées depuis la base) ==========
+49| // Ces valeurs sont des "fallbacks" en cas d'erreur de lecture de la base
+50| let TEST_MODE = false;
+51| let REPORTS_THRESHOLD = 2;
+52| let REPORTS_WINDOW_MINUTES = 60;
+53| let TEMP_BAN_MINUTES = 10;
+54| let LOGS_RETENTION_DAYS = 30;
+55| let REPORTS_RETENTION_DAYS = 60;
+56| let AUTO_CLEANUP_ENABLED = true;
+57| let VISITOR_CLEANUP_ENABLED = false;
+58| let INACTIVITY_MINUTES = 2;
+59| let CLEANUP_INTERVAL_MINUTES = 1;
+60| let DEV_MODE = true;
+61| 
+62| // Fonction pour charger la config depuis la base de données
+63| async function loadConfigFromDatabase() {
+64|     try {
+65|         console.log('📂 Chargement des paramètres depuis la base de données...');
+66|         const result = await pool.query('SELECT key, value FROM settings');
+67| 
+68|         if (result.rows.length === 0) {
+69|             console.warn('⚠️ Aucun paramètre trouvé dans la base, utilisation des valeurs par défaut.');
+70|             return;
+71|         }
 72| 
-73|     <script>
-74|         const ageSelect = document.getElementById('ageSelect');
-75|         const btnFr = document.getElementById('btnFr');
-76|         const btnNl = document.getElementById('btnNl');
-77|         const ageError = document.getElementById('ageError');
-78| 
-79|         btnFr.disabled = true;
-80|         btnNl.disabled = true;
-81| 
-82|         ageSelect.addEventListener('change', function () {
-83|             const selectedValue = ageSelect.value;
-84| 
-85|             if (selectedValue === '18plus') {
-86|                 btnFr.disabled = false;
-87|                 btnNl.disabled = false;
-88|                 ageError.classList.remove('show');
-89|             }
-90|             else if (selectedValue === '18moins') {
-91|                 btnFr.disabled = true;
-92|                 btnNl.disabled = true;
-93|                 ageError.classList.add('show');
-94|             }
-95|             else {
-96|                 btnFr.disabled = true;
-97|                 btnNl.disabled = true;
-98|                 ageError.classList.remove('show');
-99|             }
-100|         });
-101| 
-102|         function setAgeVerified() {
-103|             sessionStorage.setItem('meetgay_age_verified', 'true');
-104|             sessionStorage.setItem('meetgay_age_verified_time', Date.now());
-105|         }
+73|         const settings = {};
+74|         result.rows.forEach(row => {
+75|             settings[row.key] = row.value;
+76|         });
+77| 
+78|         // Mettre à jour les variables globales
+79|         if (settings.test_mode !== undefined) TEST_MODE = settings.test_mode === 'true';
+80|         if (settings.reports_threshold !== undefined) REPORTS_THRESHOLD = parseInt(settings.reports_threshold) || 2;
+81|         if (settings.reports_window_minutes !== undefined) REPORTS_WINDOW_MINUTES = parseInt(settings.reports_window_minutes) || 60;
+82|         if (settings.temp_ban_minutes !== undefined) TEMP_BAN_MINUTES = parseInt(settings.temp_ban_minutes) || 10;
+83|         if (settings.logs_retention_days !== undefined) LOGS_RETENTION_DAYS = parseInt(settings.logs_retention_days) || 30;
+84|         if (settings.reports_retention_days !== undefined) REPORTS_RETENTION_DAYS = parseInt(settings.reports_retention_days) || 60;
+85|         if (settings.auto_cleanup_enabled !== undefined) AUTO_CLEANUP_ENABLED = settings.auto_cleanup_enabled === 'true';
+86|         if (settings.visitor_cleanup_enabled !== undefined) VISITOR_CLEANUP_ENABLED = settings.visitor_cleanup_enabled === 'true';
+87|         if (settings.inactivity_minutes !== undefined) INACTIVITY_MINUTES = parseInt(settings.inactivity_minutes) || 2;
+88|         if (settings.cleanup_interval_minutes !== undefined) CLEANUP_INTERVAL_MINUTES = parseInt(settings.cleanup_interval_minutes) || 1;
+89|         if (settings.dev_mode !== undefined) DEV_MODE = settings.dev_mode === 'true';
+90| 
+91|         console.log('✅ Paramètres chargés avec succès !');
+92|         console.log('   - DEV_MODE:', DEV_MODE);
+93|         console.log('   - VISITOR_CLEANUP_ENABLED:', VISITOR_CLEANUP_ENABLED);
+94|         console.log('   - INACTIVITY_MINUTES:', INACTIVITY_MINUTES);
+95|         console.log('   - REPORTS_THRESHOLD:', REPORTS_THRESHOLD);
+96|         // Afficher quelques autres paramètres clés
+97| 
+98|     } catch (err) {
+99|         console.error('❌ Erreur lors du chargement des paramètres :', err.message);
+100|         console.warn('⚠️ Utilisation des valeurs par défaut (fallback).');
+101|     }
+102| }
+103| 
+104| 
+105| 
 106| 
-107|         function chooseLanguage(lang) {
-108|             if (ageSelect.value !== '18plus') {
-109|                 ageError.classList.add('show');
-110|                 return;
-111|             }
-112|             setAgeVerified();
-113|             localStorage.setItem('MeetGay_lang', lang);
-114|             window.location.href = '/login.html';
-115|         }
-116| 
-117|         btnFr.onclick = () => chooseLanguage('fr');
-118|         btnNl.onclick = () => chooseLanguage('nl');
-119|     </script>
-120| </body>
-121| 
-122| </html>
+107| 
+108| // ==========  CONFIGURATION EXPRESS ==========
+109| const app = express();
+110| const server = http.createServer(app);
+111| 
+112| console.log('🔍 DB_USER:', process.env.DB_USER);
+113| console.log('🔍 DB_PASSWORD:', process.env.DB_PASSWORD ? '******' : 'MISSING');
+114| 
+115| // Compression
+116| app.use(compression({
+117|     level: 6,
+118|     threshold: 1024,
+119|     filter: (req, res) => {
+120|         if (req.path === '/socket.io/') return false;
+121|         return compression.filter(req, res);
+122|     }
+123| }));
+124| 
+125| app.use(express.json());
+126| app.use(express.text({ type: 'text/plain' }));
+127| 
+128| app.use(session({
+129|     store: new pgSession({
+130|         pool: pool,
+131|         tableName: 'session',
+132|         createTableIfMissing: false,
+133|         pruneSessionInterval: 60
+134|     }),
+135|     secret: 'un-super-secret-change-moi',
+136|     resave: false,
+137|     saveUninitialized: false,
+138|     cookie: {
+139|         httpOnly: true,
+140|         secure: false,
+141|         maxAge: 30 * 24 * 60 * 60 * 1000 // 30 jours
+142|     }
+143| }));
+144| 
+145| 
+146| app.use(maintenanceMiddleware(pool));
+147| contactRoutes(app);
+148| htmlRoutes(app, pool);
+149| messagesRoutes(app, pool);
+150| authRoutes(app, pool);
+151| geocodeRoutes(app);
+152| require('./modules/routes/api-block')(app, pool);
+153| 
+154| // ========== CONFIGURATION DES FICHIERS STATIQUES ==========
+155| 
+156| // 🔥 Détermine les options selon le mode
+157| const staticOptions = {
+158|     setHeaders: function (res, path) {
+159|         if (path.endsWith('.css')) {
+160|             res.setHeader('Content-Type', 'text/css');
+161|         }
+162|     }
+163| };
+164| 
+165| // 🔥 Si DEV_MODE est activé, désactive le cache
+166| if (DEV_MODE === true) {
+167|     staticOptions.etag = false;           // Désactive ETag
+168|     staticOptions.maxAge = 0;             // Pas de mise en cache
+169|     staticOptions.lastModified = false;   // Désactive Last-Modified
+170| 
+171|     // Ajoute des headers anti-cache
+172|     staticOptions.setHeaders = function (res, path) {
+173|         if (path.endsWith('.css')) {
+174|             res.setHeader('Content-Type', 'text/css');
+175|         }
+176|         // 🔥 Headers anti-cache pour TOUS les fichiers
+177|         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
+178|         res.setHeader('Pragma', 'no-cache');
+179|         res.setHeader('Expires', '0');
+180|     };
+181| 
+182|     console.log('🔥 MODE DÉVELOPPEMENT ACTIF - Cache désactivé');
+183| } else {
+184|     console.log('✅ MODE PRODUCTION - Cache activé');
+185| }
+186| 
+187| // Applique la configuration
+188| app.use(express.static('/var/www/meetgay/public', staticOptions));
+189| 
+190| app.use(express.json());
+191| 
+192| // 🔥 Middleware anti-cache (seulement en développement)
+193| if (DEV_MODE === true) {
+194|     app.use((req, res, next) => {
+195|         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
+196|         res.setHeader('Pragma', 'no-cache');
+197|         res.setHeader('Expires', '0');
+198|         next();
+199|     });
+200|     console.log('🔥 Middleware anti-cache activé');
+201| }
+202| 
+203| // ========== SOCKET.IO ==========
+204| const io = socketIo(server, {
+205|     cors: {
+206|         origin: "*",
+207|         methods: ["GET", "POST"],
+208|         credentials: true,
+209|         allowedHeaders: ["*"]
+210|     },
+211|     transports: ['websocket', 'polling'],
+212|     allowEIO3: true,
+213|     pingTimeout: 120000,    // ← 2 minutes (au lieu de 10)
+214|     pingInterval: 30000     // ← 30 secondes (au lieu de 1 minute)
+215| });
+216| 
+217| const sessionManager = require('./modules/session-manager.js')(io, pool, {
+218|     CLEANUP_INTERVAL: CLEANUP_INTERVAL_MINUTES * 60 * 1000,
+219|     INACTIVITY_THRESHOLD: INACTIVITY_MINUTES * 60 * 1000
+220| });
+221| 
+222| adminRoutes(app, pool, io);
+223| 
+224| // Gestion d'erreur (port déjà utilisé)
+225| server.on('error', (err) => {
+226|     if (err.code === 'EADDRINUSE') {
+227|         console.error(`❌ Port déjà utilisé. Tue l'autre processus et redémarre.`);
+228|         process.exit(1);
+229|     }
+230| });
+231| 
+232| // Initialiser la surveillance d’inactivité (5 minutes sans activité)
+233| const updateActivity = sessionManager.updateActivity;
+234| 
+235| // ========== LANCEMENT DES HANDLERS SOCKET (APRÈS io, users, constants) ==========
+236| socketHandlers(io, pool, sessionManager, updateActivity, REPORTS_THRESHOLD, REPORTS_WINDOW_MINUTES, TEMP_BAN_MINUTES);
+237| 
+238| // ========== NETTOYAGE AUTOMATIQUE ==========
+239| // Nettoyage des utilisateurs inactifs
+240| (async function initCleanup() {
+241|     await loadConfigFromDatabase(); // Recharge les paramètres depuis la base
+242|     if (VISITOR_CLEANUP_ENABLED) {
+243|         sessionManager.startCleanup();
+244|         console.log('🧹 Nettoyage des visiteurs déconnectés ACTIVÉ');
+245|     } else {
+246|         console.log('🧹 Nettoyage des visiteurs déconnectés DÉSACTIVÉ');
+247|     }
+248| })();
+249| 
+250| // Nettoyage auto du journal et signalements (toutes les 24h)
+251| if (AUTO_CLEANUP_ENABLED) {
+252|     setInterval(async () => {
+253|         await cleanOldData(pool, LOGS_RETENTION_DAYS, REPORTS_RETENTION_DAYS);
+254|     }, 24 * 60 * 60 * 1000);
+255|     console.log(`🧹 Nettoyage auto activé: journal ${LOGS_RETENTION_DAYS} jours, signalements ${REPORTS_RETENTION_DAYS} jours`);
+256| } else {
+257|     console.log(`🧹 Nettoyage auto DÉSACTIVÉ`);
+258| }
+259| 
+260| // ========== DÉMARRAGE ==========
+261| const PORT = process.env.PORT || 3005;
+262| server.listen(PORT, '0.0.0.0', () => {
+263|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+264| });
 
 # ============================================
 # FILE: public\js\login-script.js
@@ -725,7 +871,1092 @@ Ne fais pas de supposition, relis attentivement tout le contenu."
 581| })();
 
 # ============================================
-# FIN DU FICHIER - 2 fichiers inclus
-# Généré le 2026-07-15 13:43:34
+# FILE: public\js\chat-script.js
+# ============================================
+
+1| ﻿// ========== CHAT SCRIPT - MeetGay ==========
+2| // Centralise toute la logique restante du chat (fingerprint, traductions, historique coulissant, menus)
+3| 
+4| (function () {
+5|     // ========== 1. Fingerprint (si non déjà fait par fp-bundle.js) ==========
+6|     (async function () {
+7|         let fingerprint = sessionStorage.getItem('fingerprint');
+8|         if (!fingerprint) {
+9|             try {
+10|                 // Si FingerprintJS est déjà chargé globalement, on l'utilise
+11|                 if (typeof FingerprintJS !== 'undefined') {
+12|                     const fp = await FingerprintJS.load();
+13|                     const result = await fp.get();
+14|                     fingerprint = result.visitorId;
+15|                 } else {
+16|                     console.warn('FingerprintJS non trouvé, utilisation d\'un identifiant aléatoire');
+17|                     fingerprint = 'fp_' + Math.random().toString(36).substring(2);
+18|                 }
+19|                 sessionStorage.setItem('fingerprint', fingerprint);
+20|                 window.currentFingerprint = fingerprint;
+21|             } catch (err) {
+22|                 console.error('❌ Fingerprint impossible à générer:', err);
+23|                 fingerprint = 'fallback_' + Math.random().toString(36).substring(2);
+24|                 sessionStorage.setItem('fingerprint', fingerprint);
+25|                 window.currentFingerprint = fingerprint;
+26|             }
+27|         } else {
+28|             window.currentFingerprint = fingerprint;
+29|         }
+30|     })();
+31| 
+32|     // ========== 2. Vérifier si l'utilisateur est en session ==========
+33|     {
+34|         let user = localStorage.getItem('meetgay_user');
+35|         if (!user) {
+36|             window.location.href = '/login.html';
+37|             return;
+38|         }
+39|     }
+40| 
+41|     // ========== 3. Traductions du chat ==========
+42|     let chatLang = localStorage.getItem('MeetGay_lang') || 'fr';
+43| 
+44|     const chatTranslations = {
+45|         fr: {
+46|             emptyMessage: "En attente de message...",
+47|             placeholderInput: "Cliquez sur un pseudo d'abord...",
+48|             sendBtn: "Envoyer",
+49|             historyTitle: "Historique",
+50|             connectedTitle: "Connectés"
+51|         },
+52|         nl: {
+53|             emptyMessage: "Wachten op bericht...",
+54|             placeholderInput: "Klik eerst op een pseudoniem...",
+55|             sendBtn: "Verstuur",
+56|             historyTitle: "Historisch",
+57|             connectedTitle: "Aangesloten"
+58|         }
+59|     };
+60| 
+61|     const t = chatTranslations[chatLang];
+62|     window.chatLang = chatLang;
+63|     window.chatT = chatTranslations[chatLang];
+64| 
+65|     // ========== 4. Initialisation des textes dynamiques ==========
+66|     document.addEventListener('DOMContentLoaded', () => {
+67|         window.chatLang = chatLang;
+68|         window.chatT = chatTranslations[chatLang];
+69| 
+70|         const msgArea = document.getElementById('messageArea');
+71|         if (msgArea) msgArea.innerHTML = `<div class="empty-message"><i class="fas fa-comment"></i> ${t.emptyMessage}</div>`;
+72| 
+73|         const historyDiv = document.getElementById('historyList');
+74|         if (historyDiv) historyDiv.innerHTML = `<div class="empty-message" style="padding: 20px;"><i class="fas fa-comment-slash"></i> Aucune conversation</div>`;
+75| 
+76|         const sendBtn = document.getElementById('sendBtn');
+77|         if (sendBtn) sendBtn.innerHTML = `<i class="fas fa-paper-plane"></i> ${t.sendBtn}`;
+78| 
+79|         const messageInput = document.getElementById('messageInput');
+80|         if (messageInput) messageInput.placeholder = t.placeholderInput;
+81|     });
+82| 
+83|     // ========== 5. Gestion de l'historique coulissant ==========
+84|     document.addEventListener('DOMContentLoaded', function () {
+85|         const historyInner = document.getElementById('historyInner');
+86|         const historyTab = document.getElementById('historyTab');
+87|         const closeBtn = document.getElementById('closeInnerSlider');
+88| 
+89|         // État du décalage du bouton (false = position normale)
+90|         let tabOffset = false;
+91| 
+92|         // Fonction pour décaler ou remettre le bouton
+93|         function toggleTabOffset() {
+94|             if (!historyTab) return;
+95|             if (tabOffset) {
+96|                 historyTab.style.right = '0';
+97|                 tabOffset = false;
+98|             } else {
+99|                 historyTab.style.right = '-10px';
+100|                 tabOffset = true;
+101|             }
+102|         }
+103| 
+104|         if (historyInner) {
+105|             historyInner.classList.remove('open');
+106|         }
+107| 
+108|         if (historyTab && historyInner) {
+109|             historyTab.addEventListener('click', function (e) {
+110|                 e.stopPropagation();
+111|                 historyInner.classList.toggle('open');
+112|                 toggleTabOffset(); // ← décaler/remettre le bouton au clic
+113|             });
+114|         }
+115| 
+116|         if (closeBtn && historyInner) {
+117|             closeBtn.addEventListener('click', function () {
+118|                 historyInner.classList.remove('open');
+119|                 // Quand on ferme avec la croix, on remet aussi le bouton
+120|                 if (historyTab) historyTab.style.right = '0';
+121|                 tabOffset = false;
+122|             });
+123|         }
+124|     });
+125| 
+126|     // ========== 6. GÉNÉRATION DES MENUS ==========
+127|     (function initMenus() {
+128|         const menuList = document.getElementById('newMenusList');
+129|         const windowContent = document.getElementById('windowContent');
+130|         const windowPlaceholder = document.getElementById('windowPlaceholder');
+131| 
+132|         if (!menuList) {
+133|             setTimeout(initMenus, 500);
+134|             return;
+135|         }
+136| 
+137|         // Fonction pour créer les menus
+138|         function displayMenus() {
+139|             // Vérifier que les données existent
+140|             if (!window.MENUS_DATA || !window.CONTENTS_DATA) {
+141|                 console.error('❌ Données des menus non chargées');
+142|                 return;
+143|             }
+144| 
+145|             menuList.innerHTML = '';
+146| 
+147|             window.MENUS_DATA.forEach(menu => {
+148|                 const item = document.createElement('div');
+149|                 item.className = 'new-menu-item';
+150|                 item.innerHTML = `<i class="fas ${menu.icon}"></i><span>${menu.title}</span>`;
+151| 
+152|                 item.onclick = function () {
+153|                     // Afficher le contenu
+154|                     if (windowPlaceholder) windowPlaceholder.style.display = 'none';
+155|                     if (windowContent) {
+156|                         windowContent.style.display = 'block';
+157|                         windowContent.innerHTML = window.CONTENTS_DATA[menu.id] ||
+158|                             '<div class="dynamic-content"><h3>Contenu à venir</h3></div>';
+159|                     }
+160| 
+161|                     // Fermer le hamburger sur mobile
+162|                     const menuContainer = document.getElementById('menus');
+163|                     const toggleBtn = document.getElementById('menuToggleBtn');
+164|                     if (window.innerWidth <= 710 && menuContainer && toggleBtn) {
+165|                         menuContainer.classList.remove('open');
+166|                         toggleBtn.classList.remove('open');
+167|                         toggleBtn.textContent = '☰';
+168|                     }
+169|                 };
+170| 
+171|                 menuList.appendChild(item);
+172|             });
+173| 
+174|             console.log('✅ Menus chargés :', window.MENUS_DATA.length);
+175|         }
+176| 
+177|         // Vérifier si les données sont déjà chargées
+178|         if (window.MENUS_DATA && window.CONTENTS_DATA) {
+179|             displayMenus();
+180|             return;
+181|         }
+182| 
+183|         // Sinon charger le fichier
+184|         const script = document.createElement('script');
+185|         script.src = '/js/menus-data.js';
+186|         script.onload = function () {
+187|             // Attendre que les données soient disponibles
+188|             let attempts = 0;
+189|             const checkData = setInterval(() => {
+190|                 if (window.MENUS_DATA && window.CONTENTS_DATA) {
+191|                     clearInterval(checkData);
+192|                     displayMenus();
+193|                 } else if (attempts > 20) {
+194|                     clearInterval(checkData);
+195|                     console.error('❌ Impossible de charger les données');
+196|                 }
+197|                 attempts++;
+198|             }, 100);
+199|         };
+200|         script.onerror = function () {
+201|             console.error('❌ Fichier menus-data.js introuvable');
+202|         };
+203|         document.head.appendChild(script);
+204|     })();
+205| 
+206|     // ========== HAMBURGER ==========
+207|     (function initHamburger() {
+208|         const toggleBtn = document.getElementById('menuToggleBtn');
+209|         const menu = document.getElementById('menus');
+210| 
+211|         if (!toggleBtn || !menu) return;
+212| 
+213|         toggleBtn.addEventListener('click', function (e) {
+214|             e.stopPropagation();
+215|             menu.classList.toggle('open');
+216|             toggleBtn.classList.toggle('open');
+217|             toggleBtn.textContent = menu.classList.contains('open') ? '✕' : '☰';
+218|         });
+219| 
+220|         document.addEventListener('click', function (e) {
+221|             if (menu.classList.contains('open') &&
+222|                 !menu.contains(e.target) &&
+223|                 !toggleBtn.contains(e.target)) {
+224|                 menu.classList.remove('open');
+225|                 toggleBtn.classList.remove('open');
+226|                 toggleBtn.textContent = '☰';
+227|             }
+228|         });
+229|     })();
+230| 
+231| 
+232|     (function () {
+233|         'use strict';
+234| 
+235|         // Lecture des media queries CSS (vous les modifiez dans le CSS)
+236|         const desktopMQ = window.matchMedia('(min-width: 1081px)');
+237|         const mobileMQ = window.matchMedia('(max-width: 350px)');
+238|         // Entre 351px et 1080px = mode desktop également
+239| 
+240|         // === VERSION DESKTOP ===
+241|         function initDesktopVersion() {
+242|             const nav = document.getElementById('mobileNav');
+243|             const panel = document.getElementById('navSettingsPanel');
+244|             const settingsBtn = document.getElementById('navSettingsBtn');
+245|             const navButtons = document.querySelectorAll('.mobile-nav button:not(#toggleNavBtn)');
+246| 
+247|             let isPanelOpen = false;
+248|             let animationTimer = null;
+249| 
+250|             if (nav) nav.style.display = 'flex';
+251| 
+252|             // Bouton bleu
+253|             const oldToggleBtn = document.getElementById('toggleNavBtn');
+254|             if (oldToggleBtn) {
+255|                 const newToggleBtn = oldToggleBtn.cloneNode(true);
+256|                 oldToggleBtn.parentNode.replaceChild(newToggleBtn, oldToggleBtn);
+257|                 newToggleBtn.onclick = function (e) {
+258|                     e.preventDefault();
+259|                     const isVisible = navButtons[0]?.classList.contains('hidden');
+260|                     navButtons.forEach(btn => {
+261|                         if (isVisible) btn.classList.remove('hidden');
+262|                         else btn.classList.add('hidden');
+263|                     });
+264|                     localStorage.setItem('mobileNavVisible', !isVisible);
+265|                 };
+266|             }
+267| 
+268|             function setPanelOrientation() {
+269|                 if (!panel || !nav) return;
+270|                 const pos = nav.getAttribute('data-position') || 'bottom';
+271|                 panel.classList.remove('horizontal', 'vertical');
+272|                 if (pos === 'left' || pos === 'right') {
+273|                     panel.classList.add('vertical');
+274|                 } else {
+275|                     panel.classList.add('horizontal');
+276|                 }
+277|             }
+278| 
+279|             function positionPanel() {
+280|                 if (!panel || !nav) return;
+281|                 const navRect = nav.getBoundingClientRect();
+282|                 const panelW = panel.offsetWidth;
+283|                 const panelH = panel.offsetHeight;
+284|                 const pos = nav.getAttribute('data-position') || 'bottom';
+285|                 if (panelW === 0 || panelH === 0) return;
+286| 
+287|                 let top, left;
+288|                 switch (pos) {
+289|                     case 'left':
+290|                         left = navRect.right + 8;
+291|                         top = navRect.top + (navRect.height / 2) - (panelH / 2);
+292|                         break;
+293|                     case 'right':
+294|                         left = navRect.left - panelW - 8;
+295|                         top = navRect.top + (navRect.height / 2) - (panelH / 2);
+296|                         break;
+297|                     case 'top':
+298|                         left = navRect.left;
+299|                         top = navRect.bottom + 8;
+300|                         break;
+301|                     default:
+302|                         left = navRect.left;
+303|                         top = navRect.top - panelH - 8;
+304|                         break;
+305|                 }
+306| 
+307|                 if (left < 5) left = 5;
+308|                 if (left + panelW > window.innerWidth - 5) left = window.innerWidth - panelW - 5;
+309|                 if (top < 5) top = 5;
+310|                 if (top + panelH > window.innerHeight - 5) {
+311|                     if (pos === 'top') top = navRect.top - panelH - 8;
+312|                     else if (pos === 'bottom') top = navRect.bottom + 8;
+313|                     else top = window.innerHeight - panelH - 5;
+314|                 }
+315| 
+316|                 panel.style.top = top + 'px';
+317|                 panel.style.left = left + 'px';
+318|             }
+319| 
+320|             function openPanel() {
+321|                 if (!panel) return;
+322|                 panel.style.display = 'flex';
+323|                 isPanelOpen = true;
+324|                 setPanelOrientation();
+325|                 positionPanel();
+326|             }
+327| 
+328|             function closePanel() {
+329|                 if (!panel) return;
+330|                 panel.style.display = 'none';
+331|                 isPanelOpen = false;
+332|                 if (animationTimer) clearTimeout(animationTimer);
+333|             }
+334| 
+335|             function togglePanel(e) {
+336|                 e.stopPropagation();
+337|                 if (isPanelOpen) closePanel();
+338|                 else openPanel();
+339|             }
+340| 
+341|             function setNavPosition(position) {
+342|                 if (!nav) return;
+343|                 nav.setAttribute('data-position', position);
+344|                 localStorage.setItem('mobileNavPosition', position);
+345|                 if (isPanelOpen) {
+346|                     if (animationTimer) clearTimeout(animationTimer);
+347|                     animationTimer = setTimeout(() => {
+348|                         setPanelOrientation();
+349|                         positionPanel();
+350|                         animationTimer = null;
+351|                     }, 320);
+352|                 }
+353|             }
+354| 
+355|             function loadSavedSettings() {
+356|                 const savedPos = localStorage.getItem('mobileNavPosition');
+357|                 if (savedPos && ['top', 'bottom', 'left', 'right'].includes(savedPos)) {
+358|                     nav.setAttribute('data-position', savedPos);
+359|                 } else {
+360|                     nav.setAttribute('data-position', 'bottom');
+361|                 }
+362|                 const savedVis = localStorage.getItem('mobileNavVisible');
+363|                 if (savedVis === 'true') navButtons.forEach(btn => btn.classList.add('hidden'));
+364|                 else if (savedVis === 'false') navButtons.forEach(btn => btn.classList.remove('hidden'));
+365|             }
+366| 
+367|             function resetAll() {
+368|                 closePanel();
+369|                 localStorage.removeItem('mobileNavPosition');
+370|                 localStorage.removeItem('mobileNavVisible');
+371|                 location.reload();
+372|             }
+373| 
+374|             function handleClickOutside(e) {
+375|                 if (!isPanelOpen) return;
+376|                 if (!nav.contains(e.target) && !panel.contains(e.target)) closePanel();
+377|             }
+378| 
+379|             function scrollToTarget(e) {
+380|                 const btn = e.currentTarget;
+381|                 const targetId = btn.getAttribute('data-target');
+382|                 if (!targetId) return;
+383|                 e.preventDefault();
+384|                 const target = document.getElementById(targetId);
+385|                 if (target) {
+386|                     closePanel();
+387|                     const offset = nav.getAttribute('data-position') === 'top' ? nav.offsetHeight + 20 : 80;
+388|                     const pos = target.getBoundingClientRect().top + window.scrollY - offset;
+389|                     window.scrollTo({ top: pos, behavior: 'smooth' });
+390|                 }
+391|             }
+392| 
+393|             if (nav && panel) {
+394|                 loadSavedSettings();
+395|                 if (settingsBtn) settingsBtn.onclick = togglePanel;
+396|                 document.getElementById('navPosTop')?.addEventListener('click', () => setNavPosition('top'));
+397|                 document.getElementById('navPosBottom')?.addEventListener('click', () => setNavPosition('bottom'));
+398|                 document.getElementById('navPosLeft')?.addEventListener('click', () => setNavPosition('left'));
+399|                 document.getElementById('navPosRight')?.addEventListener('click', () => setNavPosition('right'));
+400|                 document.getElementById('navReset')?.addEventListener('click', resetAll);
+401|                 document.querySelectorAll('[data-target]').forEach(btn => {
+402|                     btn.addEventListener('click', scrollToTarget);
+403|                 });
+404|                 document.addEventListener('click', handleClickOutside);
+405|                 window.addEventListener('resize', () => { if (isPanelOpen) positionPanel(); });
+406|             }
+407|         }
+408| 
+409|         // === VERSION MOBILE (très petits écrans) ===
+410|         function initMobileVersion() {
+411|             const oldNav = document.getElementById('mobileNav');
+412|             if (oldNav) oldNav.style.display = 'none';
+413| 
+414|             let menuBtn = document.getElementById('mobileMenuBtn');
+415|             if (!menuBtn) {
+416|                 menuBtn = document.createElement('button');
+417|                 menuBtn.id = 'mobileMenuBtn';
+418|                 menuBtn.innerHTML = '☰';
+419|                 document.body.appendChild(menuBtn);
+420|             }
+421| 
+422|             let panel = document.getElementById('mobileNavPanel');
+423|             if (!panel) {
+424|                 panel = document.createElement('div');
+425|                 panel.id = 'mobileNavPanel';
+426|                 panel.innerHTML = `
+427|                 <div class="mobile-panel-buttons">
+428|                     <button data-target="connectes">👥<span>Connectés</span></button>
+429|                     <button data-target="chat">💬<span>Chat</span></button>
+430|                     <button data-target="new-window">📦<span>Nouveau</span></button>
+431|                     <button data-target="menus">📋<span>Menus</span></button>
+432|                 </div>
+433|             `;
+434|                 document.body.appendChild(panel);
+435|             }
+436| 
+437|             let isOpen = false;
+438| 
+439|             function openPanel() {
+440|                 panel.classList.add('open');
+441|                 isOpen = true;
+442|             }
+443| 
+444|             function closePanel() {
+445|                 panel.classList.remove('open');
+446|                 isOpen = false;
+447|             }
+448| 
+449|             function togglePanel() {
+450|                 if (isOpen) closePanel();
+451|                 else openPanel();
+452|             }
+453| 
+454|             function scrollToTarget(e) {
+455|                 const btn = e.currentTarget;
+456|                 const targetId = btn.getAttribute('data-target');
+457|                 if (!targetId) return;
+458|                 e.preventDefault();
+459|                 const target = document.getElementById(targetId);
+460|                 if (target) {
+461|                     const pos = target.getBoundingClientRect().top + window.scrollY - 70;
+462|                     window.scrollTo({ top: pos, behavior: 'smooth' });
+463|                 }
+464|             }
+465| 
+466|             menuBtn.addEventListener('click', togglePanel);
+467|             document.querySelectorAll('#mobileNavPanel [data-target]').forEach(btn => {
+468|                 btn.addEventListener('click', scrollToTarget);
+469|             });
+470| 
+471|             document.addEventListener('click', function (e) {
+472|                 if (isOpen && !panel.contains(e.target) && e.target !== menuBtn) {
+473|                     closePanel();
+474|                 }
+475|             });
+476|         }
+477| 
+478|         // === LANCEMENT (basé sur les media queries CSS) ===
+479|         function detectAndInit() {
+480|             if (mobileMQ.matches) {
+481|                 initMobileVersion();
+482|             } else {
+483|                 initDesktopVersion();
+484|             }
+485|         }
+486| 
+487|         detectAndInit();
+488| 
+489|         // === REDIMENSIONNEMENT ===
+490|         let resizeTimer;
+491|         desktopMQ.addEventListener('change', function () {
+492|             if (resizeTimer) clearTimeout(resizeTimer);
+493|             resizeTimer = setTimeout(() => location.reload(), 150);
+494|         });
+495|         mobileMQ.addEventListener('change', function () {
+496|             if (resizeTimer) clearTimeout(resizeTimer);
+497|             resizeTimer = setTimeout(() => location.reload(), 150);
+498|         });
+499|     })();
+500| 
+501| })();   
+
+# ============================================
+# FILE: public\index.html
+# ============================================
+
+1| <!DOCTYPE html>
+2| <html lang="fr">
+3| 
+4| <head>
+5|     <meta charset="UTF-8">
+6|     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+7|     <link rel="icon" type="image/png" href="/favicon-16x16.png">
+8|     <link rel="icon"
+9|         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>">
+10|     <link rel="stylesheet" href="/css/common/reset.css">
+11|     <link rel="stylesheet" href="/css/layouts/footer.css">
+12|     <link rel="stylesheet" href="/css/pages/index.css">
+13|     <link rel="stylesheet" href="/fontawesome/css/all.min.css">
+14|     <title>MeetGay - Chat Belgique</title>
+15| </head>
+16| 
+17| <body>
+18|     <script>
+19|         // Stocker le token admin dans cookie pour que le serveur le voie
+20|         const token = localStorage.getItem('admin_token') || new URLSearchParams(window.location.search).get('token');
+21|         if (token) {
+22|             document.cookie = `admin_token=${token}; path=/`;
+23|             if (!localStorage.getItem('admin_token')) {
+24|                 localStorage.setItem('admin_token', token);
+25|             }
+26|         }
+27|     </script>
+28|     <div class="container">
+29|         <div class="welcome-box">
+30|             <h1><i class="fas fa-comment-dots"></i> MeetGay</h1>
+31|             <div class="subtitle"><i class="fas fa-map-marker-alt"></i> Belgique - Rencontres et discussions</div>
+32| 
+33|             <div class="lang-buttons">
+34|                 <button class="lang-btn fr" id="btnFr" disabled><i class="fas fa-flag-checkered"></i> Français</button>
+35|                 <button class="lang-btn nl" id="btnNl" disabled><i class="fas fa-flag-checkered"></i>
+36|                     Nederlands</button>
+37|             </div>
+38| 
+39|             <div class="features">
+40|                 <div class="feature"><i class="fas fa-envelope"></i> Messages privés</div>
+41|                 <div class="feature"><i class="fas fa-users"></i> Rencontres gay</div>
+42|                 <div class="feature"><i class="fas fa-comment-dots"></i> Chat instantané</div>
+43|             </div>
+44| 
+45|             <div class="age-warning">
+46|                 <i class="fas fa-exclamation-triangle"></i> Site réservé aux personnes majeures (18+)
+47|             </div>
+48| 
+49|             <div class="age-verification-bottom">
+50|                 <div class="age-selector-small">
+51|                     <label><i class="fas fa-id-card"></i> Vérification âge :</label>
+52|                     <select id="ageSelect">
+53|                         <option value="">-- Sélectionner --</option>
+54|                         <option value="18plus"><i class="fas fa-check-circle"></i> J'ai +18 ans</option>
+55|                         <option value="18moins"><i class="fas fa-times-circle"></i> J'ai -18 ans</option>
+56|                     </select>
+57|                     <div id="ageError" class="age-error-small">
+58|                         <i class="fas fa-ban"></i> Désolé, site réservé aux 18+
+59|                     </div>
+60|                 </div>
+61|             </div>
+62|         </div>
+63|     </div>
+64|     <footer class="site-footer">
+65|         <div class="footer-content">
+66|             <i class="far fa-copyright"></i> 2026 MeetGay - Chat Belgique -
+67|             <a href="/mentions-legales.html"><i class="fas fa-gavel"></i> Mentions légales</a> -
+68|             <a href="/cgu.html"><i class="fas fa-file-contract"></i> CGU</a> -
+69|             <a href="/contact.html"><i class="fas fa-envelope"></i> Contact</a>
+70|         </div>
+71|     </footer>
+72| 
+73|     <script>
+74|         const ageSelect = document.getElementById('ageSelect');
+75|         const btnFr = document.getElementById('btnFr');
+76|         const btnNl = document.getElementById('btnNl');
+77|         const ageError = document.getElementById('ageError');
+78| 
+79|         btnFr.disabled = true;
+80|         btnNl.disabled = true;
+81| 
+82|         ageSelect.addEventListener('change', function () {
+83|             const selectedValue = ageSelect.value;
+84| 
+85|             if (selectedValue === '18plus') {
+86|                 btnFr.disabled = false;
+87|                 btnNl.disabled = false;
+88|                 ageError.classList.remove('show');
+89|             }
+90|             else if (selectedValue === '18moins') {
+91|                 btnFr.disabled = true;
+92|                 btnNl.disabled = true;
+93|                 ageError.classList.add('show');
+94|             }
+95|             else {
+96|                 btnFr.disabled = true;
+97|                 btnNl.disabled = true;
+98|                 ageError.classList.remove('show');
+99|             }
+100|         });
+101| 
+102|         function setAgeVerified() {
+103|             sessionStorage.setItem('meetgay_age_verified', 'true');
+104|             sessionStorage.setItem('meetgay_age_verified_time', Date.now());
+105|         }
+106| 
+107|         function chooseLanguage(lang) {
+108|             if (ageSelect.value !== '18plus') {
+109|                 ageError.classList.add('show');
+110|                 return;
+111|             }
+112|             setAgeVerified();
+113|             localStorage.setItem('MeetGay_lang', lang);
+114|             window.location.href = '/login.html';
+115|         }
+116| 
+117|         btnFr.onclick = () => chooseLanguage('fr');
+118|         btnNl.onclick = () => chooseLanguage('nl');
+119|     </script>
+120| </body>
+121| 
+122| </html>
+
+# ============================================
+# FILE: public\login.html
+# ============================================
+
+1| <!DOCTYPE html>
+2| <html lang="fr" data-bfcache-skip="true">
+3| 
+4| <head>
+5|     <meta charset="UTF-8">
+6|     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+7|     <title>MeetGay - Connexion</title>
+8|     <link rel="icon"
+9|         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>">
+10|     <script src="https://cdn.jsdelivr.net/npm/@fingerprintjs/fingerprintjs@3/dist/fp.min.js"></script>
+11|     <link rel="stylesheet" href="/css/common/reset.css">
+12|     <link rel="stylesheet" href="/css/layouts/footer.css">
+13|     <link rel="stylesheet" href="/css/pages/login.css">
+14|     <link rel="stylesheet" href="/fontawesome/css/all.min.css">
+15|     <link rel="stylesheet" href="/css/pages/chat.css">
+16|     <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+17|     <script>
+18|         eruda.init();
+19|     </script>
+20| </head>
+21| 
+22| <body>
+23|     <script src="/socket.io/socket.io.js"></script>
+24|     <script src="/js/common.js"></script>
+25|     <script src="/js/geolocation.js" defer></script>
+26|     <script src="/js/login-script.js"></script>
+27| 
+28| 
+29|     <div class="page-container">
+30|         <div class="login-layout">
+31|             <!-- Panneau des connectés - À GAUCHE -->
+32|             <div class="users-panel-login">
+33|                 <h3><i class="fas fa-users"></i> <span id="loginOnlineCount" class="online-count">0</span> Connectés
+34|                 </h3>
+35| 
+36|                 <!-- 🔥 NOUVEAU : Boxe dynamique -->
+37|                 <div id="moodBox" class="mood-box">
+38|                     <span id="moodText">🤔 Chargement...</span>
+39|                 </div>
+40| 
+41|                 <div id="loginUsersList">En attente...</div>
+42|             </div>
+43| 
+44|             <!-- Formulaire - AU CENTRE -->
+45|             <div class="login-box">
+46|                 <h1><i class="fas fa-comment-dots"></i> MeetGay</h1>
+47|                 <div class="subtitle" id="subtitle"><i class="fas fa-sign-in-alt"></i> Rejoignez le chat</div>
+48|                 <div id="errorMsg" style="color: red; margin-top: 10px;"></div>
+49| 
+50|                 <form id="loginForm">
+51|                     <!-- tout ton formulaire ici, inchangé -->
+52|                     <label id="labelPseudo"><i class="fas fa-user"></i> Pseudo :</label>
+53|                     <input type="text" id="pseudo" maxlength="15" placeholder="15 caractères max" required>
+54| 
+55|                     <label id="labelAge"><i class="fas fa-birthday-cake"></i> Âge :</label>
+56|                     <select id="age" required>
+57|                         <option value="" id="ageDefault">Sélectionnez votre âge</option>
+58|                     </select>
+59| 
+60|                     <label id="labelOrigine"><i class="fa-solid fa-globe"></i> Origine :</label>
+61|                     <select id="origine">
+62|                         <option value="" id="origineDefault">Sélectionnez votre origine (Facultatif)</option>
+63|                         <option value="FR">🇫🇷 Français</option>
+64|                         <option value="BE">🇧🇪 Belge</option>
+65|                         <option value="NL">🇳🇱 Néerlandais</option>
+66|                         <option value="MA">🇲🇦 Marocain</option>
+67|                         <option value="DZ">🇩🇿 Algérien</option>
+68|                         <option value="TN">🇹🇳 Tunisien</option>
+69|                         <option value="IT">🇮🇹 Italien</option>
+70|                         <option value="ES">🇪🇸 Espagnol</option>
+71|                         <option value="PT">🇵🇹 Portugais</option>
+72|                         <option value="LATINO">🌏 Latino</option>
+73|                         <option value="ASIE">🌏 Asiatique</option>
+74|                         <option value="PECO">🌏 Pays de l'est</option>
+75|                         <option value="AFRIQUE_NOIRE">🌍 Africain</option>
+76|                         <option value="AUTRE">🌐 Autre</option>
+77|                     </select>
+78| 
+79|                     <label id="labelTendencies"><i class="fas fa-exchange-alt"></i> Orientation :</label>
+80|                     <select id="tendencies" required>
+81|                         <option value="" id="tendenciesDefault">Sélectionnez</option>
+82|                         <option value="A" id="optA"><i class="fas fa-arrow-up"></i> Actif ▲</option>
+83|                         <option value="P" id="optP"><i class="fas fa-arrow-down"></i> Passif ▼</option>
+84|                         <option value="V" id="optV"><i class="fas fa-arrows-alt-v"></i> Versatile ▲▼</option>
+85|                     </select>
+86| 
+87|                     <label id="labelGender"><i class="fa-solid fa-mars-double"></i> Genre :</label>
+88|                     <select id="gender" required>
+89|                         <option value="" id="genderDefault">Sélectionnez</option>
+90|                         <option value="G">Gay</option>
+91|                         <option value="H">Hétéro</option>
+92|                         <option value="B">Bisexuel</option>
+93|                         <option value="T">Transgenre</option>
+94|                     </select>
+95| 
+96|                     <label id="labelPurpose"><i class="fas fa-bullseye"></i> Je suis ici pour :</label>
+97|                     <select id="purpose" required>
+98|                         <option value="" id="purposeDefault">Sélectionnez</option>
+99|                         <option value="meeting"><i class="fas fa-handshake"></i> Rencontre</option>
+100|                         <option value="flirt"><i class="fas fa-heart"></i> Flirt</option>
+101|                         <option value="adultery"><i class="fas fa-heartbeat"></i> Relation sexuelle</option>
+102|                     </select>
+103| 
+104|                     <label id="labelLocation"><i class="fas fa-map-marker-alt"></i> Localité :</label>
+105|                     <select id="location" required>
+106|                         <option value="" id="locationDefault">Sélectionnez votre région</option>
+107|                         <option value="BRU"><i class="fas fa-city"></i> Bruxelles</option>
+108|                         <option value="ANV"><i class="fas fa-city"></i> Anvers</option>
+109|                         <option value="LIE"><i class="fas fa-city"></i> Liège</option>
+110|                         <option value="GAND"><i class="fas fa-city"></i> Gand</option>
+111|                         <option value="CHAR"><i class="fas fa-city"></i> Charleroi</option>
+112|                         <option value="NAM"><i class="fas fa-city"></i> Namur</option>
+113|                         <option value="MONS"><i class="fas fa-city"></i> Mons</option>
+114|                         <option value="LUV"><i class="fas fa-city"></i> Louvain</option>
+115|                         <option value="BRUGE"><i class="fas fa-city"></i> Bruges</option>
+116|                         <option value="ARLON"><i class="fas fa-city"></i> Arlon</option>
+117|                         <option value="AUTRE"><i class="fas fa-globe"></i> Autre</option>
+118|                         <!-- 👇 NOUVEAU : séparateur + option GPS -->
+119|                         <option disabled>───────────────</option>
+120|                         <option value="GPS">📍 Me géolocaliser pour plus de précision</option>
+121|                     </select>
+122| 
+123|                     <div id="gpsZone"
+124|                         style="display: none; margin-top: 10px; padding: 15px; border: 2px solid #4CAF50; border-radius: 8px; background: #f0f8f0;">
+125| 
+126|                         <!-- ÉTAT : recherche en cours -->
+127|                         <div id="gpsStatus">📡 Recherche de votre position...</div>
+128| 
+129|                         <!-- RÉSULTAT GPS -->
+130|                         <div id="gpsResult" style="display: none;">
+131|                             <p>📍 <strong>Ville détectée :</strong> <span id="detectedCity">...</span></p>
+132|                             <p style="font-size: 0.8em; color: #888; margin-top: -5px;">Commune : <span
+133|                                     id="detectedCounty">...</span></p>
+134|                             <p style="font-size: 0.9em; color: #555; margin-bottom: 10px;">Comment souhaitez-vous
+135|                                 afficher votre localité ?
+136|                             </p>
+137| 
+138|                             <!-- RADIOS -->
+139|                             <div style="margin: 10px 0; display: flex; flex-direction: column; gap: 8px;">
+140|                                 <label
+141|                                     style="display: flex; align-items: center; gap: 10px; font-size: 0.95em; cursor: pointer;">
+142|                                     <input type="radio" name="locationChoice" value="region_only" id="choiceRegionOnly">
+143|                                     <span id="choiceRegionLabel">...</span>
+144|                                 </label>
+145|                                 <label
+146|                                     style="display: flex; align-items: center; gap: 10px; font-size: 0.95em; cursor: pointer;">
+147|                                     <input type="radio" name="locationChoice" value="precise" id="choicePrecise">
+148|                                     <span id="choicePreciseLabel">...</span>
+149|                                 </label>
+150|                             </div>
+151| 
+152|                             <!-- CHECKBOX -->
+153|                             <div style="margin-top: 10px;">
+154|                                 <label style="display: flex; align-items: center; gap: 8px; font-size: 0.9em;">
+155|                                     <input type="checkbox" id="gpsConsent">
+156|                                     J'accepte que ma position soit utilisée pour afficher ma localité dans mon profil
+157|                                 </label>
+158|                             </div>
+159| 
+160|                             <!-- BOUTONS CONFIRMER / ANNULER -->
+161|                             <div style="margin-top: 10px; display: flex; gap: 10px;">
+162|                                 <button type="button" id="gpsConfirm" disabled>✅ Confirmer ma position</button>
+163|                                 <button type="button" id="gpsCancel">🔄 Annuler</button>
+164|                             </div>
+165|                         </div>
+166| 
+167|                         <!-- ===== RECHERCHE MANUELLE (cachée par défaut) ===== -->
+168|                         <div id="manualSearchZone"
+169|                             style="display: none; margin-top: 15px; padding-top: 15px; border-top: 2px solid #e0e0e0;">
+170|                             <p style="font-weight: bold; color: #333;">
+171|                                 <i class="fas fa-search"></i> Rechercher une localité
+172|                             </p>
+173|                             <p style="font-size: 0.9em; color: #666; margin: 5px 0 10px 0;">
+174|                                 Recherchez votre localité (quartier ou commune + ville)
+175|                             </p>
+176| 
+177|                             <div style="position: relative;">
+178|                                 <input type="text" id="manualLocationInput" placeholder="Commune + ville..."
+179|                                     autocomplete="off"
+180|                                     style="width: 100%; padding: 12px 14px; border: 2px solid #e0e0e0; border-radius: 12px; font-size: 14px; box-sizing: border-box;">
+181| 
+182|                                 <div id="autocompleteSuggestions">
+183|                                     <!-- Les suggestions s'affichent ici -->
+184|                                 </div>
+185|                             </div>
+186| 
+187|                             <div id="manualResults" style="display: none; margin-top: 15px;">
+188|                                 <!-- résultats recherche -->
+189|                             </div>
+190|                         </div>
+191| 
+192|                         <!-- ===== BOUTON "Ma localité n'est pas bonne" ===== -->
+193|                         <!-- IL EST BIEN DANS #gpsZone, mais EN DEHORS de #manualSearchZone -->
+194|                         <div id="switchToManualZone" style="margin-top: 10px; text-align: left;">
+195|                             <button type="button" id="switchToManualBtn"
+196|                                 style="width: auto; padding: 8px 16px; margin: 0; background: #f0f0f0; color: #555; border: 1px solid #ccc; border-radius: 50px; font-size: 13px; cursor: pointer;">
+197|                                 <i class="fas fa-pen"></i> Ma localité n'est pas bonne
+198|                             </button>
+199|                         </div>
+200| 
+201|                     </div> <!-- FIN gpsZone -->
+202|                     <label id="labelBio"><i class="fas fa-pen"></i> Présentez-vous :</label>
+203|                     <textarea id="bio" maxlength="100"
+204|                         placeholder="Quelques mots sur vous... (100 caractères max)"></textarea>
+205|                     <div class="char-counter">
+206|                         <span id="bioCounter">0</span> / 100 caractères
+207|                     </div>
+208| 
+209|                     <div id="notificationMessage"
+210|                         style="display: none; background: #fff3cd; border: 1px solid #ffeeba; color: #856404; padding: 15px; border-radius: 8px; margin: 15px 0;">
+211|                         <strong>🔔 Notifications requises</strong>
+212|                         <p style="margin: 8px 0;">Pour utiliser MeetGay, vous devez autoriser les notifications.</p>
+213|                         <button id="reenableNotificationsBtn"
+214|                             style="background: #007bff; color: white; border: none; padding: 8px 20px; border-radius: 4px; cursor: pointer; margin-top: 5px;">
+215|                             🔄 Autoriser les notifications
+216|                         </button>
+217|                     </div>
+218| 
+219|                     <button type="submit" id="submitBtn"><i class="fas fa-gamepad"></i> ENTRER DANS LE CHAT</button>
+220|                 </form>
+221| 
+222|                 <div class="note" id="note">
+223|                     <i class="fas fa-bolt"></i> Chat privé instantané<br>
+224|                     Cliquez sur un pseudo pour lui parler
+225|                 </div>
+226|             </div>
+227| 
+228|             <!-- Colonne invisible à droite pour équilibrer la mise en page -->
+229|             <div class="spacer-panel" aria-hidden="true"></div>
+230| 
+231|         </div>
+232|     </div>
+233| 
+234|     <footer class="site-footer">
+235|         <div class="footer-content">
+236|             <i class="far fa-copyright"></i> 2026 MeetGay - Chat Belgique -
+237|             <a href="/mentions-legales.html"><i class="fas fa-gavel"></i> Mentions légales</a> -
+238|             <a href="/cgu.html"><i class="fas fa-file-contract"></i> CGU</a> -
+239|             <a href="/contact.html"><i class="fas fa-envelope"></i> Contact</a>
+240|         </div>
+241|     </footer>
+242| 
+243| </body>
+244| 
+245| </html>
+
+# ============================================
+# FILE: public\chat.html
+# ============================================
+
+1| <!DOCTYPE html>
+2| <html lang="fr">
+3| 
+4| <head>
+5|     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+6|     <meta http-equiv="Pragma" content="no-cache">
+7|     <meta http-equiv="Expires" content="0">
+8|     <meta charset="UTF-8">
+9|     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+10|     <title>MeetGay - Chat</title>
+11|     <link rel="stylesheet" href="/css/common/reset.css">
+12|     <link rel="stylesheet" href="/css/pages/chat.css">
+13|     <link rel="manifest" href="/manifest.json">
+14|     <link rel="stylesheet" href="/fontawesome/css/all.min.css">
+15|     <script src="https://cdn.jsdelivr.net/npm/eruda"></script>
+16|     <script>
+17|         eruda.init();
+18|     </script>
+19| </head>
+20| 
+21| <body>
+22|     <header class="site-header">
+23|         <div class="header-content">
+24|             <div class="logo">
+25|                 <h1><i class="fas fa-comment-dots"></i> MeetGay</h1>
+26|                 <p><i class="fas fa-map-marker-alt"></i> Belgique - Rencontres et discussions</p>
+27|             </div>
+28|             <div style="display: flex; align-items: center; gap: 10px;">
+29|                 <div class="user-badge" id="userBadge"><i class="fas fa-user-circle"></i> Chargement...</div>
+30|                 <button id="settingsBtn"
+31|                     style="background: none; border: none; color: #fff; font-size: 1.2rem; cursor: pointer;"
+32|                     title="Réglages">⚙️</button>
+33|             </div>
+34|             <div class="header-buttons">
+35|                 <a href="https://www.paypal.me/tonpseudo" target="_blank" class="donate-btn"><i
+36|                         class="fas fa-coffee"></i> Don</a>
+37|                 <button id="logoutBtn" class="logout-btn"><i class="fas fa-sign-out-alt"></i> Déconnexion</button>
+38|             </div>
+39|     </header>
+40| 
+41|     <!-- BARRE DE NAVIGATION MOBILE -->
+42|     <div class="mobile-nav" id="mobileNav">
+43|         <button id="toggleNavBtn">☰</button>
+44|         <button data-target="connectes">👥</button>
+45|         <button data-target="chat">💬</button>
+46|         <button data-target="new-window">📦</button>
+47|         <button data-target="menus">📋</button>
+48|         <button id="navSettingsBtn">⚙️</button>
+49|     </div>
+50| 
+51|     <!-- Panneau des directions (pour desktop uniquement) -->
+52|     <div id="navSettingsPanel">
+53|         <button id="navPosTop">Haut</button>
+54|         <button id="navPosBottom">Bas</button>
+55|         <button id="navPosLeft">Gauche</button>
+56|         <button id="navPosRight">Droite</button>
+57|         <button id="navReset">Reset</button>
+58|     </div>
+59| 
+60|     <div class="main-wrapper">
+61|         <!-- GAUCHE : Connectés (plaqué à gauche) -->
+62|         <div class="users-block" id="connectes">
+63|             <div class="users-panel">
+64|                 <h3><i class="fas fa-users"></i> <span id="onlineCount" class="online-count">0</span> Connectés</h3>
+65|                 <div id="usersList">En attente...</div>
+66|             </div>
+67|         </div>
+68| 
+69|         <!-- CENTRE : Chat (centré) -->
+70|         <div class="chat-panel" id="chat">
+71|             <div class="chat-flex">
+72|                 <div class="chat-main">
+73|                     <div id="contactInfo" class="contact-info">
+74|                         <div><span class="contact-name" id="contactName"></span> <span id="contactAge"></span> <i
+75|                                 class=""></i> <span id="contactGender"></span> <span id="contactOrientation"></span>
+76|                         </div>
+77|                         <div id="contactPurpose" style="margin-top: 5px; font-size: 12px; color: #555;"></div>
+78|                         <div class="contact-bio" id="contactBio"></div>
+79|                     </div>
+80|                     <div class="message-area" id="messageArea">
+81|                         <div class="empty-message"><i class="fas fa-comment"></i> En attente de message...</div>
+82|                     </div>
+83|                     <div class="input-area">
+84|                         <input type="text" id="messageInput" placeholder="Cliquez sur un pseudo d'abord..." disabled>
+85|                         <button id="sendBtn" disabled><i class="fas fa-paper-plane"></i> Envoyer</button>
+86|                     </div>
+87|                     <div id="envelope" class="envelope" style="display: none;"><i class="fas fa-envelope"></i></div>
+88|                 </div>
+89|                 <div id="historyInner" class="history-inner">
+90| 
+91|                     <div class="slider-header">
+92|                         <h4>Conversations</h4>
+93|                         <button class="close-slider" id="closeInnerSlider">&times;</button>
+94|                     </div>
+95|                     <div class="slider-content" id="historyList"></div>
+96|                 </div>
+97|             </div>
+98|             <div class="history-tab" id="historyTab">
+99|                 <span>Historique</span>
+100|             </div>
+101|         </div>
+102| 
+103|         <!-- DROITE : Menus + Fenêtre (plaqué à droite) -->
+104|         <div class="new-block">
+105|             <div class="new-window" id="new-window">
+106|                 <!-- Contenu de la fenêtre -->
+107|                 <div class="new-placeholder" id="windowPlaceholder">
+108|                     <i class="fas fa-hand-pointer"></i>
+109|                     <p>Cliquez sur un menu pour afficher son contenu</p>
+110|                 </div>
+111|                 <div id="windowContent" style="display: none;"></div>
+112| 
+113|                 <!-- Menu intégré (dans le même conteneur) -->
+114|                 <div class="new-menus" id="menus">
+115|                     <h3><i class="fas fa-th-large"></i> Menus interactifs</h3>
+116|                     <div class="new-menus-list" id="newMenusList"></div>
+117|                 </div>
+118| 
+119|                 <!-- Bouton hamburger (visible uniquement en mobile) -->
+120|                 <button class="menu-toggle-btn" id="menuToggleBtn">☰</button>
+121|             </div>
+122|         </div>
+123| 
+124|     </div>
+125|     </div>
+126| 
+127|     <footer class="site-footer">
+128|         <div class="footer-content">
+129|             <i class="far fa-copyright"></i> 2026 MeetGay - Chat Belgique -
+130|             <a href="/mentions-legales.html"><i class="fas fa-gavel"></i> Mentions légales</a> -
+131|             <a href="/cgu.html"><i class="fas fa-file-contract"></i> CGU</a> -
+132|             <a href="/contact.html"><i class="fas fa-envelope"></i> Contact</a>
+133|         </div>
+134|     </footer>
+135|     <!-- Son de notification de message -->
+136|     <audio id="messageSound" preload="auto">
+137|         <source src="/sounds/incoming.mp3" type="audio/mpeg">
+138|         <source src="/sounds/incoming.wav" type="audio/wav">
+139|     </audio>
+140|     <!-- ===== PANEL DE RÉGLAGES ===== -->
+141|     <div id="settingsPanel"
+142|         style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 20000; justify-content: center; align-items: center;">
+143|         <div
+144|             style="background: #1e1e2e; border-radius: 16px; padding: 28px; max-width: 400px; width: 90%; box-shadow: 0 20px 40px rgba(0,0,0,0.5); border: 1px solid #333; color: white; font-family: system-ui, sans-serif;">
+145|             <h3 style="margin: 0 0 20px 0; color: #ff6b6b; font-size: 1.4rem;">⚙️ Réglages</h3>
+146| 
+147|             <!-- Son -->
+148|             <div style="margin-bottom: 18px;">
+149|                 <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 1rem;">
+150|                     <input type="checkbox" id="settingsSoundToggle" checked>
+151|                     🔔 Activer les sons
+152|                 </label>
+153|             </div>
+154| 
+155|             <!-- Volume -->
+156|             <div style="margin-bottom: 20px;">
+157|                 <label style="display: flex; align-items: center; gap: 10px; font-size: 0.95rem;">
+158|                     🔊 Volume :
+159|                     <input type="range" id="settingsVolume" min="0" max="100" value="70"
+160|                         style="flex: 1; cursor: pointer;">
+161|                     <span id="settingsVolumeDisplay" style="min-width: 35px; font-size: 0.9rem;">70%</span>
+162|                 </label>
+163|             </div>
+164| 
+165|             <!-- Utilisateurs bloqués -->
+166|             <div style="border-top: 1px solid #333; padding-top: 15px; margin-bottom: 15px;">
+167|                 <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 0;">
+168|                     <span>👥 Utilisateurs bloqués</span>
+169|                     <span id="blockedCount"
+170|                         style="background: #3a3a4a; padding: 2px 10px; border-radius: 12px; font-size: 0.8rem;">0</span>
+171|                 </div>
+172|                 <div id="blockedList"
+173|                     style="max-height: 80px; overflow-y: auto; font-size: 0.85rem; color: #aaa; background: #2a2a3a; border-radius: 8px; padding: 8px 12px;">
+174|                     Aucun utilisateur bloqué
+175|                 </div>
+176|             </div>
+177| 
+178|             <!-- Bouton fermer -->
+179|             <div
+180|                 style="display: flex; gap: 10px; justify-content: flex-end; border-top: 1px solid #333; padding-top: 15px;">
+181|                 <button id="settingsCloseBtn"
+182|                     style="background: #3a3a4a; border: none; padding: 8px 20px; border-radius: 8px; color: #ccc; cursor: pointer;">Fermer</button>
+183|             </div>
+184|         </div>
+185|     </div>
+186|     <script src="/socket.io/socket.io.js"></script>
+187|     <script src="/js/utils.js"></script>
+188|     <script src="/js/ui.js"></script>
+189|     <script src="/js/history.js"></script>
+190|     <script src="/js/modal-handler-user.js"></script>
+191|     <script src="/js/chat.js"></script>
+192|     <script src="/js/common.js"></script>
+193|     <script src="/js/chat-script.js"></script>
+194| 
+195| </body>
+196| 
+197| </html>
+
+# ============================================
+# FIN DU FICHIER - 6 fichiers inclus
+# Généré le 2026-07-15 13:57:39
 # Tous les fichiers sont complets
 # ============================================
