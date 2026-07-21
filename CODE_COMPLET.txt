@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET
-# Généré le 2026-07-21 12:57:02
+# Généré le 2026-07-21 22:56:11
 # 1 fichier(s) inclus
 
 "⚠️ MODE ANALYSE TOTALE - Lecture exhaustive du code ci-dessous. 
@@ -8,279 +8,140 @@ Ne fais pas de supposition, relis attentivement tout le contenu."
 
 # ========== SOMMAIRE ==========
 
-# 1. server.js
+# 1. modules\logger.js
 
 # ============================================
-# FILE: server.js
+# FILE: modules\logger.js
 # ============================================
 
-1| // ============================================================
-2| // server.js - Cœur du chat MeetGay (version base de données)
-3| // ROLE: Point d'entrée - Monte les routes et lance le serveur
-4| // ============================================================
-5| const logger = require('./modules/logger.js');
-6| // ========== CHARGEMENT DES VARIABLES D'ENVIRONNEMENT ==========
-7| if (process.env.NODE_ENV !== 'production') {
-8|     try {
-9|         require('dotenv').config();
-10|         logger.log('startup', '✅ dotenv chargé (environnement local)');
-11|     } catch (err) {
-12|         logger.log('startup', '⚠️ dotenv non installé, utilisation des variables système');
-13|     }
-14| } else {
-15|     logger.log('startup', '✅ Mode production, variables Render utilisées');
-16| }
+1| // modules/logger.js
+2| // ============================================================
+3| // Gestionnaire centralisé des logs pour MeetGay
+4| // Permet d'activer/désactiver les logs par groupe via l'admin
+5| // ============================================================
+6| 
+7| // ========== DÉFINITION DES GROUPES DE LOGS ==========
+8| // Chaque groupe a un nom et un état par défaut
+9| const LOG_GROUPS = {
+10|     STARTUP: { key: 'log_startup', defaultState: true },
+11|     USER_LIFECYCLE: { key: 'log_user_lifecycle', defaultState: true },
+12|     MESSAGES: { key: 'log_messages', defaultState: true },
+13|     REPORTS: { key: 'log_reports', defaultState: true },
+14|     DEBUG: { key: 'log_debug', defaultState: false },
+15|     ERRORS: { key: 'log_errors', defaultState: true } // Les erreurs sont toujours utiles
+16| };
 17| 
-18| // ========== IMPORTS ==========
-19| const express = require('express');
-20| const compression = require('compression');
-21| const http = require('http');
-22| const socketIo = require('socket.io');
-23| const jwt = require('jsonwebtoken');
-24| const { Pool } = require('pg');
-25| const { disconnectBannedUser } = require('./moderation');
-26| const path = require('path');
-27| const bcrypt = require('bcrypt');
-28| const session = require('express-session');
-29| const pgSession = require('connect-pg-simple')(session);
-30| 
-31| 
-32| 
-33| // Modules internes
-34| const { cleanOldData } = require('./modules/cleanup.js');
-35| const contactRoutes = require('./modules/routes/api-contact.js');
-36| const pool = require('./modules/postgresql.js');
-37| const htmlRoutes = require('./modules/routes/html.js');
-38| const adminRoutes = require('./modules/routes/admin.js');
-39| const authRoutes = require('./modules/routes/api-auth.js');
-40| const messagesRoutes = require('./modules/routes/api-messages.js');
-41| const maintenanceMiddleware = require('./modules/middleware/maintenance.js');
-42| const socketHandlers = require('./modules/socket-handlers.js');
-43| // Route de géocodage
-44| const geocodeRoutes = require('./modules/routes/geocode');
-45| 
-46| // JWT_SECRET pour les utilisateurs normaux
-47| const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
-48| 
-49| // ==========  VARIABLES GLOBALES (chargées depuis la base) ==========
-50| // Ces valeurs sont des "fallbacks" en cas d'erreur de lecture de la base
-51| let TEST_MODE = false;
-52| let REPORTS_THRESHOLD = 2;
-53| let REPORTS_WINDOW_MINUTES = 60;
-54| let TEMP_BAN_MINUTES = 10;
-55| let LOGS_RETENTION_DAYS = 30;
-56| let REPORTS_RETENTION_DAYS = 60;
-57| let AUTO_CLEANUP_ENABLED = true;
-58| let VISITOR_CLEANUP_ENABLED = false;
-59| let INACTIVITY_MINUTES = 2;
-60| let CLEANUP_INTERVAL_MINUTES = 1;
-61| let DEV_MODE = true;
-62| 
-63| // Fonction pour charger la config depuis la base de données
-64| async function loadConfigFromDatabase() {
-65|     try {
-66|         logger.log('📂 Chargement des paramètres depuis la base de données...');
-67|         const result = await pool.query('SELECT key, value FROM settings');
-68| 
-69|         if (result.rows.length === 0) {
-70|             logger.log('⚠️ Aucun paramètre trouvé dans la base, utilisation des valeurs par défaut.');
-71|             return;
-72|         }
-73| 
-74|         const settings = {};
-75|         result.rows.forEach(row => {
-76|             settings[row.key] = row.value;
-77|         });
-78| 
-79|         // Mettre à jour les variables globales
-80|         if (settings.test_mode !== undefined) TEST_MODE = settings.test_mode === 'true';
-81|         if (settings.reports_threshold !== undefined) REPORTS_THRESHOLD = parseInt(settings.reports_threshold) || 2;
-82|         if (settings.reports_window_minutes !== undefined) REPORTS_WINDOW_MINUTES = parseInt(settings.reports_window_minutes) || 60;
-83|         if (settings.temp_ban_minutes !== undefined) TEMP_BAN_MINUTES = parseInt(settings.temp_ban_minutes) || 10;
-84|         if (settings.logs_retention_days !== undefined) LOGS_RETENTION_DAYS = parseInt(settings.logs_retention_days) || 30;
-85|         if (settings.reports_retention_days !== undefined) REPORTS_RETENTION_DAYS = parseInt(settings.reports_retention_days) || 60;
-86|         if (settings.auto_cleanup_enabled !== undefined) AUTO_CLEANUP_ENABLED = settings.auto_cleanup_enabled === 'true';
-87|         if (settings.visitor_cleanup_enabled !== undefined) VISITOR_CLEANUP_ENABLED = settings.visitor_cleanup_enabled === 'true';
-88|         if (settings.inactivity_minutes !== undefined) INACTIVITY_MINUTES = parseInt(settings.inactivity_minutes) || 2;
-89|         if (settings.cleanup_interval_minutes !== undefined) CLEANUP_INTERVAL_MINUTES = parseInt(settings.cleanup_interval_minutes) || 1;
-90|         if (settings.dev_mode !== undefined) DEV_MODE = settings.dev_mode === 'true';
-91| 
-92|         logger.log('✅ Paramètres chargés avec succès !');
-93|         // ========== CHARGEMENT DE LA CONFIG DES LOGS ==========
-94|         await logger.loadLogConfig(pool);
-95|         logger.log('   - DEV_MODE:', DEV_MODE);
-96|         logger.log('   - VISITOR_CLEANUP_ENABLED:', VISITOR_CLEANUP_ENABLED);
-97|         logger.log('   - INACTIVITY_MINUTES:', INACTIVITY_MINUTES);
-98|         logger.log('   - REPORTS_THRESHOLD:', REPORTS_THRESHOLD);
-99|         // Afficher quelques autres paramètres clés
+18| // ========== ÉTAT DES LOGS EN MÉMOIRE ==========
+19| // On charge les valeurs depuis la base, mais on a des fallbacks
+20| let logStates = {
+21|     log_startup: true,
+22|     log_user_lifecycle: true,
+23|     log_messages: true,
+24|     log_reports: true,
+25|     log_debug: false,
+26|     log_errors: true
+27| };
+28| 
+29| // ========== FONCTION POUR CHARGER LA CONFIG DEPUIS LA BASE ==========
+30| async function loadLogConfig(pool) {
+31|     try {
+32|         console.log('📋 Chargement de la configuration des logs depuis la base...');
+33| 
+34|         // On récupère toutes les clés qui commencent par 'log_'
+35|         const result = await pool.query(
+36|             `SELECT key, value FROM settings WHERE key LIKE 'log_%'`
+37|         );
+38| 
+39|         if (result.rows.length > 0) {
+40|             // On met à jour l'état en mémoire
+41|             result.rows.forEach(row => {
+42|                 if (logStates.hasOwnProperty(row.key)) {
+43|                     logStates[row.key] = row.value === 'true';
+44|                 }
+45|             });
+46|             console.log('✅ Configuration des logs chargée avec succès.');
+47|             console.log('   État actuel :', logStates);
+48|         } else {
+49|             console.log('⚠️ Aucune configuration de logs trouvée, utilisation des valeurs par défaut.');
+50|         }
+51|     } catch (err) {
+52|         console.warn('⚠️ Impossible de charger la config des logs :', err.message);
+53|         console.warn('   Utilisation des valeurs par défaut.');
+54|     }
+55| }
+56| 
+57| // ========== FONCTION PRINCIPALE POUR LOGUER ==========
+58| function log(group, ...args) {
+59|     // On vérifie si le groupe existe et si il est activé
+60|     const groupKey = `log_${group.toLowerCase()}`;
+61| 
+62|     if (logStates[groupKey]) {
+63|         const timestamp = new Date().toISOString();
+64|         console.log(`[${timestamp}] [${group.toUpperCase()}]`, ...args);
+65|     }
+66| }
+67| 
+68| // ========== FONCTION POUR LES ERREURS ==========
+69| // Les erreurs sont toujours loguées, mais on garde une fonction séparée
+70| function error(...args) {
+71|     // On log toujours les erreurs en console (pour le serveur)
+72|     console.error(...args);
+73|     // Ici on pourrait ajouter plus tard : envoi par email, stockage en base, etc.
+74| }
+75| 
+76| // ========== FONCTION POUR LES AVERTISSEMENTS ==========
+77| function warn(...args) {
+78|     // On affiche toujours les avertissements, mais avec un format spécifique
+79|     const timestamp = new Date().toISOString();
+80|     console.warn(`[${timestamp}] [WARN]`, ...args);
+81| }
+82| 
+83| // ========== FONCTION POUR METTRE À JOUR UN GROUPE ==========
+84| // Utile pour l'admin : quand on clique sur un interrupteur
+85| async function updateLogGroup(pool, groupKey, enabled) {
+86|     try {
+87|         // On s'assure que la clé commence par 'log_'
+88|         const fullKey = groupKey.startsWith('log_') ? groupKey : `log_${groupKey}`;
+89| 
+90|         // On met à jour dans la base
+91|         await pool.query(
+92|             `INSERT INTO settings (key, value) 
+93|              VALUES ($1, $2) 
+94|              ON CONFLICT (key) DO UPDATE SET value = $2`,
+95|             [fullKey, enabled ? 'true' : 'false']
+96|         );
+97| 
+98|         // On met à jour en mémoire
+99|         logStates[fullKey] = enabled;
 100| 
-101|     } catch (err) {
-102|         logger.error('❌ Erreur lors du chargement des paramètres :', err.message);
-103|         logger.log('⚠️ Utilisation des valeurs par défaut (fallback).');
-104|     }
-105| }
-106| 
-107| 
+101|         console.log(`✅ Groupe de logs "${fullKey}" ${enabled ? 'activé' : 'désactivé'}`);
+102|         return true;
+103|     } catch (err) {
+104|         console.error('❌ Erreur lors de la mise à jour du groupe de logs :', err.message);
+105|         return false;
+106|     }
+107| }
 108| 
-109| 
-110| 
-111| // ==========  CONFIGURATION EXPRESS ==========
-112| const app = express();
-113| const server = http.createServer(app);
+109| // ========== FONCTION POUR RÉCUPÉRER L'ÉTAT D'UN GROUPE ==========
+110| function getLogState(groupKey) {
+111|     const fullKey = groupKey.startsWith('log_') ? groupKey : `log_${groupKey}`;
+112|     return logStates[fullKey] || false;
+113| }
 114| 
-115| // Compression
-116| app.use(compression({
-117|     level: 6,
-118|     threshold: 1024,
-119|     filter: (req, res) => {
-120|         if (req.path === '/socket.io/') return false;
-121|         return compression.filter(req, res);
-122|     }
-123| }));
-124| 
-125| app.use(express.json());
-126| app.use(express.text({ type: 'text/plain' }));
-127| 
-128| app.use(session({
-129|     store: new pgSession({
-130|         pool: pool,
-131|         tableName: 'session',
-132|         createTableIfMissing: false,
-133|         pruneSessionInterval: 60
-134|     }),
-135|     secret: 'un-super-secret-change-moi',
-136|     resave: false,
-137|     saveUninitialized: false,
-138|     cookie: {
-139|         httpOnly: true,
-140|         secure: false,
-141|         maxAge: 30 * 24 * 60 * 60 * 1000 // 30 jours
-142|     }
-143| }));
-144| 
-145| 
-146| app.use(maintenanceMiddleware(pool));
-147| contactRoutes(app);
-148| htmlRoutes(app, pool);
-149| messagesRoutes(app, pool);
-150| authRoutes(app, pool);
-151| geocodeRoutes(app);
-152| require('./modules/routes/api-block')(app, pool);
-153| 
-154| // ========== CONFIGURATION DES FICHIERS STATIQUES ==========
-155| 
-156| // 🔥 Détermine les options selon le mode
-157| const staticOptions = {
-158|     setHeaders: function (res, path) {
-159|         if (path.endsWith('.css')) {
-160|             res.setHeader('Content-Type', 'text/css');
-161|         }
-162|     }
-163| };
-164| 
-165| // 🔥 Si DEV_MODE est activé, désactive le cache
-166| if (DEV_MODE === true) {
-167|     staticOptions.etag = false;           // Désactive ETag
-168|     staticOptions.maxAge = 0;             // Pas de mise en cache
-169|     staticOptions.lastModified = false;   // Désactive Last-Modified
-170| 
-171|     // Ajoute des headers anti-cache
-172|     staticOptions.setHeaders = function (res, path) {
-173|         if (path.endsWith('.css')) {
-174|             res.setHeader('Content-Type', 'text/css');
-175|         }
-176|         // 🔥 Headers anti-cache pour TOUS les fichiers
-177|         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
-178|         res.setHeader('Pragma', 'no-cache');
-179|         res.setHeader('Expires', '0');
-180|     };
-181| 
-182|     logger.log('🔥 MODE DÉVELOPPEMENT ACTIF - Cache désactivé');
-183| } else {
-184|     logger.log('✅ MODE PRODUCTION - Cache activé');
-185| }
-186| 
-187| // Applique la configuration
-188| app.use(express.static('/var/www/meetgay/public', staticOptions));
-189| 
-190| app.use(express.json());
-191| 
-192| // 🔥 Middleware anti-cache (seulement en développement)
-193| if (DEV_MODE === true) {
-194|     app.use((req, res, next) => {
-195|         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
-196|         res.setHeader('Pragma', 'no-cache');
-197|         res.setHeader('Expires', '0');
-198|         next();
-199|     });
-200|     logger.log('🔥 Middleware anti-cache activé');
-201| }
-202| 
-203| // ========== SOCKET.IO ==========
-204| const io = socketIo(server, {
-205|     cors: {
-206|         origin: "*",
-207|         methods: ["GET", "POST"],
-208|         credentials: true,
-209|         allowedHeaders: ["*"]
-210|     },
-211|     transports: ['websocket', 'polling'],
-212|     allowEIO3: true,
-213|     pingTimeout: 120000,    // ← 2 minutes (au lieu de 10)
-214|     pingInterval: 30000     // ← 30 secondes (au lieu de 1 minute)
-215| });
-216| 
-217| const sessionManager = require('./modules/session-manager.js')(io, pool, {
-218|     CLEANUP_INTERVAL: CLEANUP_INTERVAL_MINUTES * 60 * 1000,
-219|     INACTIVITY_THRESHOLD: INACTIVITY_MINUTES * 60 * 1000
-220| });
-221| 
-222| adminRoutes(app, pool, io);
-223| 
-224| // Gestion d'erreur (port déjà utilisé)
-225| server.on('error', (err) => {
-226|     if (err.code === 'EADDRINUSE') {
-227|         logger.error(`❌ Port déjà utilisé. Tue l'autre processus et redémarre.`);
-228|         process.exit(1);
-229|     }
-230| });
-231| 
-232| // Initialiser la surveillance d’inactivité (5 minutes sans activité)
-233| const updateActivity = sessionManager.updateActivity;
-234| 
-235| // ========== LANCEMENT DES HANDLERS SOCKET (APRÈS io, users, constants) ==========
-236| socketHandlers(io, pool, sessionManager, updateActivity, REPORTS_THRESHOLD, REPORTS_WINDOW_MINUTES, TEMP_BAN_MINUTES);
-237| 
-238| // ========== NETTOYAGE AUTOMATIQUE ==========
-239| // Nettoyage des utilisateurs inactifs
-240| (async function initCleanup() {
-241|     await loadConfigFromDatabase(); // Recharge les paramètres depuis la base
-242|     if (VISITOR_CLEANUP_ENABLED) {
-243|         sessionManager.startCleanup();
-244|         logger.log('🧹 Nettoyage des visiteurs déconnectés ACTIVÉ');
-245|     } else {
-246|         logger.log('🧹 Nettoyage des visiteurs déconnectés DÉSACTIVÉ');
-247|     }
-248| })();
-249| 
-250| // Nettoyage auto du journal et signalements (toutes les 24h)
-251| if (AUTO_CLEANUP_ENABLED) {
-252|     setInterval(async () => {
-253|         await cleanOldData(pool, LOGS_RETENTION_DAYS, REPORTS_RETENTION_DAYS);
-254|     }, 24 * 60 * 60 * 1000);
-255|     logger.log(`🧹 Nettoyage auto activé: journal ${LOGS_RETENTION_DAYS} jours, signalements ${REPORTS_RETENTION_DAYS} jours`);
-256| } else {
-257|     logger.log(`🧹 Nettoyage auto DÉSACTIVÉ`);
-258| }
-259| 
-260| // ========== DÉMARRAGE ==========
-261| const PORT = process.env.PORT || 3005;
-262| server.listen(PORT, '0.0.0.0', () => {
-263|     logger.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
-264| });
+115| // ========== EXPORT DES FONCTIONS ==========
+116| module.exports = {
+117|     LOG_GROUPS,
+118|     log,
+119|     error,
+120|     warn,
+121|     loadLogConfig,
+122|     updateLogGroup,
+123|     getLogState,
+124|     logStates // Pour déboguer
+125| };
 
 # ============================================
 # FIN DU FICHIER - 1 fichiers inclus
-# Généré le 2026-07-21 12:57:02
+# Généré le 2026-07-21 22:56:11
 # Tous les fichiers sont complets
 # ============================================
