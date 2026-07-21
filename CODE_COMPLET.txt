@@ -1,6 +1,6 @@
 # MEETGAY - CODE COMPLET
-# Généré le 2026-07-20 20:39:55
-# 3 fichier(s) inclus
+# Généré le 2026-07-21 12:51:57
+# 1 fichier(s) inclus
 
 "⚠️ MODE ANALYSE TOTALE - Lecture exhaustive du code ci-dessous. 
 Vérifie chaque fichier listé dans le sommaire. 
@@ -8,720 +8,7 @@ Ne fais pas de supposition, relis attentivement tout le contenu."
 
 # ========== SOMMAIRE ==========
 
-# 1. modules\routes\admin.js
-# 2. public\js\admin.js
-# 3. protected\admin.html
-
-# ============================================
-# FILE: modules\routes\admin.js
-# ============================================
-
-1| ﻿// modules/routes/admin.js
-2| const bcrypt = require('bcrypt');
-3| const { disconnectBannedUser } = require('../../moderation');
-4| 
-5| 
-6| 
-7| module.exports = function (app, pool, io, users) {
-8| 
-9|     // ========== FONCTION POUR INCREMENTER LES COMPTEURS IP ==========
-10|     async function incrementIpCounter(ip, actionType) {
-11|         if (!ip) return;
-12| 
-13|         try {
-14|             // Réinitialiser les compteurs pour les IP qui n'ont pas été vues depuis 24h
-15|             await pool.query(
-16|                 `UPDATE users 
-17|              SET kick_count = 0, ban_count = 0
-18|              WHERE last_ip = $1 
-19|              AND last_ip IS NOT NULL
-20|              AND (
-21|                  (kick_count > 0 AND last_seen < NOW() - INTERVAL '24 hours') OR
-22|                  (ban_count > 0 AND last_seen < NOW() - INTERVAL '24 hours')
-23|              )`,
-24|                 [ip]
-25|             );
-26| 
-27|             // Incrémenter le compteur
-28|             await pool.query(
-29|                 `UPDATE users 
-30|              SET ${actionType === 'kick' ? 'kick_count' : 'ban_count'} = 
-31|                  ${actionType === 'kick' ? 'kick_count' : 'ban_count'} + 1,
-32|                  last_seen = NOW()
-33|              WHERE last_ip = $1`,
-34|                 [ip]
-35|             );
-36|             console.log(`✅ Compteur ${actionType} incrémenté pour IP: ${ip}`);
-37|         } catch (err) {
-38|             console.error(`❌ Erreur incrémentation compteur ${actionType}:`, err);
-39|         }
-40|     }
-41| 
-42|     // ========== ROUTES ADMIN ==========
-43|     app.post('/api/admin/login', async (req, res) => {
-44|         const { username, password } = req.body;
-45| 
-46|         try {
-47|             const result = await pool.query(
-48|                 `SELECT id, username, password_hash, is_active FROM admins WHERE username = $1`,
-49|                 [username]
-50|             );
-51| 
-52|             if (result.rows.length === 0) {
-53|                 return res.status(401).json({ success: false, error: 'Identifiants incorrects' });
-54|             }
-55| 
-56|             const admin = result.rows[0];
-57| 
-58|             if (!admin.is_active) {
-59|                 return res.status(401).json({ success: false, error: 'Compte désactivé' });
-60|             }
-61| 
-62|             const isValid = await bcrypt.compare(password, admin.password_hash);
-63| 
-64|             if (!isValid) {
-65|                 return res.status(401).json({ success: false, error: 'Identifiants incorrects' });
-66|             }
-67| 
-68|             // CRÉER LA SESSION
-69|             req.session.adminId = admin.id;
-70|             req.session.isAdmin = true;
-71|             req.session.adminUsername = admin.username;
-72| 
-73|             // FORCER L'INSERTION DANS admin_sessions
-74|             try {
-75|                 const sessionId = req.session.id;
-76|                 console.log('📝 Tentative insertion - Session ID:', sessionId);
-77|                 console.log('📝 Tentative insertion - Admin ID:', admin.id);
-78| 
-79|                 const insertResult = await pool.query(
-80|                     `INSERT INTO admin_sessions (session_id, admin_id, is_logged_in, login_time, last_activity) 
-81|                  VALUES ($1, $2, true, NOW(), NOW())
-82|                  ON CONFLICT (session_id) DO UPDATE 
-83|                  SET is_logged_in = true, last_activity = NOW()
-84|                  RETURNING *`,
-85|                     [sessionId, admin.id]
-86|                 );
-87| 
-88|                 console.log('✅ SUCCÈS - Ligne insérée:', insertResult.rows[0]);
-89|             } catch (dbErr) {
-90|                 console.error('❌ ÉCHEC INSERTION:', dbErr.message);
-91|                 console.error('Détails:', dbErr);
-92|             }
-93| 
-94|             res.json({ success: true, admin: { id: admin.id, username: admin.username } });
-95| 
-96|         } catch (err) {
-97|             console.error('Erreur login admin:', err);
-98|             res.status(500).json({ success: false, error: 'Erreur serveur' });
-99|         }
-100|     });
-101| 
-102|     app.post('/api/admin/logout', async (req, res) => {
-103|         // Mettre à jour la table admin_sessions
-104|         if (req.session && req.session.id) {
-105|             try {
-106|                 await pool.query(
-107|                     `UPDATE admin_sessions SET is_logged_in = false, logout_time = NOW() 
-108|                  WHERE session_id = $1`,
-109|                     [req.session.id]
-110|                 );
-111|             } catch (err) {
-112|                 console.error('Erreur mise à jour session:', err.message);
-113|             }
-114|         }
-115| 
-116|         req.session.destroy((err) => {
-117|             if (err) {
-118|                 return res.status(500).json({ error: 'Erreur déconnexion' });
-119|             }
-120|             res.json({ success: true });
-121|         });
-122|     });
-123| 
-124|     app.get('/api/admin/users', async (req, res) => {
-125|         // Vérifier si un admin est connecté via la session
-126|         if (!req.session.isAdmin || !req.session.adminId) {
-127|             return res.status(403).json({ error: 'Accès non autorisé - Veuillez vous connecter' });
-128|         }
-129| 
-130|         // Si admin connecté, on exécute la requête
-131|         try {
-132|             const result = await pool.query('SELECT pseudo, age, role, warnings, is_banned, ban_reason, last_ip, kick_count, ban_count FROM users ORDER BY id');
-133|             res.json(result.rows);
-134|         } catch (err) {
-135|             console.error("Erreur admin/users:", err.message);
-136|             res.status(500).json({ error: 'Erreur serveur', details: err.message });
-137|         }
-138|     });
-139| 
-140|     app.post('/api/admin/warn', async (req, res) => {
-141|         const { pseudo } = req.body;
-142| 
-143|         try {
-144|             // 1. Incrémenter le compteur
-145|             const result = await pool.query(
-146|                 'UPDATE users SET warnings = COALESCE(warnings, 0) + 1 WHERE pseudo = $1 RETURNING warnings',
-147|                 [pseudo]
-148|             );
-149| 
-150|             const newWarnCount = result.rows[0]?.warnings || 0;
-151| 
-152|             // Enregistrer l'action dans le journal
-153|             await pool.query(
-154|                 `INSERT INTO moderation_actions (admin_pseudo, action_type, target_pseudo, reason)
-155|                 VALUES ($1, 'warn', $2, $3)`,
-156|                 [req.session.adminUsername, pseudo, `Warn automatique (total: ${newWarnCount})`]
-157|             );
-158| 
-159|             // 2. Trouver l'utilisateur dans l'objet global "users"
-160|             let targetSocketId = null;
-161|             for (const [socketId, user] of Object.entries(users)) {
-162|                 if (user.pseudo === pseudo) {
-163|                     targetSocketId = socketId;
-164|                     break;
-165|                 }
-166|             }
-167| 
-168|             // 3. Si connecté, lui envoyer un événement
-169|             if (targetSocketId && io) {
-170|                 io.to(targetSocketId).emit('userWarned', {
-171|                     warnings: newWarnCount,
-172|                     message: `⚠️ Vous avez reçu un avertissement. Total : ${newWarnCount}`
-173|                 });
-174|             }
-175| 
-176|             res.json({ success: true, warnings: newWarnCount });
-177| 
-178|         } catch (err) {
-179|             console.error('Erreur warn:', err);
-180|             res.status(500).json({ error: 'Erreur serveur' });
-181|         }
-182|     });
-183| 
-184|     // ========== KICK USER ==========
-185|     app.post('/api/admin/kick', async (req, res) => {
-186|         if (!req.session.isAdmin) {
-187|             return res.status(401).json({ error: 'Non autorisé' });
-188|         }
-189| 
-190|         const { pseudo } = req.body;
-191|         if (!pseudo) {
-192|             return res.status(400).json({ error: 'Pseudo requis' });
-193|         }
-194| 
-195|         try {
-196|             // 1. Vérifier que l'utilisateur existe et récupérer son IP
-197|             const userCheck = await pool.query(
-198|                 'SELECT pseudo, last_ip FROM users WHERE pseudo = $1',
-199|                 [pseudo]
-200|             );
-201| 
-202|             if (userCheck.rows.length === 0) {
-203|                 return res.status(404).json({ error: 'Utilisateur non trouvé' });
-204|             }
-205| 
-206|             const userIp = userCheck.rows[0].last_ip;
-207| 
-208|             // 2. 🔥 ENREGISTRER L'IP DANS L'HISTORIQUE (AVANT TOUTE ACTION)
-209|             if (userIp) {
-210|                 try {
-211|                     await pool.query(
-212|                         `INSERT INTO ip_history (ip_address, action_type, target_pseudo, admin_pseudo)
-213|                          VALUES ($1, 'kick', $2, $3)`,
-214|                         [userIp, pseudo, req.session.adminUsername]
-215|                     );
-216|                     console.log(`✅ IP ${userIp} enregistrée pour kick de ${pseudo}`);
-217|                 } catch (err) {
-218|                     console.error('❌ Erreur enregistrement IP history (kick):', err);
-219|                 }
-220|             } else {
-221|                 console.warn(`⚠️ Pas d'IP pour ${pseudo}, impossible d'enregistrer l'historique`);
-222|             }
-223| 
-224|             // 3. Trouver le socket de l'utilisateur
-225|             let targetSocketId = null;
-226|             for (const [socketId, user] of Object.entries(users)) {
-227|                 if (user.pseudo === pseudo) {
-228|                     targetSocketId = socketId;
-229|                     break;
-230|                 }
-231|             }
-232| 
-233|             // 4. Si connecté, lui envoyer un événement de kick
-234|             if (targetSocketId && io) {
-235|                 io.to(targetSocketId).emit('kicked', {
-236|                     message: '🦵 Vous avez été expulsé par un administrateur.'
-237|                 });
-238| 
-239|                 setTimeout(() => {
-240|                     const socket = io.sockets.sockets.get(targetSocketId);
-241|                     if (socket) {
-242|                         socket.disconnect(true);
-243|                     }
-244|                 }, 500);
-245|             }
-246| 
-247|             // 5. Supprimer l'utilisateur de la base de données
-248|             await pool.query('DELETE FROM users WHERE pseudo = $1', [pseudo]);
-249| 
-250|             // 6. Logger l'action dans le journal de modération
-251|             await pool.query(
-252|                 `INSERT INTO moderation_actions (admin_pseudo, action_type, target_pseudo, reason)
-253|                  VALUES ($1, 'kick', $2, 'Expulsé par administrateur')`,
-254|                 [req.session.adminUsername, pseudo]
-255|             );
-256| 
-257|             // 7. Notifier le panel admin
-258|             io.emit('new_moderation_action', {
-259|                 type: 'kick',
-260|                 target: pseudo,
-261|                 admin: req.session.adminUsername,
-262|                 timestamp: new Date()
-263|             });
-264| 
-265|             res.json({
-266|                 success: true,
-267|                 message: `${pseudo} a été expulsé et supprimé de la base`
-268|             });
-269| 
-270|         } catch (err) {
-271|             console.error('Erreur kick:', err);
-272|             res.status(500).json({ error: 'Erreur serveur lors de l\'expulsion' });
-273|         }
-274|     });
-275| 
-276| 
-277|     // ========== BAN USER ==========
-278|     app.post('/api/admin/ban', async (req, res) => {
-279|         const { pseudo, reason } = req.body;
-280| 
-281|         try {
-282|             // 1. Récupérer l'IP de l'utilisateur AVANT de le bannir
-283|             const userCheck = await pool.query(
-284|                 'SELECT last_ip FROM users WHERE pseudo = $1',
-285|                 [pseudo]
-286|             );
-287| 
-288|             const userIp = userCheck.rows[0]?.last_ip;
-289| 
-290|             // 2. 🔥 ENREGISTRER L'IP DANS L'HISTORIQUE (AVANT LE BAN)
-291|             if (userIp) {
-292|                 try {
-293|                     await pool.query(
-294|                         `INSERT INTO ip_history (ip_address, action_type, target_pseudo, admin_pseudo)
-295|                          VALUES ($1, 'ban', $2, $3)`,
-296|                         [userIp, pseudo, req.session.adminUsername]
-297|                     );
-298|                     console.log(`✅ IP ${userIp} enregistrée pour ban de ${pseudo}`);
-299|                 } catch (err) {
-300|                     console.error('❌ Erreur enregistrement IP history (ban):', err);
-301|                 }
-302|             } else {
-303|                 console.warn(`⚠️ Pas d'IP pour ${pseudo}, impossible d'enregistrer l'historique de ban`);
-304|             }
-305| 
-306|             // 3. Bannir l'utilisateur
-307|             await pool.query('UPDATE users SET is_banned = true, ban_reason = $1 WHERE pseudo = $2', [reason, pseudo]);
-308| 
-309|             // 4. Déconnecter l'utilisateur
-310|             disconnectBannedUser(io, users, pseudo, reason);
-311| 
-312|             // 5. Notifier le panel admin
-313|             io.emit('new_moderation_action', {
-314|                 type: 'ban',
-315|                 target: pseudo,
-316|                 admin: req.session.adminUsername,
-317|                 timestamp: new Date()
-318|             });
-319| 
-320|             res.json({ success: true });
-321| 
-322|         } catch (err) {
-323|             console.error('Erreur ban:', err);
-324|             res.status(500).json({ error: 'Erreur lors du bannissement' });
-325|         }
-326|     });
-327| 
-328| 
-329| 
-330|     // GET /api/admin/reports - Liste des signalements
-331|     app.get('/api/admin/reports', async (req, res) => {
-332|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
-333| 
-334|         try {
-335|             const result = await pool.query(`
-336|             SELECT r.*, 
-337|                    u1.pseudo as reporter_exists,
-338|                    u2.pseudo as target_exists
-339|             FROM reports r
-340|             LEFT JOIN users u1 ON u1.pseudo = r.reporter_pseudo
-341|             LEFT JOIN users u2 ON u2.pseudo = r.target_pseudo
-342|             ORDER BY r.created_at DESC
-343|             LIMIT 100
-344|         `);
-345|             res.json(result.rows);
-346|         } catch (err) {
-347|             console.error('Erreur reports:', err);
-348|             res.status(500).json({ error: 'Erreur serveur' });
-349|         }
-350|     });
-351| 
-352| 
-353| 
-354|     // GET /api/admin/moderation-logs - Journal des actions
-355|     app.get('/api/admin/moderation-logs', async (req, res) => {
-356|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
-357| 
-358|         try {
-359|             const result = await pool.query(`
-360|             SELECT * FROM moderation_actions 
-361|             ORDER BY created_at DESC 
-362|             LIMIT 100
-363|         `);
-364|             res.json(result.rows);
-365|         } catch (err) {
-366|             console.error('Erreur logs:', err);
-367|             res.status(500).json({ error: 'Erreur serveur' });
-368|         }
-369|     });
-370| 
-371|     // POST /api/admin/ignore-report - Ignorer un signalement
-372|     app.post('/api/admin/ignore-report', async (req, res) => {
-373|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
-374| 
-375|         const { reportId } = req.body;
-376|         if (!reportId) return res.status(400).json({ error: 'ID requis' });
-377| 
-378|         try {
-379|             await pool.query('DELETE FROM reports WHERE id = $1', [reportId]);
-380|             res.json({ success: true });
-381|         } catch (err) {
-382|             console.error('Erreur ignore report:', err);
-383|             res.status(500).json({ error: 'Erreur serveur' });
-384|         }
-385|     });
-386| 
-387| 
-388| 
-389|     // ========== MAINTENANCE MODE ==========
-390|     app.get('/api/admin/maintenance', async (req, res) => {
-391|         try {
-392|             const result = await pool.query("SELECT value FROM settings WHERE key = 'maintenance_mode'");
-393|             res.json({ enabled: result.rows[0]?.value === 'true' });
-394|         } catch (err) {
-395|             res.status(500).json({ error: 'Erreur' });
-396|         }
-397|     });
-398| 
-399|     app.post('/api/admin/maintenance', async (req, res) => {
-400|         const { enabled } = req.body;
-401|         if (typeof enabled !== 'boolean') {
-402|             return res.status(400).json({ error: 'enabled doit être true/false' });
-403|         }
-404|         try {
-405|             await pool.query("UPDATE settings SET value = $1 WHERE key = 'maintenance_mode'", [enabled ? 'true' : 'false']);
-406|             res.json({ success: true, enabled });
-407|         } catch (err) {
-408|             res.status(500).json({ error: 'Erreur' });
-409|         }
-410|     });
-411| 
-412|     // ========== VIDAGE MANUEL (API) ==========
-413| 
-414|     // POST /api/admin/clear-logs - Vider TOUT le journal
-415|     app.post('/api/admin/clear-logs', async (req, res) => {
-416|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
-417| 
-418|         try {
-419|             const result = await pool.query('DELETE FROM moderation_actions');
-420|             res.json({ success: true, deleted: result.rowCount });
-421|         } catch (err) {
-422|             console.error('Erreur clear logs:', err);
-423|             res.status(500).json({ error: 'Erreur serveur' });
-424|         }
-425|     });
-426| 
-427|     // POST /api/admin/clean-reports - Nettoyer les anciens signalements
-428|     app.post('/api/admin/clean-reports', async (req, res) => {
-429|         if (!req.session.isAdmin) return res.status(401).json({ error: 'Non autorisé' });
-430| 
-431|         const { days = 60 } = req.body;
-432|         try {
-433|             const result = await pool.query(
-434|                 `DELETE FROM reports WHERE created_at < NOW() - INTERVAL '${days} days'`
-435|             );
-436|             res.json({ success: true, deleted: result.rowCount });
-437|         } catch (err) {
-438|             console.error('Erreur clean reports:', err);
-439|             res.status(500).json({ error: 'Erreur serveur' });
-440|         }
-441|     });
-442| 
-443|     // ========== RÉCUPÉRER L'HISTORIQUE IP ==========
-444|     app.post('/api/admin/ip-history', async (req, res) => {
-445|         if (!req.session.isAdmin) {
-446|             return res.status(401).json({ error: 'Non autorisé' });
-447|         }
-448| 
-449|         const { ip } = req.body;
-450|         if (!ip) {
-451|             return res.status(400).json({ error: 'IP requise' });
-452|         }
-453| 
-454|         try {
-455|             // Compter les kicks et bans sur les dernières 24h
-456|             const result = await pool.query(
-457|                 `SELECT 
-458|                     COUNT(CASE WHEN action_type = 'kick' THEN 1 END) as kick_count,
-459|                     COUNT(CASE WHEN action_type = 'ban' THEN 1 END) as ban_count
-460|                  FROM ip_history 
-461|                  WHERE ip_address = $1 
-462|                  AND created_at > NOW() - INTERVAL '24 hours'`,
-463|                 [ip]
-464|             );
-465| 
-466|             const responseData = {
-467|                 success: true,
-468|                 ip: ip,
-469|                 kick_count: parseInt(result.rows[0].kick_count) || 0,
-470|                 ban_count: parseInt(result.rows[0].ban_count) || 0
-471|             };
-472|             console.log(`📤 Envoi historique IP pour ${ip}:`, responseData);
-473|             res.json(responseData);
-474|         } catch (err) {
-475|             console.error('Erreur ip-history:', err);
-476|             res.status(500).json({ error: 'Erreur serveur' });
-477|         }
-478|     });
-479| 
-480|     // ========== ADMIN : CONVERSATIONS ==========
-481| 
-482|     // Récupérer toutes les conversations
-483|     app.get('/api/admin/conversations', async (req, res) => {
-484|         if (!req.session.isAdmin) {
-485|             return res.status(401).json({ error: 'Non autorisé' });
-486|         }
-487| 
-488|         try {
-489|             const result = await pool.query(`
-490|                 SELECT 
-491|                     c.id,
-492|                     c.user1,
-493|                     c.user2,
-494|                     c.created_at,
-495|                     c.last_message_at,
-496|                     COUNT(m.id) as message_count
-497|                 FROM conversations c
-498|                 LEFT JOIN messages m ON m.conversation_id = c.id
-499|                 GROUP BY c.id
-500|                 ORDER BY c.last_message_at DESC
-501|             `);
-502|             res.json(result.rows);
-503|         } catch (err) {
-504|             console.error('Erreur conversations:', err);
-505|             res.status(500).json({ error: 'Erreur serveur' });
-506|         }
-507|     });
-508| 
-509|     // Récupérer les messages d'une conversation (messages + archive)
-510|     app.get('/api/admin/conversations/:id/messages', async (req, res) => {
-511|         if (!req.session.isAdmin) {
-512|             return res.status(401).json({ error: 'Non autorisé' });
-513|         }
-514| 
-515|         const { id } = req.params;
-516|         try {
-517|             // 👇 UNION DES DEUX TABLES
-518|             const result = await pool.query(`
-519|             SELECT 
-520|                 id,
-521|                 from_pseudo,
-522|                 to_pseudo,
-523|                 message,
-524|                 created_at,
-525|                 'live' as source
-526|             FROM messages 
-527|             WHERE conversation_id = $1
-528|             
-529|             UNION ALL
-530|             
-531|             SELECT 
-532|                 id,
-533|                 from_pseudo,
-534|                 to_pseudo,
-535|                 message,
-536|                 created_at,
-537|                 'archive' as source
-538|             FROM messages_archive 
-539|             WHERE conversation_id = $1
-540|             
-541|             ORDER BY created_at ASC
-542|         `, [id]);
-543| 
-544|             res.json(result.rows);
-545|         } catch (err) {
-546|             console.error('Erreur messages conversation:', err);
-547|             res.status(500).json({ error: 'Erreur serveur' });
-548|         }
-549|     });
-550| 
-551|     // ========== ROUTES POUR LES PARAMÈTRES DE CONFIGURATION ==========
-552| 
-553|     // Récupérer tous les paramètres
-554|     app.get('/api/admin/settings', async (req, res) => {
-555|         if (!req.session.isAdmin) {
-556|             return res.status(401).json({ error: 'Non autorisé' });
-557|         }
-558| 
-559|         try {
-560|             const result = await pool.query('SELECT key, value FROM settings');
-561|             const settings = {};
-562|             result.rows.forEach(row => {
-563|                 settings[row.key] = row.value;
-564|             });
-565|             res.json({ success: true, settings });
-566|         } catch (err) {
-567|             console.error('Erreur récupération settings:', err);
-568|             res.status(500).json({ error: 'Erreur serveur' });
-569|         }
-570|     });
-571| 
-572|     // Mettre à jour un paramètre
-573|     app.post('/api/admin/settings/update', async (req, res) => {
-574|         if (!req.session.isAdmin) {
-575|             return res.status(401).json({ error: 'Non autorisé' });
-576|         }
-577| 
-578|         const { key, value } = req.body;
-579|         if (!key) {
-580|             return res.status(400).json({ error: 'Clé requise' });
-581|         }
-582| 
-583|         try {
-584|             // Vérifier si la clé existe
-585|             const check = await pool.query('SELECT 1 FROM settings WHERE key = $1', [key]);
-586|             if (check.rows.length === 0) {
-587|                 return res.status(404).json({ error: 'Clé non trouvée' });
-588|             }
-589| 
-590|             await pool.query('UPDATE settings SET value = $1 WHERE key = $2', [value, key]);
-591|             console.log(`📝 Paramètre mis à jour: ${key} = ${value}`);
-592| 
-593|             res.json({ success: true, message: 'Paramètre mis à jour' });
-594|         } catch (err) {
-595|             console.error('Erreur mise à jour setting:', err);
-596|             res.status(500).json({ error: 'Erreur serveur' });
-597|         }
-598|     });
-599| 
-600|     // Mettre à jour plusieurs paramètres à la fois (pour le formulaire)
-601|     app.post('/api/admin/settings/update-multiple', async (req, res) => {
-602|         if (!req.session.isAdmin) {
-603|             return res.status(401).json({ error: 'Non autorisé' });
-604|         }
-605| 
-606|         const { settings } = req.body;
-607|         if (!settings || typeof settings !== 'object') {
-608|             return res.status(400).json({ error: 'Paramètres invalides' });
-609|         }
-610| 
-611|         try {
-612|             for (const [key, value] of Object.entries(settings)) {
-613|                 await pool.query('UPDATE settings SET value = $1 WHERE key = $2', [String(value), key]);
-614|             }
-615|             console.log('📝 Paramètres mis à jour en masse');
-616|             res.json({ success: true, message: 'Paramètres mis à jour' });
-617|         } catch (err) {
-618|             console.error('Erreur mise à jour settings:', err);
-619|             res.status(500).json({ error: 'Erreur serveur' });
-620|         }
-621|     });
-622| 
-623|     // ========== SUPPRESSION DÉFINITIVE D'UN UTILISATEUR ==========
-624|     app.delete('/api/admin/delete-user', async (req, res) => {
-625|         try {
-626|             const { pseudo } = req.body;
-627| 
-628|             if (!pseudo) {
-629|                 return res.status(400).json({ success: false, error: 'Pseudo manquant' });
-630|             }
-631| 
-632|             const checkUser = await pool.query('SELECT role, socket_id FROM users WHERE pseudo = $1', [pseudo]);
-633|             if (checkUser.rows.length === 0) {
-634|                 return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
-635|             }
-636| 
-637|             if (checkUser.rows[0].role === 'admin') {
-638|                 return res.status(403).json({ success: false, error: 'Impossible de supprimer un administrateur' });
-639|             }
-640| 
-641|             // 🔥 Envoyer l'événement de déconnexion
-642|             const socketId = checkUser.rows[0].socket_id;
-643|             if (socketId) {
-644|                 const socket = io.sockets.sockets.get(socketId);
-645|                 if (socket) {
-646|                     socket.emit('account-deleted', {
-647|                         reason: '⛔ Votre compte a été supprimé par l\'administrateur.'
-648|                     });
-649|                     // ⚠️ On NE déconnecte PAS le socket immédiatement
-650|                     // Le client gérera la redirection après le message
-651|                 }
-652|             }
-653| 
-654|             await pool.query('DELETE FROM users WHERE pseudo = $1', [pseudo]);
-655| 
-656|             res.json({ success: true, message: `Utilisateur ${pseudo} supprimé et déconnecté` });
-657| 
-658|         } catch (err) {
-659|             console.error('Erreur delete-user:', err);
-660|             res.status(500).json({ success: false, error: 'Erreur serveur' });
-661|         }
-662| 
-663|     });
-664| 
-665|     // ========== ACTIVER / DÉSACTIVER ADMINER ==========
-666|     const fs = require('fs');
-667|     const adminerPath = '/var/www/meetgay/public/db-manage.php';
-668|     const adminerDisabledPath = '/var/www/meetgay/public/db-manage.disabled';
-669| 
-670|     app.post('/api/admin/toggle-adminer', async (req, res) => {
-671|         if (!req.session.isAdmin) {
-672|             return res.status(401).json({ error: 'Non autorisé' });
-673|         }
-674| 
-675|         const { enabled } = req.body;
-676| 
-677|         try {
-678|             // Mettre à jour la base
-679|             await pool.query(
-680|                 "UPDATE settings SET value = $1 WHERE key = 'adminer_enabled'",
-681|                 [enabled ? 'true' : 'false']
-682|             );
-683| 
-684|             // Activer ou désactiver le fichier
-685|             if (enabled) {
-686|                 // Renommer .disabled → .php
-687|                 if (fs.existsSync(adminerDisabledPath)) {
-688|                     fs.renameSync(adminerDisabledPath, adminerPath);
-689|                     console.log('🔓 Adminer activé');
-690|                 }
-691|             } else {
-692|                 // Renommer .php → .disabled
-693|                 if (fs.existsSync(adminerPath)) {
-694|                     fs.renameSync(adminerPath, adminerDisabledPath);
-695|                     console.log('🔒 Adminer désactivé');
-696|                 }
-697|             }
-698| 
-699|             res.json({ success: true, enabled });
-700|         } catch (err) {
-701|             console.error('Erreur toggle adminer:', err);
-702|             res.status(500).json({ error: 'Erreur serveur' });
-703|         }
-704|     });
-705| 
-706| };
+# 1. public\js\admin.js
 
 # ============================================
 # FILE: public\js\admin.js
@@ -1586,1144 +873,1007 @@ Ne fais pas de supposition, relis attentivement tout le contenu."
 857|             ]
 858|         },
 859|         {
-860|             title: '📂 MODE DÉVELOPPEUR',
+860|             title: '📋 Journalisation (Logs)',
 861|             fields: [
-862|                 { key: 'dev_mode', label: "🛠️ Mode développeur (désactive le cache)", type: 'toggle' },
-863|                 { key: 'test_mode', label: '🧪 Mode test (désactive le fingerprint)', type: 'toggle' }
-864|             ]
-865|         },
-866|         {
-867|             title: '🔐 ADMINER (gestion base de données)',
-868|             fields: [
-869|                 {
-870|                     key: 'adminer_enabled',
-871|                     label: '📂 Activer Adminer <a href="/db-manage.php" target="_blank" class="adminer-link" style="display:none; margin-left:12px; background:#667eea; color:white; padding:4px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:600;">🔓 Ouvrir Adminer</a>',
-872|                     type: 'toggle'
-873|                 }
-874|             ]
-875|         }
-876|     ];
-877| 
-878|     // Génération du HTML pour chaque groupe
-879|     groups.forEach(group => {
-880|         html += `<div class="config-group">`;
-881|         html += `<div class="config-group-title">${group.title}</div>`;
-882|         html += `<div class="config-group-body">`;
-883| 
-884|         group.fields.forEach(field => {
-885|             const val = settings[field.key] !== undefined ? settings[field.key] : '';
-886|             const dataKey = field.key;
-887| 
-888|             html += `<div class="config-row">`;
-889|             html += `<label for="${dataKey}">${field.label}</label>`;
-890|             html += `<div class="config-control">`;
-891| 
-892|             if (field.type === 'toggle') {
-893|                 const isChecked = val === 'true';
-894|                 const checked = isChecked ? 'checked' : '';
-895|                 const statusClass = isChecked ? 'active' : 'inactive';
-896|                 const statusText = isChecked ? '✅ ACTIVÉ' : '❌ DÉSACTIVÉ';
-897| 
-898|                 html += `
-899|                     <input type="checkbox" id="${dataKey}" data-key="${dataKey}" class="toggle-input" ${checked}>
-900|                     <span class="toggle-status ${statusClass}">${statusText}</span>
-901|                 `;
-902|             } else {
-903|                 html += `
-904|                     <input type="number" id="${dataKey}" data-key="${dataKey}" class="setting-input" value="${val}">
-905|                     ${field.suffix ? `<span class="config-suffix">${field.suffix}</span>` : ''}
-906|                 `;
-907|             }
+862|                 { key: 'log_startup', label: '🚀 Logs de démarrage du serveur', type: 'checkbox', default: 'true' },
+863|                 { key: 'log_user_lifecycle', label: '👤 Logs des connexions / déconnexions', type: 'checkbox', default: 'true' },
+864|                 { key: 'log_messages', label: '💬 Logs des messages (envoi/réception)', type: 'checkbox', default: 'true' },
+865|                 { key: 'log_reports', label: '🚨 Logs des signalements et bans', type: 'checkbox', default: 'true' },
+866|                 { key: 'log_debug', label: '🐞 Logs de débogage (développement)', type: 'checkbox', default: 'false' },
+867|                 { key: 'log_errors', label: '❌ Logs des erreurs', type: 'checkbox', default: 'true' }
+868|             ]
+869|         },
+870|         {
+871|             title: '📂 MODE DÉVELOPPEUR',
+872|             fields: [
+873|                 { key: 'dev_mode', label: "🛠️ Mode développeur (désactive le cache)", type: 'toggle' },
+874|                 { key: 'test_mode', label: '🧪 Mode test (désactive le fingerprint)', type: 'toggle' }
+875|             ]
+876|         },
+877|         {
+878|             title: '🔐 ADMINER (gestion base de données)',
+879|             fields: [
+880|                 {
+881|                     key: 'adminer_enabled',
+882|                     label: '📂 Activer Adminer <a href="/db-manage.php" target="_blank" class="adminer-link" style="display:none; margin-left:12px; background:#667eea; color:white; padding:4px 12px; border-radius:6px; text-decoration:none; font-size:12px; font-weight:600;">🔓 Ouvrir Adminer</a>',
+883|                     type: 'toggle'
+884|                 }
+885|             ]
+886|         }
+887|     ];
+888| 
+889|     // Génération du HTML pour chaque groupe
+890|     groups.forEach(group => {
+891|         html += `<div class="config-group">`;
+892|         html += `<div class="config-group-title">${group.title}</div>`;
+893|         html += `<div class="config-group-body">`;
+894| 
+895|         group.fields.forEach(field => {
+896|             const val = settings[field.key] !== undefined ? settings[field.key] : '';
+897|             const dataKey = field.key;
+898| 
+899|             html += `<div class="config-row">`;
+900|             html += `<label for="${dataKey}">${field.label}</label>`;
+901|             html += `<div class="config-control">`;
+902| 
+903|             if (field.type === 'toggle') {
+904|                 const isChecked = val === 'true';
+905|                 const checked = isChecked ? 'checked' : '';
+906|                 const statusClass = isChecked ? 'active' : 'inactive';
+907|                 const statusText = isChecked ? '✅ ACTIVÉ' : '❌ DÉSACTIVÉ';
 908| 
-909|             html += `</div>`; // fermeture .config-control
-910|             html += `</div>`; // fermeture .config-row
-911|         });
-912| 
-913|         html += `</div>`; // fermeture .config-group-body
-914|         html += `</div>`; // fermeture .config-group
-915|     });
-916| 
-917|     // ============================================
-918|     // SUPPRESSION DU BOUTON SAUVEGARDER
-919|     // ============================================
-920|     html += `<div id="msgConfig" class="config-message"></div>`;
-921|     html += `</form>`;
-922| 
-923|     // Initialiser l'affichage du bouton Adminer
-924|     const link = document.querySelector('.adminer-link');
-925|     const toggle = document.querySelector('[data-key="adminer_enabled"]');
-926|     if (link && toggle) {
-927|         if (toggle.checked) {
-928|             link.style.display = 'inline-block';
-929|         } else {
-930|             link.style.display = 'none';
-931|         }
-932|     }
+909|                 html += `
+910|                     <input type="checkbox" id="${dataKey}" data-key="${dataKey}" class="toggle-input" ${checked}>
+911|                     <span class="toggle-status ${statusClass}">${statusText}</span>
+912|                 `;
+913|             } else {
+914|                 html += `
+915|                     <input type="number" id="${dataKey}" data-key="${dataKey}" class="setting-input" value="${val}">
+916|                     ${field.suffix ? `<span class="config-suffix">${field.suffix}</span>` : ''}
+917|                 `;
+918|             }
+919| 
+920|             html += `</div>`; // fermeture .config-control
+921|             html += `</div>`; // fermeture .config-row
+922|         });
+923| 
+924|         html += `</div>`; // fermeture .config-group-body
+925|         html += `</div>`; // fermeture .config-group
+926|     });
+927| 
+928|     // ============================================
+929|     // SUPPRESSION DU BOUTON SAUVEGARDER
+930|     // ============================================
+931|     html += `<div id="msgConfig" class="config-message"></div>`;
+932|     html += `</form>`;
 933| 
-934|     container.innerHTML = html;
-935| 
-936| 
-937| 
-938|     // ============================================
-939|     // SAUVEGARDE AUTOMATIQUE À CHAQUE MODIFICATION
-940|     // ============================================
-941| 
-942|     // Fonction de sauvegarde automatique
-943|     function autoSave(input) {
-944|         const key = input.getAttribute('data-key');
-945|         let value;
+934|     // Initialiser l'affichage du bouton Adminer
+935|     const link = document.querySelector('.adminer-link');
+936|     const toggle = document.querySelector('[data-key="adminer_enabled"]');
+937|     if (link && toggle) {
+938|         if (toggle.checked) {
+939|             link.style.display = 'inline-block';
+940|         } else {
+941|             link.style.display = 'none';
+942|         }
+943|     }
+944| 
+945|     container.innerHTML = html;
 946| 
-947|         if (input.type === 'checkbox') {
-948|             value = input.checked ? 'true' : 'false';
-949|         } else {
-950|             value = input.value;
-951|         }
+947| 
+948| 
+949|     // ============================================
+950|     // SAUVEGARDE AUTOMATIQUE À CHAQUE MODIFICATION
+951|     // ============================================
 952| 
-953|         const msg = document.getElementById('msgConfig');
-954|         msg.textContent = '⏳ Sauvegarde en cours...';
-955|         msg.className = 'config-message loading';
-956| 
-957|         // Envoyer la modification au serveur
-958|         fetch('/api/admin/settings/update-multiple', {
-959|             method: 'POST',
-960|             headers: { 'Content-Type': 'application/json' },
-961|             body: JSON.stringify({ settings: { [key]: value } })
-962|         })
-963|             .then(response => response.json())
-964|             .then(data => {
-965|                 if (data.success) {
-966|                     msg.textContent = '✅ Sauvegardé';
-967|                     msg.className = 'config-message success';
-968|                     // Mettre à jour currentSettings
-969|                     currentSettings[key] = value;
-970|                 } else {
-971|                     msg.textContent = '❌ Erreur: ' + (data.error || 'Inconnue');
-972|                     msg.className = 'config-message error';
-973|                 }
-974|                 // Effacer le message après 3 secondes
-975|                 setTimeout(() => {
-976|                     msg.className = 'config-message';
-977|                     msg.textContent = '';
-978|                 }, 3000);
-979|             })
-980|             .catch(err => {
-981|                 msg.textContent = '❌ Erreur réseau';
-982|                 msg.className = 'config-message error';
-983|                 setTimeout(() => {
-984|                     msg.className = 'config-message';
-985|                     msg.textContent = '';
-986|                 }, 3000);
-987|             });
-988|     }
-989| 
-990|     // Écouteur pour les toggles
-991|     document.querySelectorAll('.toggle-input').forEach(input => {
-992|         input.addEventListener('change', function () {
-993|             const key = this.getAttribute('data-key');
-994| 
-995|             // Mettre à jour le statut visuel
-996|             const statusSpan = this.closest('.config-control').querySelector('.toggle-status');
-997|             if (statusSpan) {
-998|                 if (this.checked) {
-999|                     statusSpan.textContent = '✅ ACTIVÉ';
-1000|                     statusSpan.className = 'toggle-status active';
-1001|                 } else {
-1002|                     statusSpan.textContent = '❌ DÉSACTIVÉ';
-1003|                     statusSpan.className = 'toggle-status inactive';
-1004|                 }
-1005|             }
-1006| 
-1007|             // ==========================================
-1008|             // CAS SPÉCIAL : ADMINER
-1009|             // ==========================================
-1010|             if (key === 'adminer_enabled') {
-1011|                 // Appel direct à la route toggle-adminer
-1012|                 const isEnabled = this.checked;
-1013|                 const msg = document.getElementById('msgConfig');
-1014|                 msg.textContent = '⏳ Modification en cours...';
-1015|                 msg.className = 'config-message loading';
-1016| 
-1017|                 // ==========================================
-1018|                 // GÉRER L'AFFICHAGE DU BOUTON ADMINER
-1019|                 // ==========================================
-1020|                 const link = document.querySelector('.adminer-link');
-1021|                 if (link) {
-1022|                     if (isEnabled) {
-1023|                         link.style.display = 'inline-block';
-1024|                     } else {
-1025|                         link.style.display = 'none';
-1026|                     }
-1027|                 }
-1028| 
-1029|                 fetch('/api/admin/toggle-adminer', {
-1030|                     method: 'POST',
-1031|                     headers: { 'Content-Type': 'application/json' },
-1032|                     body: JSON.stringify({ enabled: isEnabled })
-1033|                 })
-1034|                     .then(response => response.json())
-1035|                     .then(data => {
-1036|                         if (data.success) {
-1037|                             msg.textContent = `✅ Adminer ${data.enabled ? 'activé' : 'désactivé'}`;
-1038|                             msg.className = 'config-message success';
-1039|                             // Mettre à jour currentSettings
-1040|                             currentSettings.adminer_enabled = data.enabled ? 'true' : 'false';
-1041|                         } else {
-1042|                             msg.textContent = '❌ Erreur: ' + (data.error || 'Inconnue');
-1043|                             msg.className = 'config-message error';
-1044|                             // Revenir à l'état précédent
-1045|                             this.checked = !isEnabled;
-1046|                             const statusSpan = this.closest('.config-control').querySelector('.toggle-status');
-1047|                             if (statusSpan) {
-1048|                                 if (this.checked) {
-1049|                                     statusSpan.textContent = '✅ ACTIVÉ';
-1050|                                     statusSpan.className = 'toggle-status active';
-1051|                                 } else {
-1052|                                     statusSpan.textContent = '❌ DÉSACTIVÉ';
-1053|                                     statusSpan.className = 'toggle-status inactive';
-1054|                                 }
-1055|                             }
-1056|                         }
-1057|                         setTimeout(() => {
-1058|                             msg.className = 'config-message';
-1059|                             msg.textContent = '';
-1060|                         }, 3000);
-1061|                     })
-1062|                     .catch(err => {
-1063|                         console.error('Erreur toggle adminer:', err);
-1064|                         msg.textContent = '❌ Erreur réseau';
-1065|                         msg.className = 'config-message error';
-1066|                         // Revenir à l'état précédent
-1067|                         this.checked = !isEnabled;
-1068|                         const statusSpan = this.closest('.config-control').querySelector('.toggle-status');
-1069|                         if (statusSpan) {
-1070|                             if (this.checked) {
-1071|                                 statusSpan.textContent = '✅ ACTIVÉ';
-1072|                                 statusSpan.className = 'toggle-status active';
-1073|                             } else {
-1074|                                 statusSpan.textContent = '❌ DÉSACTIVÉ';
-1075|                                 statusSpan.className = 'toggle-status inactive';
-1076|                             }
-1077|                         }
-1078|                         setTimeout(() => {
-1079|                             msg.className = 'config-message';
-1080|                             msg.textContent = '';
-1081|                         }, 3000);
-1082|                     });
-1083|             } else {
-1084|                 // Sauvegarde automatique pour les autres toggles
-1085|                 autoSave(this);
-1086|             }
-1087|         });
-1088|     });
-1089| 
-1090|     // Écouteur pour les inputs numériques
-1091|     document.querySelectorAll('.setting-input').forEach(input => {
-1092|         // Sauvegarde à chaque changement de valeur
-1093|         input.addEventListener('change', function () {
-1094|             autoSave(this);
-1095|         });
-1096|         // Sauvegarde après avoir terminé de taper (avec un délai)
-1097|         let timeoutId;
-1098|         input.addEventListener('input', function () {
-1099|             clearTimeout(timeoutId);
-1100|             timeoutId = setTimeout(() => {
-1101|                 autoSave(this);
-1102|             }, 500); // Attendre 500ms après la dernière frappe
-1103|         });
-1104|     });
-1105| }
-1106| 
-1107| 
-1108| 
-1109| // Charger les settings quand on clique sur l'onglet Configuration
-1110| document.addEventListener('DOMContentLoaded', function () {
-1111|     // Si l'onglet config est actif par défaut
-1112|     const activeTab = document.querySelector('.tab-content.active');
-1113|     if (activeTab && activeTab.id === 'tab-config') {
-1114|         setTimeout(loadSettings, 300);
-1115|     }
-1116| 
-1117|     // Écouter le clic sur le bouton config
-1118|     const configTabBtn = document.querySelector('.tab-btn[data-tab="config"]');
-1119|     if (configTabBtn) {
-1120|         configTabBtn.addEventListener('click', function () {
-1121|             setTimeout(loadSettings, 300);
-1122|         });
-1123|     }
-1124| });
-1125| 
-1126| // Fonction pour gérer les onglets (si elle n'existe pas déjà)
-1127| // On améliore la fonction showTab qui est probablement dans admin.js
-1128| // Si elle n'existe pas, on la crée.
-1129| if (typeof window.showTab !== 'function') {
-1130|     window.showTab = function (tabName) {
-1131|         // Cacher tous les onglets
-1132|         document.querySelectorAll('.tab-content').forEach(tab => {
-1133|             tab.classList.remove('active');
-1134|         });
-1135|         document.querySelectorAll('.tab-btn').forEach(btn => {
-1136|             btn.classList.remove('active');
-1137|         });
-1138| 
-1139|         // Afficher l'onglet sélectionné
-1140|         const targetTab = document.getElementById(`tab-${tabName}`);
-1141|         if (targetTab) {
-1142|             targetTab.classList.add('active');
-1143|         }
-1144| 
-1145|         // Activer le bouton correspondant
-1146|         const targetBtn = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
-1147|         if (targetBtn) {
-1148|             targetBtn.classList.add('active');
-1149|         }
-1150| 
-1151|         // Charger la config si on clique sur l'onglet config
-1152|         if (tabName === 'config') {
-1153|             loadSettings();
+953|     // Fonction de sauvegarde automatique
+954|     function autoSave(input) {
+955|         const key = input.getAttribute('data-key');
+956|         let value;
+957| 
+958|         if (input.type === 'checkbox') {
+959|             value = input.checked ? 'true' : 'false';
+960|         } else {
+961|             value = input.value;
+962|         }
+963| 
+964|         const msg = document.getElementById('msgConfig');
+965|         msg.textContent = '⏳ Sauvegarde en cours...';
+966|         msg.className = 'config-message loading';
+967| 
+968|         // Envoyer la modification au serveur
+969|         fetch('/api/admin/settings/update-multiple', {
+970|             method: 'POST',
+971|             headers: { 'Content-Type': 'application/json' },
+972|             body: JSON.stringify({ settings: { [key]: value } })
+973|         })
+974|             .then(response => response.json())
+975|             .then(data => {
+976|                 if (data.success) {
+977|                     msg.textContent = '✅ Sauvegardé';
+978|                     msg.className = 'config-message success';
+979|                     // Mettre à jour currentSettings
+980|                     currentSettings[key] = value;
+981|                 } else {
+982|                     msg.textContent = '❌ Erreur: ' + (data.error || 'Inconnue');
+983|                     msg.className = 'config-message error';
+984|                 }
+985|                 // Effacer le message après 3 secondes
+986|                 setTimeout(() => {
+987|                     msg.className = 'config-message';
+988|                     msg.textContent = '';
+989|                 }, 3000);
+990|             })
+991|             .catch(err => {
+992|                 msg.textContent = '❌ Erreur réseau';
+993|                 msg.className = 'config-message error';
+994|                 setTimeout(() => {
+995|                     msg.className = 'config-message';
+996|                     msg.textContent = '';
+997|                 }, 3000);
+998|             });
+999|     }
+1000| 
+1001|     // Écouteur pour les toggles
+1002|     document.querySelectorAll('.toggle-input').forEach(input => {
+1003|         input.addEventListener('change', function () {
+1004|             const key = this.getAttribute('data-key');
+1005| 
+1006|             // Mettre à jour le statut visuel
+1007|             const statusSpan = this.closest('.config-control').querySelector('.toggle-status');
+1008|             if (statusSpan) {
+1009|                 if (this.checked) {
+1010|                     statusSpan.textContent = '✅ ACTIVÉ';
+1011|                     statusSpan.className = 'toggle-status active';
+1012|                 } else {
+1013|                     statusSpan.textContent = '❌ DÉSACTIVÉ';
+1014|                     statusSpan.className = 'toggle-status inactive';
+1015|                 }
+1016|             }
+1017| 
+1018|             // ==========================================
+1019|             // CAS SPÉCIAL : ADMINER
+1020|             // ==========================================
+1021|             if (key === 'adminer_enabled') {
+1022|                 // Appel direct à la route toggle-adminer
+1023|                 const isEnabled = this.checked;
+1024|                 const msg = document.getElementById('msgConfig');
+1025|                 msg.textContent = '⏳ Modification en cours...';
+1026|                 msg.className = 'config-message loading';
+1027| 
+1028|                 // ==========================================
+1029|                 // GÉRER L'AFFICHAGE DU BOUTON ADMINER
+1030|                 // ==========================================
+1031|                 const link = document.querySelector('.adminer-link');
+1032|                 if (link) {
+1033|                     if (isEnabled) {
+1034|                         link.style.display = 'inline-block';
+1035|                     } else {
+1036|                         link.style.display = 'none';
+1037|                     }
+1038|                 }
+1039| 
+1040|                 fetch('/api/admin/toggle-adminer', {
+1041|                     method: 'POST',
+1042|                     headers: { 'Content-Type': 'application/json' },
+1043|                     body: JSON.stringify({ enabled: isEnabled })
+1044|                 })
+1045|                     .then(response => response.json())
+1046|                     .then(data => {
+1047|                         if (data.success) {
+1048|                             msg.textContent = `✅ Adminer ${data.enabled ? 'activé' : 'désactivé'}`;
+1049|                             msg.className = 'config-message success';
+1050|                             // Mettre à jour currentSettings
+1051|                             currentSettings.adminer_enabled = data.enabled ? 'true' : 'false';
+1052|                         } else {
+1053|                             msg.textContent = '❌ Erreur: ' + (data.error || 'Inconnue');
+1054|                             msg.className = 'config-message error';
+1055|                             // Revenir à l'état précédent
+1056|                             this.checked = !isEnabled;
+1057|                             const statusSpan = this.closest('.config-control').querySelector('.toggle-status');
+1058|                             if (statusSpan) {
+1059|                                 if (this.checked) {
+1060|                                     statusSpan.textContent = '✅ ACTIVÉ';
+1061|                                     statusSpan.className = 'toggle-status active';
+1062|                                 } else {
+1063|                                     statusSpan.textContent = '❌ DÉSACTIVÉ';
+1064|                                     statusSpan.className = 'toggle-status inactive';
+1065|                                 }
+1066|                             }
+1067|                         }
+1068|                         setTimeout(() => {
+1069|                             msg.className = 'config-message';
+1070|                             msg.textContent = '';
+1071|                         }, 3000);
+1072|                     })
+1073|                     .catch(err => {
+1074|                         console.error('Erreur toggle adminer:', err);
+1075|                         msg.textContent = '❌ Erreur réseau';
+1076|                         msg.className = 'config-message error';
+1077|                         // Revenir à l'état précédent
+1078|                         this.checked = !isEnabled;
+1079|                         const statusSpan = this.closest('.config-control').querySelector('.toggle-status');
+1080|                         if (statusSpan) {
+1081|                             if (this.checked) {
+1082|                                 statusSpan.textContent = '✅ ACTIVÉ';
+1083|                                 statusSpan.className = 'toggle-status active';
+1084|                             } else {
+1085|                                 statusSpan.textContent = '❌ DÉSACTIVÉ';
+1086|                                 statusSpan.className = 'toggle-status inactive';
+1087|                             }
+1088|                         }
+1089|                         setTimeout(() => {
+1090|                             msg.className = 'config-message';
+1091|                             msg.textContent = '';
+1092|                         }, 3000);
+1093|                     });
+1094|             } else {
+1095|                 // Sauvegarde automatique pour les autres toggles
+1096|                 autoSave(this);
+1097|             }
+1098|         });
+1099|     });
+1100| 
+1101|     // Écouteur pour les inputs numériques
+1102|     document.querySelectorAll('.setting-input').forEach(input => {
+1103|         // Sauvegarde à chaque changement de valeur
+1104|         input.addEventListener('change', function () {
+1105|             autoSave(this);
+1106|         });
+1107|         // Sauvegarde après avoir terminé de taper (avec un délai)
+1108|         let timeoutId;
+1109|         input.addEventListener('input', function () {
+1110|             clearTimeout(timeoutId);
+1111|             timeoutId = setTimeout(() => {
+1112|                 autoSave(this);
+1113|             }, 500); // Attendre 500ms après la dernière frappe
+1114|         });
+1115|     });
+1116| }
+1117| 
+1118| 
+1119| 
+1120| // Charger les settings quand on clique sur l'onglet Configuration
+1121| document.addEventListener('DOMContentLoaded', function () {
+1122|     // Si l'onglet config est actif par défaut
+1123|     const activeTab = document.querySelector('.tab-content.active');
+1124|     if (activeTab && activeTab.id === 'tab-config') {
+1125|         setTimeout(loadSettings, 300);
+1126|     }
+1127| 
+1128|     // Écouter le clic sur le bouton config
+1129|     const configTabBtn = document.querySelector('.tab-btn[data-tab="config"]');
+1130|     if (configTabBtn) {
+1131|         configTabBtn.addEventListener('click', function () {
+1132|             setTimeout(loadSettings, 300);
+1133|         });
+1134|     }
+1135| });
+1136| 
+1137| // Fonction pour gérer les onglets (si elle n'existe pas déjà)
+1138| // On améliore la fonction showTab qui est probablement dans admin.js
+1139| // Si elle n'existe pas, on la crée.
+1140| if (typeof window.showTab !== 'function') {
+1141|     window.showTab = function (tabName) {
+1142|         // Cacher tous les onglets
+1143|         document.querySelectorAll('.tab-content').forEach(tab => {
+1144|             tab.classList.remove('active');
+1145|         });
+1146|         document.querySelectorAll('.tab-btn').forEach(btn => {
+1147|             btn.classList.remove('active');
+1148|         });
+1149| 
+1150|         // Afficher l'onglet sélectionné
+1151|         const targetTab = document.getElementById(`tab-${tabName}`);
+1152|         if (targetTab) {
+1153|             targetTab.classList.add('active');
 1154|         }
-1155|     };
-1156| }
-1157| 
-1158| // Initialiser au chargement de la page
-1159| document.addEventListener('DOMContentLoaded', function () {
-1160|     // Si l'onglet config est actif par défaut, charger les settings
-1161|     const activeTab = document.querySelector('.tab-content.active');
-1162|     if (activeTab && activeTab.id === 'tab-config') {
-1163|         loadSettings();
-1164|     }
-1165| 
-1166|     // S'assurer que le bouton config a un écouteur pour charger les settings au clic
-1167|     const configTabBtn = document.querySelector('.tab-btn[data-tab="config"]');
-1168|     if (configTabBtn) {
-1169|         configTabBtn.addEventListener('click', function () {
-1170|             // Le chargement se fera via showTab, mais on s'assure que si showTab est appelé, ça fonctionne
-1171|             // Pour plus de sécurité, on peut appeler loadSettings après un petit délai
-1172|             setTimeout(loadSettings, 100);
-1173|         });
-1174|     }
-1175| });
+1155| 
+1156|         // Activer le bouton correspondant
+1157|         const targetBtn = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
+1158|         if (targetBtn) {
+1159|             targetBtn.classList.add('active');
+1160|         }
+1161| 
+1162|         // Charger la config si on clique sur l'onglet config
+1163|         if (tabName === 'config') {
+1164|             loadSettings();
+1165|         }
+1166|     };
+1167| }
+1168| 
+1169| // Initialiser au chargement de la page
+1170| document.addEventListener('DOMContentLoaded', function () {
+1171|     // Si l'onglet config est actif par défaut, charger les settings
+1172|     const activeTab = document.querySelector('.tab-content.active');
+1173|     if (activeTab && activeTab.id === 'tab-config') {
+1174|         loadSettings();
+1175|     }
 1176| 
-1177| async function backupDatabase() {
-1178|     if (typeof MGModal !== 'undefined') {
-1179|         MGModal.show({
-1180|             title: '🗄️ Sauvegarde',
-1181|             message: 'Sauvegarder la base de données ?',
-1182|             onConfirm: async () => {
-1183|                 try {
-1184|                     const response = await fetch('/api/backup', {
-1185|                         method: 'POST',
-1186|                         headers: { 'Content-Type': 'application/json' },
-1187|                         body: JSON.stringify({ action: 'database' })
-1188|                     });
-1189|                     const data = await response.json();
-1190|                     if (data.success) {
-1191|                         MGModal.show({
-1192|                             title: '✅ Succès',
-1193|                             message: 'Sauvegarde BDD effectuée.',
-1194|                             onConfirm: () => { }
-1195|                         });
-1196|                     } else {
-1197|                         MGModal.show({
-1198|                             title: '❌ Erreur',
-1199|                             message: data.error || 'Erreur inconnue',
-1200|                             onConfirm: () => { }
-1201|                         });
-1202|                     }
-1203|                 } catch (err) {
-1204|                     console.error(err);
-1205|                     MGModal.show({
-1206|                         title: '❌ Erreur réseau',
-1207|                         message: 'Impossible de contacter le serveur.',
-1208|                         onConfirm: () => { }
-1209|                     });
-1210|                 }
-1211|             },
-1212|             onCancel: () => { }
-1213|         });
-1214|     } else {
-1215|         // Fallback
-1216|         if (!confirm('🗄️ Sauvegarder la base de données ?')) return;
-1217|         try {
-1218|             const response = await fetch('/api/backup', {
-1219|                 method: 'POST',
-1220|                 headers: { 'Content-Type': 'application/json' },
-1221|                 body: JSON.stringify({ action: 'database' })
-1222|             });
-1223|             const data = await response.json();
-1224|             if (data.success) {
-1225|                 alert('✅ Sauvegarde BDD effectuée');
-1226|             } else {
-1227|                 alert('❌ Erreur: ' + (data.error || 'Inconnue'));
-1228|             }
-1229|         } catch (err) {
-1230|             console.error(err);
-1231|             alert('❌ Erreur réseau');
-1232|         }
-1233|     }
-1234| }
-1235| 
-1236| async function manualCleanup() {
-1237|     if (typeof MGModal !== 'undefined') {
-1238|         MGModal.show({
-1239|             title: '🧹 Nettoyage',
-1240|             message: 'Nettoyer les visiteurs inactifs ?\n\n⚠️ Fonction à implémenter côté serveur pour l\'instant.',
-1241|             onConfirm: () => {
-1242|                 MGModal.show({
-1243|                     title: '⚠️ Information',
-1244|                     message: 'Fonction à implémenter côté serveur prochainement.',
-1245|                     onConfirm: () => { }
-1246|                 });
-1247|             },
-1248|             onCancel: () => { }
-1249|         });
-1250|     } else {
-1251|         if (!confirm('🧹 Nettoyer les visiteurs inactifs ?')) return;
-1252|         alert('⚠️ Fonction à implémenter côté serveur');
-1253|     }
-1254| }
-1255| 
-1256| // ========== SECTION SIGNALEMENTS ==========
-1257| async function loadReports() {
-1258|     const reportsDiv = document.getElementById('reportsList');
-1259|     if (!reportsDiv) return;
-1260| 
-1261|     try {
-1262|         const response = await fetch('/api/admin/reports');
-1263|         const reports = await response.json();
-1264| 
-1265|         if (reports.length === 0) {
-1266|             reportsDiv.innerHTML = '<div class="loading">✅ Aucun signalement en attente</div>';
-1267|             return;
-1268|         }
-1269| 
-1270|         let html = '<table class="admin-table"><thead><tr><th>Date</th><th>Signalé par</th><th>Cible</th><th>Actions</th></tr></thead><tbody>';
+1177|     // S'assurer que le bouton config a un écouteur pour charger les settings au clic
+1178|     const configTabBtn = document.querySelector('.tab-btn[data-tab="config"]');
+1179|     if (configTabBtn) {
+1180|         configTabBtn.addEventListener('click', function () {
+1181|             // Le chargement se fera via showTab, mais on s'assure que si showTab est appelé, ça fonctionne
+1182|             // Pour plus de sécurité, on peut appeler loadSettings après un petit délai
+1183|             setTimeout(loadSettings, 100);
+1184|         });
+1185|     }
+1186| });
+1187| 
+1188| async function backupDatabase() {
+1189|     if (typeof MGModal !== 'undefined') {
+1190|         MGModal.show({
+1191|             title: '🗄️ Sauvegarde',
+1192|             message: 'Sauvegarder la base de données ?',
+1193|             onConfirm: async () => {
+1194|                 try {
+1195|                     const response = await fetch('/api/backup', {
+1196|                         method: 'POST',
+1197|                         headers: { 'Content-Type': 'application/json' },
+1198|                         body: JSON.stringify({ action: 'database' })
+1199|                     });
+1200|                     const data = await response.json();
+1201|                     if (data.success) {
+1202|                         MGModal.show({
+1203|                             title: '✅ Succès',
+1204|                             message: 'Sauvegarde BDD effectuée.',
+1205|                             onConfirm: () => { }
+1206|                         });
+1207|                     } else {
+1208|                         MGModal.show({
+1209|                             title: '❌ Erreur',
+1210|                             message: data.error || 'Erreur inconnue',
+1211|                             onConfirm: () => { }
+1212|                         });
+1213|                     }
+1214|                 } catch (err) {
+1215|                     console.error(err);
+1216|                     MGModal.show({
+1217|                         title: '❌ Erreur réseau',
+1218|                         message: 'Impossible de contacter le serveur.',
+1219|                         onConfirm: () => { }
+1220|                     });
+1221|                 }
+1222|             },
+1223|             onCancel: () => { }
+1224|         });
+1225|     } else {
+1226|         // Fallback
+1227|         if (!confirm('🗄️ Sauvegarder la base de données ?')) return;
+1228|         try {
+1229|             const response = await fetch('/api/backup', {
+1230|                 method: 'POST',
+1231|                 headers: { 'Content-Type': 'application/json' },
+1232|                 body: JSON.stringify({ action: 'database' })
+1233|             });
+1234|             const data = await response.json();
+1235|             if (data.success) {
+1236|                 alert('✅ Sauvegarde BDD effectuée');
+1237|             } else {
+1238|                 alert('❌ Erreur: ' + (data.error || 'Inconnue'));
+1239|             }
+1240|         } catch (err) {
+1241|             console.error(err);
+1242|             alert('❌ Erreur réseau');
+1243|         }
+1244|     }
+1245| }
+1246| 
+1247| async function manualCleanup() {
+1248|     if (typeof MGModal !== 'undefined') {
+1249|         MGModal.show({
+1250|             title: '🧹 Nettoyage',
+1251|             message: 'Nettoyer les visiteurs inactifs ?\n\n⚠️ Fonction à implémenter côté serveur pour l\'instant.',
+1252|             onConfirm: () => {
+1253|                 MGModal.show({
+1254|                     title: '⚠️ Information',
+1255|                     message: 'Fonction à implémenter côté serveur prochainement.',
+1256|                     onConfirm: () => { }
+1257|                 });
+1258|             },
+1259|             onCancel: () => { }
+1260|         });
+1261|     } else {
+1262|         if (!confirm('🧹 Nettoyer les visiteurs inactifs ?')) return;
+1263|         alert('⚠️ Fonction à implémenter côté serveur');
+1264|     }
+1265| }
+1266| 
+1267| // ========== SECTION SIGNALEMENTS ==========
+1268| async function loadReports() {
+1269|     const reportsDiv = document.getElementById('reportsList');
+1270|     if (!reportsDiv) return;
 1271| 
-1272|         reports.forEach(r => {
-1273|             html += `
-1274|                 <tr>
-1275|                     <td>${new Date(r.created_at).toLocaleString()}</td>
-1276|                     <td>${escapeHtml(r.reporter_pseudo)}</td>
-1277|                     <td><strong>${escapeHtml(r.target_pseudo)}</strong></td>
-1278|                     <td class="action-buttons">
-1279|                         <button class="action-btn btn-warn" onclick="warnUser('${escapeHtml(r.target_pseudo)}')">⚠️ Warn</button>
-1280| <button class="action-btn btn-warn" onclick="warnUser('${escapeHtml(r.target_pseudo)}')">⚠️ Warn</button>
-1281| <button class="action-btn btn-kick" onclick="kickUser('${escapeHtml(r.target_pseudo)}')">🦵 Kick</button>
-1282| <button class="action-btn btn-ban" onclick="banUser('${escapeHtml(r.target_pseudo)}')">🚫 Ban</button>
-1283|                     </td>
-1284|                 </tr>
-1285|             `;
-1286|         });
-1287| 
-1288|         html += '</tbody></table>';
-1289|         reportsDiv.innerHTML = html;
-1290|     } catch (err) {
-1291|         console.error(err);
-1292|         reportsDiv.innerHTML = '<div class="loading">❌ Erreur chargement</div>';
-1293|     }
-1294| }
-1295| 
-1296| async function ignoreReport(reportId) {
-1297|     if (typeof MGModal !== 'undefined') {
-1298|         MGModal.show({
-1299|             title: '✅ Ignorer',
-1300|             message: 'Ignorer ce signalement ?',
-1301|             onConfirm: async () => {
-1302|                 try {
-1303|                     const response = await fetch('/api/admin/ignore-report', {
-1304|                         method: 'POST',
-1305|                         headers: { 'Content-Type': 'application/json' },
-1306|                         body: JSON.stringify({ reportId })
-1307|                     });
-1308| 
-1309|                     if (response.ok) {
-1310|                         MGModal.show({
-1311|                             title: '✅ Ignoré',
-1312|                             message: 'Signalement ignoré.',
-1313|                             onConfirm: () => loadReports()
-1314|                         });
-1315|                     } else {
-1316|                         MGModal.show({
-1317|                             title: '❌ Erreur',
-1318|                             message: 'Erreur lors de l\'ignorance.',
-1319|                             onConfirm: () => { }
-1320|                         });
-1321|                     }
-1322|                 } catch (err) {
-1323|                     console.error(err);
-1324|                     MGModal.show({
-1325|                         title: '❌ Erreur réseau',
-1326|                         message: 'Impossible de contacter le serveur.',
-1327|                         onConfirm: () => { }
-1328|                     });
-1329|                 }
-1330|             },
-1331|             onCancel: () => { }
-1332|         });
-1333|     } else {
-1334|         // Fallback
-1335|         if (!confirm('Ignorer ce signalement ?')) return;
-1336|         try {
-1337|             const response = await fetch('/api/admin/ignore-report', {
-1338|                 method: 'POST',
-1339|                 headers: { 'Content-Type': 'application/json' },
-1340|                 body: JSON.stringify({ reportId })
-1341|             });
-1342|             if (response.ok) {
-1343|                 alert('✅ Signalement ignoré');
-1344|                 loadReports();
-1345|             } else {
-1346|                 alert('❌ Erreur');
-1347|             }
-1348|         } catch (err) {
-1349|             console.error(err);
-1350|             alert('❌ Erreur réseau');
-1351|         }
-1352|     }
-1353| }
-1354| 
-1355| // ========== SECTION JOURNAL ==========
-1356| async function loadModerationLogs() {
-1357|     const logsDiv = document.getElementById('logsList');
-1358|     if (!logsDiv) return;
-1359| 
-1360|     try {
-1361|         const response = await fetch('/api/admin/moderation-logs');
-1362|         const logs = await response.json();
-1363| 
-1364|         if (logs.length === 0) {
-1365|             logsDiv.innerHTML = '<div class="loading">📭 Aucune action enregistrée</div>';
-1366|             return;
-1367|         }
-1368| 
-1369|         let html = '<table class="admin-table"><thead><tr><th>Date</th><th>Admin</th><th>Action</th><th>Cible</th><th>Détails</th></tr></thead><tbody>';
+1272|     try {
+1273|         const response = await fetch('/api/admin/reports');
+1274|         const reports = await response.json();
+1275| 
+1276|         if (reports.length === 0) {
+1277|             reportsDiv.innerHTML = '<div class="loading">✅ Aucun signalement en attente</div>';
+1278|             return;
+1279|         }
+1280| 
+1281|         let html = '<table class="admin-table"><thead><tr><th>Date</th><th>Signalé par</th><th>Cible</th><th>Actions</th></tr></thead><tbody>';
+1282| 
+1283|         reports.forEach(r => {
+1284|             html += `
+1285|                 <tr>
+1286|                     <td>${new Date(r.created_at).toLocaleString()}</td>
+1287|                     <td>${escapeHtml(r.reporter_pseudo)}</td>
+1288|                     <td><strong>${escapeHtml(r.target_pseudo)}</strong></td>
+1289|                     <td class="action-buttons">
+1290|                         <button class="action-btn btn-warn" onclick="warnUser('${escapeHtml(r.target_pseudo)}')">⚠️ Warn</button>
+1291| <button class="action-btn btn-warn" onclick="warnUser('${escapeHtml(r.target_pseudo)}')">⚠️ Warn</button>
+1292| <button class="action-btn btn-kick" onclick="kickUser('${escapeHtml(r.target_pseudo)}')">🦵 Kick</button>
+1293| <button class="action-btn btn-ban" onclick="banUser('${escapeHtml(r.target_pseudo)}')">🚫 Ban</button>
+1294|                     </td>
+1295|                 </tr>
+1296|             `;
+1297|         });
+1298| 
+1299|         html += '</tbody></table>';
+1300|         reportsDiv.innerHTML = html;
+1301|     } catch (err) {
+1302|         console.error(err);
+1303|         reportsDiv.innerHTML = '<div class="loading">❌ Erreur chargement</div>';
+1304|     }
+1305| }
+1306| 
+1307| async function ignoreReport(reportId) {
+1308|     if (typeof MGModal !== 'undefined') {
+1309|         MGModal.show({
+1310|             title: '✅ Ignorer',
+1311|             message: 'Ignorer ce signalement ?',
+1312|             onConfirm: async () => {
+1313|                 try {
+1314|                     const response = await fetch('/api/admin/ignore-report', {
+1315|                         method: 'POST',
+1316|                         headers: { 'Content-Type': 'application/json' },
+1317|                         body: JSON.stringify({ reportId })
+1318|                     });
+1319| 
+1320|                     if (response.ok) {
+1321|                         MGModal.show({
+1322|                             title: '✅ Ignoré',
+1323|                             message: 'Signalement ignoré.',
+1324|                             onConfirm: () => loadReports()
+1325|                         });
+1326|                     } else {
+1327|                         MGModal.show({
+1328|                             title: '❌ Erreur',
+1329|                             message: 'Erreur lors de l\'ignorance.',
+1330|                             onConfirm: () => { }
+1331|                         });
+1332|                     }
+1333|                 } catch (err) {
+1334|                     console.error(err);
+1335|                     MGModal.show({
+1336|                         title: '❌ Erreur réseau',
+1337|                         message: 'Impossible de contacter le serveur.',
+1338|                         onConfirm: () => { }
+1339|                     });
+1340|                 }
+1341|             },
+1342|             onCancel: () => { }
+1343|         });
+1344|     } else {
+1345|         // Fallback
+1346|         if (!confirm('Ignorer ce signalement ?')) return;
+1347|         try {
+1348|             const response = await fetch('/api/admin/ignore-report', {
+1349|                 method: 'POST',
+1350|                 headers: { 'Content-Type': 'application/json' },
+1351|                 body: JSON.stringify({ reportId })
+1352|             });
+1353|             if (response.ok) {
+1354|                 alert('✅ Signalement ignoré');
+1355|                 loadReports();
+1356|             } else {
+1357|                 alert('❌ Erreur');
+1358|             }
+1359|         } catch (err) {
+1360|             console.error(err);
+1361|             alert('❌ Erreur réseau');
+1362|         }
+1363|     }
+1364| }
+1365| 
+1366| // ========== SECTION JOURNAL ==========
+1367| async function loadModerationLogs() {
+1368|     const logsDiv = document.getElementById('logsList');
+1369|     if (!logsDiv) return;
 1370| 
-1371|         logs.forEach(log => {
-1372|             let actionIcon = '';
-1373|             if (log.action_type === 'warn') actionIcon = '⚠️';
-1374|             else if (log.action_type === 'ban') actionIcon = '🚫';
-1375|             else if (log.action_type === 'temp_ban') actionIcon = '⏱️';
-1376|             else if (log.action_type === 'unban') actionIcon = '🔓';
-1377|             else if (log.action_type === 'set_modo') actionIcon = '👮';
-1378|             else if (log.action_type === 'set_admin') actionIcon = '👑';
-1379|             else actionIcon = '📝';
-1380| 
-1381|             let details = log.reason || '';
-1382|             if (log.duration_minutes) details += ` (${log.duration_minutes} min)`;
-1383| 
-1384|             html += `
-1385|                 <tr>
-1386|                     <td>${new Date(log.created_at).toLocaleString()}</td>
-1387|                     <td>${escapeHtml(log.admin_pseudo)}</td>
-1388|                     <td>${actionIcon} ${escapeHtml(log.action_type)}</td>
-1389|                     <td><strong>${escapeHtml(log.target_pseudo)}</strong></td>
-1390|                     <td>${escapeHtml(details)}</td>
-1391|                 </tr>
-1392|             `;
-1393|         });
+1371|     try {
+1372|         const response = await fetch('/api/admin/moderation-logs');
+1373|         const logs = await response.json();
+1374| 
+1375|         if (logs.length === 0) {
+1376|             logsDiv.innerHTML = '<div class="loading">📭 Aucune action enregistrée</div>';
+1377|             return;
+1378|         }
+1379| 
+1380|         let html = '<table class="admin-table"><thead><tr><th>Date</th><th>Admin</th><th>Action</th><th>Cible</th><th>Détails</th></tr></thead><tbody>';
+1381| 
+1382|         logs.forEach(log => {
+1383|             let actionIcon = '';
+1384|             if (log.action_type === 'warn') actionIcon = '⚠️';
+1385|             else if (log.action_type === 'ban') actionIcon = '🚫';
+1386|             else if (log.action_type === 'temp_ban') actionIcon = '⏱️';
+1387|             else if (log.action_type === 'unban') actionIcon = '🔓';
+1388|             else if (log.action_type === 'set_modo') actionIcon = '👮';
+1389|             else if (log.action_type === 'set_admin') actionIcon = '👑';
+1390|             else actionIcon = '📝';
+1391| 
+1392|             let details = log.reason || '';
+1393|             if (log.duration_minutes) details += ` (${log.duration_minutes} min)`;
 1394| 
-1395|         html += '</tbody></table>';
-1396|         logsDiv.innerHTML = html;
-1397|     } catch (err) {
-1398|         console.error(err);
-1399|         logsDiv.innerHTML = '<div class="loading">❌ Erreur chargement</div>';
-1400|     }
-1401| 
-1402| }
-1403| 
-1404| // ========== SECTION CONVERSATIONS ==========
-1405| let currentConversationId = null;
-1406| 
-1407| async function loadConversations() {
-1408|     const container = document.getElementById('conversationsList');
-1409|     if (!container) return;
-1410| 
-1411|     try {
-1412|         const response = await fetch('/api/admin/conversations');
-1413|         const conversations = await response.json();
+1395|             html += `
+1396|                 <tr>
+1397|                     <td>${new Date(log.created_at).toLocaleString()}</td>
+1398|                     <td>${escapeHtml(log.admin_pseudo)}</td>
+1399|                     <td>${actionIcon} ${escapeHtml(log.action_type)}</td>
+1400|                     <td><strong>${escapeHtml(log.target_pseudo)}</strong></td>
+1401|                     <td>${escapeHtml(details)}</td>
+1402|                 </tr>
+1403|             `;
+1404|         });
+1405| 
+1406|         html += '</tbody></table>';
+1407|         logsDiv.innerHTML = html;
+1408|     } catch (err) {
+1409|         console.error(err);
+1410|         logsDiv.innerHTML = '<div class="loading">❌ Erreur chargement</div>';
+1411|     }
+1412| 
+1413| }
 1414| 
-1415|         if (conversations.length === 0) {
-1416|             container.innerHTML = '<div class="loading">📭 Aucune conversation</div>';
-1417|             return;
-1418|         }
-1419| 
-1420|         let html = `
-1421|             <div style="margin-bottom: 16px;">
-1422|                 <input type="text" id="convSearchInput" placeholder="🔍 Rechercher une conversation..." 
-1423|                     style="width:100%; padding:12px 16px; border:2px solid #e2e8f0; border-radius:12px; font-size:14px;">
-1424|             </div>
-1425|             <table class="admin-table">
-1426|                 <thead>
-1427|                     <tr>
-1428|                         <th>Participants</th>
-1429|                         <th>Messages</th>
-1430|                         <th>Dernier message</th>
-1431|                         <th>Actions</th>
-1432|                     </tr>
-1433|                 </thead>
-1434|                 <tbody>
-1435|         `;
-1436| 
-1437|         conversations.forEach(c => {
-1438|             const participants = `${c.user1} ↔ ${c.user2}`;
-1439|             const date = new Date(c.last_message_at).toLocaleString();
-1440|             html += `
-1441|                 <tr data-conv-id="${c.id}">
-1442|                     <td><strong>${escapeHtml(participants)}</strong></td>
-1443|                     <td>${c.message_count || 0}</td>
-1444|                     <td>${date}</td>
-1445|                     <td>
-1446|                         <button class="action-btn btn-modo" onclick="viewConversation(${c.id})">
-1447|                             <i class="fas fa-eye"></i> Voir
-1448|                         </button>
-1449|                     </td>
-1450|                 </tr>
-1451|             `;
-1452|         });
-1453| 
-1454|         html += '</tbody></table>';
-1455|         container.innerHTML = html;
-1456| 
-1457|         // Filtrer les conversations
-1458|         const searchInput = document.getElementById('convSearchInput');
-1459|         if (searchInput) {
-1460|             searchInput.addEventListener('keyup', function () {
-1461|                 const term = this.value.toLowerCase();
-1462|                 const rows = container.querySelectorAll('tbody tr');
-1463|                 rows.forEach(row => {
-1464|                     const text = row.textContent.toLowerCase();
-1465|                     row.style.display = text.includes(term) ? '' : 'none';
-1466|                 });
-1467|             });
-1468|         }
-1469| 
-1470|     } catch (err) {
-1471|         console.error('Erreur loadConversations:', err);
-1472|         container.innerHTML = '<div class="loading">❌ Erreur chargement</div>';
-1473|     }
-1474| }
-1475| 
-1476| async function viewConversation(conversationId) {
-1477|     const container = document.getElementById('conversationsList');
-1478|     if (!container) return;
-1479| 
-1480|     currentConversationId = conversationId;
-1481| 
-1482|     try {
-1483|         const response = await fetch(`/api/admin/conversations/${conversationId}/messages`);
-1484|         const messages = await response.json();
-1485| 
-1486|         // Récupérer le nom des participants
-1487|         const convResponse = await fetch('/api/admin/conversations');
-1488|         const conversations = await convResponse.json();
-1489|         const conv = conversations.find(c => c.id === conversationId);
-1490|         const participants = conv ? `${conv.user1} ↔ ${conv.user2}` : `Conversation ${conversationId}`;
-1491| 
-1492|         let html = `
-1493|             <div style="margin-bottom: 16px;">
-1494|                 <button class="action-btn btn-unban" onclick="backToConversations()">
-1495|                     <i class="fas fa-arrow-left"></i> Retour aux conversations
-1496|                 </button>
-1497|                 <h3 style="margin: 16px 0 8px;">💬 ${escapeHtml(participants)}</h3>
-1498|                 <p style="color: #64748b; font-size: 14px;">${messages.length} messages</p>
-1499|             </div>
-1500|             <div style="background: #f8fafc; border-radius: 12px; padding: 16px; max-height: 600px; overflow-y: auto;">
-1501|         `;
+1415| // ========== SECTION CONVERSATIONS ==========
+1416| let currentConversationId = null;
+1417| 
+1418| async function loadConversations() {
+1419|     const container = document.getElementById('conversationsList');
+1420|     if (!container) return;
+1421| 
+1422|     try {
+1423|         const response = await fetch('/api/admin/conversations');
+1424|         const conversations = await response.json();
+1425| 
+1426|         if (conversations.length === 0) {
+1427|             container.innerHTML = '<div class="loading">📭 Aucune conversation</div>';
+1428|             return;
+1429|         }
+1430| 
+1431|         let html = `
+1432|             <div style="margin-bottom: 16px;">
+1433|                 <input type="text" id="convSearchInput" placeholder="🔍 Rechercher une conversation..." 
+1434|                     style="width:100%; padding:12px 16px; border:2px solid #e2e8f0; border-radius:12px; font-size:14px;">
+1435|             </div>
+1436|             <table class="admin-table">
+1437|                 <thead>
+1438|                     <tr>
+1439|                         <th>Participants</th>
+1440|                         <th>Messages</th>
+1441|                         <th>Dernier message</th>
+1442|                         <th>Actions</th>
+1443|                     </tr>
+1444|                 </thead>
+1445|                 <tbody>
+1446|         `;
+1447| 
+1448|         conversations.forEach(c => {
+1449|             const participants = `${c.user1} ↔ ${c.user2}`;
+1450|             const date = new Date(c.last_message_at).toLocaleString();
+1451|             html += `
+1452|                 <tr data-conv-id="${c.id}">
+1453|                     <td><strong>${escapeHtml(participants)}</strong></td>
+1454|                     <td>${c.message_count || 0}</td>
+1455|                     <td>${date}</td>
+1456|                     <td>
+1457|                         <button class="action-btn btn-modo" onclick="viewConversation(${c.id})">
+1458|                             <i class="fas fa-eye"></i> Voir
+1459|                         </button>
+1460|                     </td>
+1461|                 </tr>
+1462|             `;
+1463|         });
+1464| 
+1465|         html += '</tbody></table>';
+1466|         container.innerHTML = html;
+1467| 
+1468|         // Filtrer les conversations
+1469|         const searchInput = document.getElementById('convSearchInput');
+1470|         if (searchInput) {
+1471|             searchInput.addEventListener('keyup', function () {
+1472|                 const term = this.value.toLowerCase();
+1473|                 const rows = container.querySelectorAll('tbody tr');
+1474|                 rows.forEach(row => {
+1475|                     const text = row.textContent.toLowerCase();
+1476|                     row.style.display = text.includes(term) ? '' : 'none';
+1477|                 });
+1478|             });
+1479|         }
+1480| 
+1481|     } catch (err) {
+1482|         console.error('Erreur loadConversations:', err);
+1483|         container.innerHTML = '<div class="loading">❌ Erreur chargement</div>';
+1484|     }
+1485| }
+1486| 
+1487| async function viewConversation(conversationId) {
+1488|     const container = document.getElementById('conversationsList');
+1489|     if (!container) return;
+1490| 
+1491|     currentConversationId = conversationId;
+1492| 
+1493|     try {
+1494|         const response = await fetch(`/api/admin/conversations/${conversationId}/messages`);
+1495|         const messages = await response.json();
+1496| 
+1497|         // Récupérer le nom des participants
+1498|         const convResponse = await fetch('/api/admin/conversations');
+1499|         const conversations = await convResponse.json();
+1500|         const conv = conversations.find(c => c.id === conversationId);
+1501|         const participants = conv ? `${conv.user1} ↔ ${conv.user2}` : `Conversation ${conversationId}`;
 1502| 
-1503|         if (messages.length === 0) {
-1504|             html += '<p style="color: #64748b;">Aucun message dans cette conversation.</p>';
-1505|         } else {
-1506|             messages.forEach(m => {
-1507|                 const date = new Date(m.created_at).toLocaleString();
-1508|                 const isLeft = m.from_pseudo === conv?.user1;
-1509|                 const rowClass = isLeft ? 'message-row-left' : 'message-row-right';
-1510|                 const bubbleClass = isLeft ? 'message-bubble-left' : 'message-bubble-right';
-1511| 
-1512|                 // 🔥 AJOUT DU BADGE
-1513|                 const sourceBadge = m.source === 'archive'
-1514|                     ? '<span style="font-size:10px; background:#e2e8f0; padding:1px 8px; border-radius:12px; color:#475569; margin-left:8px;">📦 Archivé</span>'
-1515|                     : '<span style="font-size:10px; background:#dcfce7; padding:1px 8px; border-radius:12px; color:#15803d; margin-left:8px;">💬 En cours</span>';
-1516| 
-1517|                 html += `
-1518|         <div class="message-row ${rowClass}">
-1519|             <div class="message-bubble ${bubbleClass}">
-1520|                 <div class="message-header">
-1521|                     <span class="message-sender">${escapeHtml(m.from_pseudo)}</span>
-1522|                     <span class="message-time">${date}</span>
-1523|                 </div>
-1524|                 <div class="message-text">${escapeHtml(m.message)}</div>
-1525|             </div>
-1526|         </div>
-1527|     `;
-1528|             });
-1529|         }
-1530| 
-1531|         html += '</div>';
-1532|         container.innerHTML = html;
-1533| 
-1534|     } catch (err) {
-1535|         console.error('Erreur viewConversation:', err);
-1536|         container.innerHTML = '<div class="loading">❌ Erreur chargement des messages</div>';
-1537|     }
-1538| }
-1539| 
-1540| function backToConversations() {
-1541|     loadConversations();
-1542| }
-1543| 
-1544| // ========== VIDAGE MANUEL ==========
-1545| 
-1546| async function clearLogsManually() {
-1547|     if (typeof MGModal !== 'undefined') {
-1548|         MGModal.show({
-1549|             title: '🗑️ Vider le journal',
-1550|             message: 'Vider TOUT le journal de modération ?\n\nAction irréversible.',
-1551|             onConfirm: async () => {
-1552|                 try {
-1553|                     const response = await fetch('/api/admin/clear-logs', { method: 'POST' });
-1554|                     const data = await response.json();
-1555|                     if (data.success) {
-1556|                         MGModal.show({
-1557|                             title: '✅ Journal vidé',
-1558|                             message: `${data.deleted} entrées supprimées.`,
-1559|                             onConfirm: () => loadModerationLogs()
-1560|                         });
-1561|                     } else {
-1562|                         MGModal.show({
-1563|                             title: '❌ Erreur',
-1564|                             message: 'Erreur lors du vidage.',
-1565|                             onConfirm: () => { }
-1566|                         });
-1567|                     }
-1568|                 } catch (err) {
-1569|                     console.error(err);
-1570|                     MGModal.show({
-1571|                         title: '❌ Erreur réseau',
-1572|                         message: 'Impossible de contacter le serveur.',
-1573|                         onConfirm: () => { }
-1574|                     });
-1575|                 }
-1576|             },
-1577|             onCancel: () => { }
-1578|         });
-1579|     } else {
-1580|         // Fallback
-1581|         if (!confirm('🗑️ Vider TOUT le journal de modération ? Action irréversible.')) return;
-1582|         try {
-1583|             const response = await fetch('/api/admin/clear-logs', { method: 'POST' });
-1584|             const data = await response.json();
-1585|             if (data.success) {
-1586|                 alert(`✅ Journal vidé (${data.deleted} entrées supprimées)`);
-1587|                 loadModerationLogs();
-1588|             } else {
-1589|                 alert('❌ Erreur');
-1590|             }
-1591|         } catch (err) {
-1592|             console.error(err);
-1593|             alert('❌ Erreur réseau');
-1594|         }
-1595|     }
-1596| }
-1597| 
-1598| async function cleanReportsManually() {
-1599|     if (typeof MGModal !== 'undefined') {
-1600|         // Pour la saisie du nombre de jours, on doit encore utiliser prompt
-1601|         // Car MGModal n'a pas d'input pour l'instant
-1602|         const days = prompt('📋 Supprimer les signalements plus vieux que combien de jours ? (défaut: 60)', '60');
-1603|         if (!days) return;
-1604| 
-1605|         MGModal.show({
-1606|             title: '📋 Nettoyer signalements',
-1607|             message: `Supprimer les signalements plus vieux que ${days} jours ?`,
-1608|             onConfirm: async () => {
-1609|                 try {
-1610|                     const response = await fetch('/api/admin/clean-reports', {
-1611|                         method: 'POST',
-1612|                         headers: { 'Content-Type': 'application/json' },
-1613|                         body: JSON.stringify({ days: parseInt(days) })
-1614|                     });
-1615|                     const data = await response.json();
-1616|                     if (data.success) {
-1617|                         MGModal.show({
-1618|                             title: '✅ Nettoyé',
-1619|                             message: `${data.deleted} signalements supprimés.`,
-1620|                             onConfirm: () => {
-1621|                                 if (document.getElementById('tab-reports').classList.contains('active')) {
-1622|                                     loadReports();
-1623|                                 }
-1624|                             }
-1625|                         });
-1626|                     } else {
-1627|                         MGModal.show({
-1628|                             title: '❌ Erreur',
-1629|                             message: 'Erreur lors du nettoyage.',
-1630|                             onConfirm: () => { }
-1631|                         });
-1632|                     }
-1633|                 } catch (err) {
-1634|                     console.error(err);
-1635|                     MGModal.show({
-1636|                         title: '❌ Erreur réseau',
-1637|                         message: 'Impossible de contacter le serveur.',
-1638|                         onConfirm: () => { }
-1639|                     });
-1640|                 }
-1641|             },
-1642|             onCancel: () => { }
-1643|         });
-1644|     } else {
-1645|         // Fallback
-1646|         const days = prompt('📋 Supprimer les signalements plus vieux que combien de jours ? (défaut: 60)', '60');
-1647|         if (!days) return;
-1648|         if (!confirm(`Supprimer les signalements plus vieux que ${days} jours ?`)) return;
-1649|         try {
-1650|             const response = await fetch('/api/admin/clean-reports', {
-1651|                 method: 'POST',
-1652|                 headers: { 'Content-Type': 'application/json' },
-1653|                 body: JSON.stringify({ days: parseInt(days) })
-1654|             });
-1655|             const data = await response.json();
-1656|             if (data.success) {
-1657|                 alert(`✅ ${data.deleted} signalements supprimés`);
-1658|                 if (document.getElementById('tab-reports').classList.contains('active')) {
-1659|                     loadReports();
-1660|                 }
-1661|             } else {
-1662|                 alert('❌ Erreur');
-1663|             }
-1664|         } catch (err) {
-1665|             console.error(err);
-1666|             alert('❌ Erreur réseau');
-1667|         }
-1668|     }
-1669| }
-1670| 
-1671| // ========== HORLOGE EN TEMPS RÉEL ==========
-1672| function updateClock() {
-1673|     const now = new Date();
-1674|     const options = {
-1675|         weekday: 'long',
-1676|         year: 'numeric',
-1677|         month: 'long',
-1678|         day: 'numeric',
-1679|         hour: '2-digit',
-1680|         minute: '2-digit',
-1681|         second: '2-digit',
-1682|         hour12: false
-1683|     };
-1684|     const formatted = now.toLocaleDateString('fr-FR', options);
-1685|     const clockSpan = document.getElementById('currentDateTime');
-1686|     if (clockSpan) clockSpan.textContent = formatted;
-1687| }
-1688| 
-1689| // Mettre à jour l'horloge toutes les secondes
-1690| setInterval(updateClock, 1000);
-1691| updateClock(); // Appel immédiat
-1692| 
-1693| // Gestion des onglets
-1694| function initTabs() {
-1695|     const tabs = document.querySelectorAll('.tab-btn');
-1696|     tabs.forEach(btn => {
-1697|         btn.addEventListener('click', () => {
-1698|             tabs.forEach(b => b.classList.remove('active'));
-1699|             btn.classList.add('active');
-1700| 
-1701|             document.querySelectorAll('.tab-content').forEach(content => {
-1702|                 content.classList.remove('active');
-1703|             });
-1704| 
-1705|             const tabId = `tab-${btn.dataset.tab}`;
-1706|             document.getElementById(tabId).classList.add('active');
-1707| 
-1708|             if (btn.dataset.tab === 'reports') loadReports();
-1709|             if (btn.dataset.tab === 'logs') loadModerationLogs();
-1710|             if (btn.dataset.tab === 'conversations') loadConversations(); // ← AJOUTER
-1711|         });
-1712|     });
-1713| }
-1714| 
-1715| // ========== 7. UTILITAIRES ==========
-1716| function escapeHtml(str) {
-1717|     if (!str) return '';
-1718|     return str.replace(/[&<>]/g, function (m) {
-1719|         if (m === '&') return '&amp;';
-1720|         if (m === '<') return '&lt;';
-1721|         if (m === '>') return '&gt;';
-1722|         return m;
+1503|         let html = `
+1504|             <div style="margin-bottom: 16px;">
+1505|                 <button class="action-btn btn-unban" onclick="backToConversations()">
+1506|                     <i class="fas fa-arrow-left"></i> Retour aux conversations
+1507|                 </button>
+1508|                 <h3 style="margin: 16px 0 8px;">💬 ${escapeHtml(participants)}</h3>
+1509|                 <p style="color: #64748b; font-size: 14px;">${messages.length} messages</p>
+1510|             </div>
+1511|             <div style="background: #f8fafc; border-radius: 12px; padding: 16px; max-height: 600px; overflow-y: auto;">
+1512|         `;
+1513| 
+1514|         if (messages.length === 0) {
+1515|             html += '<p style="color: #64748b;">Aucun message dans cette conversation.</p>';
+1516|         } else {
+1517|             messages.forEach(m => {
+1518|                 const date = new Date(m.created_at).toLocaleString();
+1519|                 const isLeft = m.from_pseudo === conv?.user1;
+1520|                 const rowClass = isLeft ? 'message-row-left' : 'message-row-right';
+1521|                 const bubbleClass = isLeft ? 'message-bubble-left' : 'message-bubble-right';
+1522| 
+1523|                 // 🔥 AJOUT DU BADGE
+1524|                 const sourceBadge = m.source === 'archive'
+1525|                     ? '<span style="font-size:10px; background:#e2e8f0; padding:1px 8px; border-radius:12px; color:#475569; margin-left:8px;">📦 Archivé</span>'
+1526|                     : '<span style="font-size:10px; background:#dcfce7; padding:1px 8px; border-radius:12px; color:#15803d; margin-left:8px;">💬 En cours</span>';
+1527| 
+1528|                 html += `
+1529|         <div class="message-row ${rowClass}">
+1530|             <div class="message-bubble ${bubbleClass}">
+1531|                 <div class="message-header">
+1532|                     <span class="message-sender">${escapeHtml(m.from_pseudo)}</span>
+1533|                     <span class="message-time">${date}</span>
+1534|                 </div>
+1535|                 <div class="message-text">${escapeHtml(m.message)}</div>
+1536|             </div>
+1537|         </div>
+1538|     `;
+1539|             });
+1540|         }
+1541| 
+1542|         html += '</div>';
+1543|         container.innerHTML = html;
+1544| 
+1545|     } catch (err) {
+1546|         console.error('Erreur viewConversation:', err);
+1547|         container.innerHTML = '<div class="loading">❌ Erreur chargement des messages</div>';
+1548|     }
+1549| }
+1550| 
+1551| function backToConversations() {
+1552|     loadConversations();
+1553| }
+1554| 
+1555| // ========== VIDAGE MANUEL ==========
+1556| 
+1557| async function clearLogsManually() {
+1558|     if (typeof MGModal !== 'undefined') {
+1559|         MGModal.show({
+1560|             title: '🗑️ Vider le journal',
+1561|             message: 'Vider TOUT le journal de modération ?\n\nAction irréversible.',
+1562|             onConfirm: async () => {
+1563|                 try {
+1564|                     const response = await fetch('/api/admin/clear-logs', { method: 'POST' });
+1565|                     const data = await response.json();
+1566|                     if (data.success) {
+1567|                         MGModal.show({
+1568|                             title: '✅ Journal vidé',
+1569|                             message: `${data.deleted} entrées supprimées.`,
+1570|                             onConfirm: () => loadModerationLogs()
+1571|                         });
+1572|                     } else {
+1573|                         MGModal.show({
+1574|                             title: '❌ Erreur',
+1575|                             message: 'Erreur lors du vidage.',
+1576|                             onConfirm: () => { }
+1577|                         });
+1578|                     }
+1579|                 } catch (err) {
+1580|                     console.error(err);
+1581|                     MGModal.show({
+1582|                         title: '❌ Erreur réseau',
+1583|                         message: 'Impossible de contacter le serveur.',
+1584|                         onConfirm: () => { }
+1585|                     });
+1586|                 }
+1587|             },
+1588|             onCancel: () => { }
+1589|         });
+1590|     } else {
+1591|         // Fallback
+1592|         if (!confirm('🗑️ Vider TOUT le journal de modération ? Action irréversible.')) return;
+1593|         try {
+1594|             const response = await fetch('/api/admin/clear-logs', { method: 'POST' });
+1595|             const data = await response.json();
+1596|             if (data.success) {
+1597|                 alert(`✅ Journal vidé (${data.deleted} entrées supprimées)`);
+1598|                 loadModerationLogs();
+1599|             } else {
+1600|                 alert('❌ Erreur');
+1601|             }
+1602|         } catch (err) {
+1603|             console.error(err);
+1604|             alert('❌ Erreur réseau');
+1605|         }
+1606|     }
+1607| }
+1608| 
+1609| async function cleanReportsManually() {
+1610|     if (typeof MGModal !== 'undefined') {
+1611|         // Pour la saisie du nombre de jours, on doit encore utiliser prompt
+1612|         // Car MGModal n'a pas d'input pour l'instant
+1613|         const days = prompt('📋 Supprimer les signalements plus vieux que combien de jours ? (défaut: 60)', '60');
+1614|         if (!days) return;
+1615| 
+1616|         MGModal.show({
+1617|             title: '📋 Nettoyer signalements',
+1618|             message: `Supprimer les signalements plus vieux que ${days} jours ?`,
+1619|             onConfirm: async () => {
+1620|                 try {
+1621|                     const response = await fetch('/api/admin/clean-reports', {
+1622|                         method: 'POST',
+1623|                         headers: { 'Content-Type': 'application/json' },
+1624|                         body: JSON.stringify({ days: parseInt(days) })
+1625|                     });
+1626|                     const data = await response.json();
+1627|                     if (data.success) {
+1628|                         MGModal.show({
+1629|                             title: '✅ Nettoyé',
+1630|                             message: `${data.deleted} signalements supprimés.`,
+1631|                             onConfirm: () => {
+1632|                                 if (document.getElementById('tab-reports').classList.contains('active')) {
+1633|                                     loadReports();
+1634|                                 }
+1635|                             }
+1636|                         });
+1637|                     } else {
+1638|                         MGModal.show({
+1639|                             title: '❌ Erreur',
+1640|                             message: 'Erreur lors du nettoyage.',
+1641|                             onConfirm: () => { }
+1642|                         });
+1643|                     }
+1644|                 } catch (err) {
+1645|                     console.error(err);
+1646|                     MGModal.show({
+1647|                         title: '❌ Erreur réseau',
+1648|                         message: 'Impossible de contacter le serveur.',
+1649|                         onConfirm: () => { }
+1650|                     });
+1651|                 }
+1652|             },
+1653|             onCancel: () => { }
+1654|         });
+1655|     } else {
+1656|         // Fallback
+1657|         const days = prompt('📋 Supprimer les signalements plus vieux que combien de jours ? (défaut: 60)', '60');
+1658|         if (!days) return;
+1659|         if (!confirm(`Supprimer les signalements plus vieux que ${days} jours ?`)) return;
+1660|         try {
+1661|             const response = await fetch('/api/admin/clean-reports', {
+1662|                 method: 'POST',
+1663|                 headers: { 'Content-Type': 'application/json' },
+1664|                 body: JSON.stringify({ days: parseInt(days) })
+1665|             });
+1666|             const data = await response.json();
+1667|             if (data.success) {
+1668|                 alert(`✅ ${data.deleted} signalements supprimés`);
+1669|                 if (document.getElementById('tab-reports').classList.contains('active')) {
+1670|                     loadReports();
+1671|                 }
+1672|             } else {
+1673|                 alert('❌ Erreur');
+1674|             }
+1675|         } catch (err) {
+1676|             console.error(err);
+1677|             alert('❌ Erreur réseau');
+1678|         }
+1679|     }
+1680| }
+1681| 
+1682| // ========== HORLOGE EN TEMPS RÉEL ==========
+1683| function updateClock() {
+1684|     const now = new Date();
+1685|     const options = {
+1686|         weekday: 'long',
+1687|         year: 'numeric',
+1688|         month: 'long',
+1689|         day: 'numeric',
+1690|         hour: '2-digit',
+1691|         minute: '2-digit',
+1692|         second: '2-digit',
+1693|         hour12: false
+1694|     };
+1695|     const formatted = now.toLocaleDateString('fr-FR', options);
+1696|     const clockSpan = document.getElementById('currentDateTime');
+1697|     if (clockSpan) clockSpan.textContent = formatted;
+1698| }
+1699| 
+1700| // Mettre à jour l'horloge toutes les secondes
+1701| setInterval(updateClock, 1000);
+1702| updateClock(); // Appel immédiat
+1703| 
+1704| // Gestion des onglets
+1705| function initTabs() {
+1706|     const tabs = document.querySelectorAll('.tab-btn');
+1707|     tabs.forEach(btn => {
+1708|         btn.addEventListener('click', () => {
+1709|             tabs.forEach(b => b.classList.remove('active'));
+1710|             btn.classList.add('active');
+1711| 
+1712|             document.querySelectorAll('.tab-content').forEach(content => {
+1713|                 content.classList.remove('active');
+1714|             });
+1715| 
+1716|             const tabId = `tab-${btn.dataset.tab}`;
+1717|             document.getElementById(tabId).classList.add('active');
+1718| 
+1719|             if (btn.dataset.tab === 'reports') loadReports();
+1720|             if (btn.dataset.tab === 'logs') loadModerationLogs();
+1721|             if (btn.dataset.tab === 'conversations') loadConversations(); // ← AJOUTER
+1722|         });
 1723|     });
 1724| }
 1725| 
-1726| // ========== 8. DÉCONNEXION ==========
-1727| async function logout() {
-1728|     if (typeof MGModal !== 'undefined') {
-1729|         MGModal.show({
-1730|             title: '🔓 Déconnexion',
-1731|             message: 'Se déconnecter du panneau admin ?',
-1732|             onConfirm: async () => {
-1733|                 try {
-1734|                     await fetch('/api/admin/logout', { method: 'POST' });
-1735|                     window.location.href = '/admin-login.html';
-1736|                 } catch (err) {
-1737|                     console.error(err);
-1738|                     MGModal.show({
-1739|                         title: '❌ Erreur',
-1740|                         message: 'Erreur lors de la déconnexion.',
-1741|                         onConfirm: () => { }
-1742|                     });
-1743|                 }
-1744|             },
-1745|             onCancel: () => { }
-1746|         });
-1747|     } else {
-1748|         if (!confirm('Se déconnecter ?')) return;
-1749|         try {
-1750|             await fetch('/api/admin/logout', { method: 'POST' });
-1751|             window.location.href = '/admin-login.html';
-1752|         } catch (err) {
-1753|             console.error(err);
-1754|             alert('Erreur lors de la déconnexion');
-1755|         }
-1756|     }
-1757| }
-1758| 
-1759| // ========== 9. INITIALISATION ==========
-1760| (async function () {
-1761|     await loadUsers();
-1762| 
-1763|     if (searchBtn) searchBtn.addEventListener('click', applyFilters);
-1764|     if (searchInput) searchInput.addEventListener('keyup', (e) => {
-1765|         if (e.key === 'Enter') applyFilters();
-1766|     });
-1767|     if (roleFilter) roleFilter.addEventListener('change', applyFilters);
-1768|     if (statusFilter) statusFilter.addEventListener('change', applyFilters);
+1726| // ========== 7. UTILITAIRES ==========
+1727| function escapeHtml(str) {
+1728|     if (!str) return '';
+1729|     return str.replace(/[&<>]/g, function (m) {
+1730|         if (m === '&') return '&amp;';
+1731|         if (m === '<') return '&lt;';
+1732|         if (m === '>') return '&gt;';
+1733|         return m;
+1734|     });
+1735| }
+1736| 
+1737| // ========== 8. DÉCONNEXION ==========
+1738| async function logout() {
+1739|     if (typeof MGModal !== 'undefined') {
+1740|         MGModal.show({
+1741|             title: '🔓 Déconnexion',
+1742|             message: 'Se déconnecter du panneau admin ?',
+1743|             onConfirm: async () => {
+1744|                 try {
+1745|                     await fetch('/api/admin/logout', { method: 'POST' });
+1746|                     window.location.href = '/admin-login.html';
+1747|                 } catch (err) {
+1748|                     console.error(err);
+1749|                     MGModal.show({
+1750|                         title: '❌ Erreur',
+1751|                         message: 'Erreur lors de la déconnexion.',
+1752|                         onConfirm: () => { }
+1753|                     });
+1754|                 }
+1755|             },
+1756|             onCancel: () => { }
+1757|         });
+1758|     } else {
+1759|         if (!confirm('Se déconnecter ?')) return;
+1760|         try {
+1761|             await fetch('/api/admin/logout', { method: 'POST' });
+1762|             window.location.href = '/admin-login.html';
+1763|         } catch (err) {
+1764|             console.error(err);
+1765|             alert('Erreur lors de la déconnexion');
+1766|         }
+1767|     }
+1768| }
 1769| 
-1770|     if (maintenanceBtn) maintenanceBtn.addEventListener('click', toggleMaintenance);
-1771|     if (backupDbBtn) backupDbBtn.addEventListener('click', backupDatabase);
-1772|     if (cleanupBtn) cleanupBtn.addEventListener('click', manualCleanup);
+1770| // ========== 9. INITIALISATION ==========
+1771| (async function () {
+1772|     await loadUsers();
 1773| 
-1774|     // Boutons de nettoyage manuel
-1775|     const clearLogsBtn = document.getElementById('clearLogsBtn');
-1776|     const cleanReportsBtn = document.getElementById('cleanReportsBtn');
-1777|     if (clearLogsBtn) clearLogsBtn.addEventListener('click', clearLogsManually);
-1778|     if (cleanReportsBtn) cleanReportsBtn.addEventListener('click', cleanReportsManually);
-1779| 
-1780|     // Initialiser les onglets
-1781|     initTabs();
-1782| 
-1783|     // Démarrer l'horloge
-1784|     updateClock();
-1785| 
-1786| })();
-1787| 
-1788| // ========== CONNEXION SOCKET.IO POUR LE PANEL ADMIN ==========
-1789| const adminSocket = io();
+1774|     if (searchBtn) searchBtn.addEventListener('click', applyFilters);
+1775|     if (searchInput) searchInput.addEventListener('keyup', (e) => {
+1776|         if (e.key === 'Enter') applyFilters();
+1777|     });
+1778|     if (roleFilter) roleFilter.addEventListener('change', applyFilters);
+1779|     if (statusFilter) statusFilter.addEventListener('change', applyFilters);
+1780| 
+1781|     if (maintenanceBtn) maintenanceBtn.addEventListener('click', toggleMaintenance);
+1782|     if (backupDbBtn) backupDbBtn.addEventListener('click', backupDatabase);
+1783|     if (cleanupBtn) cleanupBtn.addEventListener('click', manualCleanup);
+1784| 
+1785|     // Boutons de nettoyage manuel
+1786|     const clearLogsBtn = document.getElementById('clearLogsBtn');
+1787|     const cleanReportsBtn = document.getElementById('cleanReportsBtn');
+1788|     if (clearLogsBtn) clearLogsBtn.addEventListener('click', clearLogsManually);
+1789|     if (cleanReportsBtn) cleanReportsBtn.addEventListener('click', cleanReportsManually);
 1790| 
-1791| // Écouter les mises à jour de la liste des utilisateurs
-1792| adminSocket.on('update users', (usersList) => {
-1793|     console.log('🔄 Mise à jour automatique du panel admin');
-1794| 
-1795|     loadUsers();
+1791|     // Initialiser les onglets
+1792|     initTabs();
+1793| 
+1794|     // Démarrer l'horloge
+1795|     updateClock();
 1796| 
-1797|     // Forcer le rechargement de l'historique IP après un délai
-1798|     setTimeout(() => {
-1799|         console.log('🔄 Appel forcé de loadAllIpHistory() après update users');
-1800|         loadAllIpHistory();
-1801|     }, 800);
-1802| });
-1803| 
-1804| // Écouter les événements de modération
-1805| adminSocket.on('new_moderation_action', (data) => {
-1806|     console.log('🛡️ Nouvelle action de modération:', data);
+1797| })();
+1798| 
+1799| // ========== CONNEXION SOCKET.IO POUR LE PANEL ADMIN ==========
+1800| const adminSocket = io();
+1801| 
+1802| // Écouter les mises à jour de la liste des utilisateurs
+1803| adminSocket.on('update users', (usersList) => {
+1804|     console.log('🔄 Mise à jour automatique du panel admin');
+1805| 
+1806|     loadUsers();
 1807| 
-1808|     // Recharger les logs si l'onglet est actif
-1809|     const logsTab = document.getElementById('tab-logs');
-1810|     if (logsTab && logsTab.classList.contains('active')) {
-1811|         loadModerationLogs();
-1812|     }
-1813| 
-1814|     // Recharger la liste des utilisateurs pour mettre à jour les warns/bans
-1815|     loadUsers();
-1816| });
-1817| 
-1818| // Écouter les nouveaux signalements
-1819| adminSocket.on('new_report', (data) => {
-1820|     console.log('📢 Nouveau signalement:', data);
-1821| 
-1822|     // Recharger les signalements si l'onglet est actif
-1823|     const reportsTab = document.getElementById('tab-reports');
-1824|     if (reportsTab && reportsTab.classList.contains('active')) {
-1825|         loadReports();
-1826|     }
-1827| 
-1828|     // Optionnel : notification visuelle
-1829|     const reportsBtn = document.querySelector('.tab-btn[data-tab="reports"]');
-1830|     if (reportsBtn) {
-1831|         reportsBtn.style.background = '#ff6b6b';
-1832|         reportsBtn.style.color = 'white';
-1833|         setTimeout(() => {
-1834|             reportsBtn.style.background = '';
-1835|             reportsBtn.style.color = '';
-1836|         }, 3000);
+1808|     // Forcer le rechargement de l'historique IP après un délai
+1809|     setTimeout(() => {
+1810|         console.log('🔄 Appel forcé de loadAllIpHistory() après update users');
+1811|         loadAllIpHistory();
+1812|     }, 800);
+1813| });
+1814| 
+1815| // Écouter les événements de modération
+1816| adminSocket.on('new_moderation_action', (data) => {
+1817|     console.log('🛡️ Nouvelle action de modération:', data);
+1818| 
+1819|     // Recharger les logs si l'onglet est actif
+1820|     const logsTab = document.getElementById('tab-logs');
+1821|     if (logsTab && logsTab.classList.contains('active')) {
+1822|         loadModerationLogs();
+1823|     }
+1824| 
+1825|     // Recharger la liste des utilisateurs pour mettre à jour les warns/bans
+1826|     loadUsers();
+1827| });
+1828| 
+1829| // Écouter les nouveaux signalements
+1830| adminSocket.on('new_report', (data) => {
+1831|     console.log('📢 Nouveau signalement:', data);
+1832| 
+1833|     // Recharger les signalements si l'onglet est actif
+1834|     const reportsTab = document.getElementById('tab-reports');
+1835|     if (reportsTab && reportsTab.classList.contains('active')) {
+1836|         loadReports();
 1837|     }
-1838| });
-1839| 
-1840| 
-1841| // Ajouter la fonction loadSettings à l'objet window
-1842| window.loadSettings = loadSettings;
-1843| 
-1844| 
-1845| 
-1846| 
+1838| 
+1839|     // Optionnel : notification visuelle
+1840|     const reportsBtn = document.querySelector('.tab-btn[data-tab="reports"]');
+1841|     if (reportsBtn) {
+1842|         reportsBtn.style.background = '#ff6b6b';
+1843|         reportsBtn.style.color = 'white';
+1844|         setTimeout(() => {
+1845|             reportsBtn.style.background = '';
+1846|             reportsBtn.style.color = '';
+1847|         }, 3000);
+1848|     }
+1849| });
+1850| 
+1851| 
+1852| // Ajouter la fonction loadSettings à l'objet window
+1853| window.loadSettings = loadSettings;
+1854| 
+1855| 
+1856| 
+1857| 
 
 # ============================================
-# FILE: protected\admin.html
-# ============================================
-
-1| <!DOCTYPE html>
-2| <html lang="fr">
-3| 
-4| <head>
-5|     <meta charset="UTF-8">
-6|     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-7|     <title>Admin - MeetGay</title>
-8|     <link rel="stylesheet" href="/css/common/reset.css">
-9|     <link rel="stylesheet" href="/css/pages/admin.css">
-10|     <link rel="stylesheet" href="/fontawesome/css/all.min.css">
-11| </head>
-12| 
-13| <body>
-14|     <div class="admin-wrapper">
-15|         <!-- EN-TÊTE -->
-16|         <div class="admin-header">
-17|             <div class="logo-area">
-18|                 <h1><i class="fas fa-shield-alt"></i> Panel Admin MeetGay</h1>
-19|                 <p><i class="fas fa-users"></i> Gestion complète de la communauté</p>
-20|             </div>
-21|             <!-- HORLOGE -->
-22|             <div class="clock-box">
-23|                 <span id="currentDateTime"></span>
-24|             </div>
-25|             <div class="admin-badge">
-26|                 <span><i class="fas fa-crown"></i> <span id="adminUsername">Administrateur</span></span>
-27|                 <button class="logout-btn" onclick="logout()"><i class="fas fa-sign-out-alt"></i> Déconnexion</button>
-28|             </div>
-29|         </div>
-30| 
-31|         <!-- STATS -->
-32|         <div class="stats-grid">
-33|             <div class="stat-card">
-34|                 <div class="stat-icon"><i class="fas fa-users"></i></div>
-35|                 <div class="stat-info">
-36|                     <h3 id="totalUsers">0</h3>
-37|                     <p>Utilisateurs</p>
-38|                 </div>
-39|             </div>
-40|             <div class="stat-card">
-41|                 <div class="stat-icon"><i class="fas fa-exclamation-triangle"></i></div>
-42|                 <div class="stat-info">
-43|                     <h3 id="totalWarns">0</h3>
-44|                     <p>Avertissements</p>
-45|                 </div>
-46|             </div>
-47|             <div class="stat-card">
-48|                 <div class="stat-icon"><i class="fas fa-ban"></i></div>
-49|                 <div class="stat-info">
-50|                     <h3 id="totalBanned">0</h3>
-51|                     <p>Bannis</p>
-52|                 </div>
-53|             </div>
-54|             <div class="stat-card">
-55|                 <div class="stat-icon"><i class="fas fa-user-shield"></i></div>
-56|                 <div class="stat-info">
-57|                     <h3 id="totalModos">0</h3>
-58|                     <p>Modérateurs</p>
-59|                 </div>
-60|             </div>
-61|         </div>
-62| 
-63|         <!-- RECHERCHE -->
-64|         <div class="search-bar">
-65|             <i class="fas fa-search"></i>
-66|             <input type="text" id="searchInput" placeholder="Rechercher par pseudo...">
-67|             <select id="roleFilter">
-68|                 <option value="all">Tous les rôles</option>
-69|                 <option value="admin"><i class="fas fa-crown"></i> Admin</option>
-70|                 <option value="modo"><i class="fas fa-user-shield"></i> Modo</option>
-71|                 <option value="user"><i class="fas fa-user"></i> Membre</option>
-72|                 <option value="guest"><i class="fas fa-user-friends"></i> Visiteur</option>
-73|             </select>
-74|             <select id="statusFilter">
-75|                 <option value="all">Tous statuts</option>
-76|                 <option value="active"><i class="fas fa-check-circle"></i> Actifs</option>
-77|                 <option value="banned"><i class="fas fa-ban"></i> Bannis</option>
-78|                 <option value="warned"><i class="fas fa-exclamation-triangle"></i> Avertis</option>
-79|             </select>
-80|             <button id="searchBtn"><i class="fas fa-filter"></i> Filtrer</button>
-81|         </div>
-82| 
-83|         <!-- ONGLETS -->
-84|         <div class="admin-tabs">
-85|             <button class="tab-btn active" data-tab="users"><i class="fas fa-users"></i> Utilisateurs</button>
-86|             <button class="tab-btn" data-tab="reports"><i class="fas fa-flag"></i> Signalements</button>
-87|             <button class="tab-btn" data-tab="logs"><i class="fas fa-history"></i> Journal</button>
-88|             <button class="tab-btn" data-tab="conversations"><i class="fas fa-comments"></i> Conversations</button>
-89|             <button class="tab-btn" data-tab="config" onclick="showTab('config')">⚙️ Configuration</button>
-90|             <button class="quick-btn" id="cleanReportsBtn"><i class="fas fa-broom"></i> Nettoyer signalements</button>
-91|             <button class="quick-btn" id="clearLogsBtn"><i class="fas fa-trash-alt"></i> Vider journal</button>
-92|         </div>
-93| 
-94|         <div id="tab-users" class="tab-content active">
-95|             <div class="table-container">
-96|                 <div id="usersList">Chargement des utilisateurs...</div>
-97|             </div>
-98|         </div>
-99|         <div id="tab-reports" class="tab-content">
-100|             <div class="table-container">
-101|                 <div id="reportsList">Chargement...</div>
-102|             </div>
-103|         </div>
-104|         <div id="tab-logs" class="tab-content">
-105|             <div class="table-container">
-106|                 <div id="logsList">Chargement...</div>
-107|             </div>
-108|         </div>
-109|         <div id="tab-conversations" class="tab-content">
-110|             <div class="table-container">
-111|                 <div id="conversationsList">Chargement des conversations...</div>
-112|             </div>
-113|         </div>
-114| 
-115|         <!-- ========== ONGLET CONFIGURATION ========== -->
-116|         <div id="tab-config" class="tab-content" style="display:none;">
-117|             <h2>⚙️ Configuration du serveur</h2>
-118|             <p style="color: #aaa; margin-bottom: 20px;">Modifie les paramètres de nettoyage, modération et
-119|                 développement.</p>
-120| 
-121|             <div id="configForm">
-122|                 <!-- Le contenu sera chargé par JavaScript -->
-123|                 <div class="loading">⏳ Chargement des paramètres...</div>
-124|             </div>
-125|         </div>
-126| 
-127|         <!-- ACTIONS RAPIDES -->
-128|         <div class="quick-actions">
-129|             <h3><i class="fas fa-cogs"></i> Actions rapides</h3>
-130|             <div class="actions-grid">
-131|                 <button class="quick-btn" id="maintenanceBtn"><i class="fas fa-wrench"></i> Mode maintenance</button>
-132|                 <button class="quick-btn" id="backupDbBtn"><i class="fas fa-database"></i> Sauvegarder la BDD</button>
-133|                 <button class="quick-btn danger-btn" id="cleanupBtn"><i class="fas fa-broom"></i> Nettoyage
-134|                     manuel</button>
-135|             </div>
-136|         </div>
-137|     </div>
-138|     <script src="/socket.io/socket.io.js"></script>
-139|     <script src="/js/admin.js"></script>
-140|     <script src="/js/modal-handler-admin.js"></script>
-141| </body>
-142| 
-143| </html>
-
-# ============================================
-# FIN DU FICHIER - 3 fichiers inclus
-# Généré le 2026-07-20 20:39:55
+# FIN DU FICHIER - 1 fichiers inclus
+# Généré le 2026-07-21 12:51:57
 # Tous les fichiers sont complets
 # ============================================
