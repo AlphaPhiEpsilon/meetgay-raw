@@ -1,6 +1,6 @@
 # MEETGAY - CODE COMPLET
-# Généré le 2026-08-08 11:39:25
-# 2 fichier(s) inclus
+# Généré le 2026-08-08 12:09:35
+# 1 fichier(s) inclus
 
 "⚠️ MODE ANALYSE TOTALE - Lecture exhaustive du code ci-dessous. 
 Vérifie chaque fichier listé dans le sommaire. 
@@ -8,614 +8,281 @@ Ne fais pas de supposition, relis attentivement tout le contenu."
 
 # ========== SOMMAIRE ==========
 
-# 1. public\css\pages\manage-alert.css
-# 2. public\manage-alert.html
+# 1. server.js
 
 # ============================================
-# FILE: public\css\pages\manage-alert.css
+# FILE: server.js
 # ============================================
 
-1| /* ===== manage-alert.css ===== */
-2| /* Harmonisation avec le style global de MeetGay */
-3| 
-4| /* 🔥 1. Fond dégradé et structure de la page */
-5| html,
-6| body {
-7|     height: 100%;
-8|     margin: 0;
-9|     padding: 0;
-10| }
-11| 
-12| body {
-13|     display: flex;
-14|     flex-direction: column;
-15|     min-height: 100vh;
-16|     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-17|     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-18| }
-19| 
-20| /* 🔥 2. Conteneur principal - CENTRAGE PARFAIT */
-21| .page-container {
-22|     flex: 1;
-23|     display: flex;
-24|     justify-content: center;
-25|     align-items: center;
-26|     padding: 20px;
-27|     width: 100%;
-28|     box-sizing: border-box;
-29|     min-height: 0;
-30|     /* Permet au flex de bien fonctionner */
-31| }
+1| // ============================================================
+2| // server.js - Cœur du chat MeetGay (version base de données)
+3| // ROLE: Point d'entrée - Monte les routes et lance le serveur
+4| // ============================================================
+5| 
+6| // ========== CHARGEMENT DES VARIABLES D'ENVIRONNEMENT ==========
+7| if (process.env.NODE_ENV !== 'production') {
+8|     try {
+9|         require('dotenv').config();
+10|         console.log('✅ dotenv chargé (environnement local)');
+11|     } catch (err) {
+12|         console.log('⚠️ dotenv non installé, utilisation des variables système');
+13|     }
+14| } else {
+15|     console.log('✅ Mode production, variables Render utilisées');
+16| }
+17| 
+18| // ========== IMPORTS ==========
+19| const express = require('express');
+20| const compression = require('compression');
+21| const http = require('http');
+22| const socketIo = require('socket.io');
+23| const jwt = require('jsonwebtoken');
+24| const { Pool } = require('pg');
+25| const { disconnectBannedUser } = require('./moderation');
+26| const path = require('path');
+27| const bcrypt = require('bcrypt');
+28| const session = require('express-session');
+29| const pgSession = require('connect-pg-simple')(session);
+30| 
+31| 
 32| 
-33| /* 🔥 3. La boîte blanche centrée */
-34| .manage-box {
-35|     background: white;
-36|     border-radius: 16px;
-37|     padding: 40px;
-38|     max-width: 600px;
-39|     width: 100%;
-40|     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
-41|     margin: 20px 0;
-42|     box-sizing: border-box;
-43| }
-44| 
-45| /* 🔥 4. Footer collé en bas */
-46| .site-footer {
-47|     flex-shrink: 0;
-48|     background: rgba(0, 0, 0, 0.2);
-49|     backdrop-filter: blur(10px);
-50|     padding: 15px 30px;
-51|     border-top: 1px solid rgba(255, 255, 255, 0.2);
-52|     width: 100%;
-53|     box-sizing: border-box;
-54|     text-align: center;
-55|     color: white;
-56| }
-57| 
-58| .footer-content {
-59|     max-width: 1200px;
-60|     margin: 0 auto;
-61| }
-62| 
-63| .footer-content a {
-64|     color: rgba(255, 255, 255, 0.8);
-65|     text-decoration: none;
-66|     margin: 0 10px;
-67| }
-68| 
-69| .footer-content a:hover {
-70|     color: white;
-71|     text-decoration: underline;
-72| }
-73| 
-74| /* 🔥 5. Le reste du style (inchangé) */
-75| .manage-box h1 {
-76|     color: #667eea;
-77|     font-size: 24px;
-78|     margin-bottom: 25px;
-79|     text-align: center;
-80|     border-bottom: 2px solid #667eea;
-81|     padding-bottom: 15px;
-82| }
-83| 
-84| .manage-box h1 i {
-85|     margin-right: 10px;
-86| }
-87| 
-88| .alert-info {
-89|     background: #f8f9fa;
-90|     border-radius: 12px;
-91|     padding: 20px;
-92|     margin-bottom: 25px;
-93|     border-left: 4px solid #667eea;
-94| }
-95| 
-96| .alert-info p {
-97|     margin: 8px 0;
-98|     font-size: 15px;
-99|     color: #333;
-100| }
+33| // Modules internes
+34| const { cleanOldData } = require('./modules/cleanup.js');
+35| const contactRoutes = require('./modules/routes/api-contact.js');
+36| const pool = require('./modules/postgresql.js');
+37| const htmlRoutes = require('./modules/routes/html.js');
+38| const adminRoutes = require('./modules/routes/admin.js');
+39| const authRoutes = require('./modules/routes/api-auth.js');
+40| const messagesRoutes = require('./modules/routes/api-messages.js');
+41| const maintenanceMiddleware = require('./modules/middleware/maintenance.js');
+42| const socketHandlers = require('./modules/socket-handlers.js');
+43| // Route de géocodage
+44| const geocodeRoutes = require('./modules/routes/geocode');
+45| const alertRoutes = require('./modules/routes/api-subscribe-alert.js');
+46| 
+47| // JWT_SECRET pour les utilisateurs normaux
+48| const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
+49| 
+50| // ==========  VARIABLES GLOBALES (chargées depuis la base) ==========
+51| // Ces valeurs sont des "fallbacks" en cas d'erreur de lecture de la base
+52| let TEST_MODE = false;
+53| let REPORTS_THRESHOLD = 2;
+54| let REPORTS_WINDOW_MINUTES = 60;
+55| let TEMP_BAN_MINUTES = 10;
+56| let LOGS_RETENTION_DAYS = 30;
+57| let REPORTS_RETENTION_DAYS = 60;
+58| let AUTO_CLEANUP_ENABLED = true;
+59| let VISITOR_CLEANUP_ENABLED = false;
+60| let INACTIVITY_MINUTES = 2;
+61| let CLEANUP_INTERVAL_MINUTES = 1;
+62| let DEV_MODE = true;
+63| 
+64| // Fonction pour charger la config depuis la base de données
+65| async function loadConfigFromDatabase() {
+66|     try {
+67|         console.log('📂 Chargement des paramètres depuis la base de données...');
+68|         const result = await pool.query('SELECT key, value FROM settings');
+69| 
+70|         if (result.rows.length === 0) {
+71|             console.warn('⚠️ Aucun paramètre trouvé dans la base, utilisation des valeurs par défaut.');
+72|             return;
+73|         }
+74| 
+75|         const settings = {};
+76|         result.rows.forEach(row => {
+77|             settings[row.key] = row.value;
+78|         });
+79| 
+80|         // Mettre à jour les variables globales
+81|         if (settings.test_mode !== undefined) TEST_MODE = settings.test_mode === 'true';
+82|         if (settings.reports_threshold !== undefined) REPORTS_THRESHOLD = parseInt(settings.reports_threshold) || 2;
+83|         if (settings.reports_window_minutes !== undefined) REPORTS_WINDOW_MINUTES = parseInt(settings.reports_window_minutes) || 60;
+84|         if (settings.temp_ban_minutes !== undefined) TEMP_BAN_MINUTES = parseInt(settings.temp_ban_minutes) || 10;
+85|         if (settings.logs_retention_days !== undefined) LOGS_RETENTION_DAYS = parseInt(settings.logs_retention_days) || 30;
+86|         if (settings.reports_retention_days !== undefined) REPORTS_RETENTION_DAYS = parseInt(settings.reports_retention_days) || 60;
+87|         if (settings.auto_cleanup_enabled !== undefined) AUTO_CLEANUP_ENABLED = settings.auto_cleanup_enabled === 'true';
+88|         if (settings.visitor_cleanup_enabled !== undefined) VISITOR_CLEANUP_ENABLED = settings.visitor_cleanup_enabled === 'true';
+89|         if (settings.inactivity_minutes !== undefined) INACTIVITY_MINUTES = parseInt(settings.inactivity_minutes) || 2;
+90|         if (settings.cleanup_interval_minutes !== undefined) CLEANUP_INTERVAL_MINUTES = parseInt(settings.cleanup_interval_minutes) || 1;
+91|         if (settings.dev_mode !== undefined) DEV_MODE = settings.dev_mode === 'true';
+92| 
+93| 
+94|     } catch (err) {
+95|         console.error('❌ Erreur lors du chargement des paramètres :', err.message);
+96|         console.warn('⚠️ Utilisation des valeurs par défaut (fallback).');
+97|     }
+98| }
+99| 
+100| 
 101| 
-102| .alert-info strong {
-103|     color: #667eea;
-104| }
-105| 
-106| .alert-info .status-active {
-107|     color: #28a745;
-108|     font-weight: bold;
-109| }
-110| 
-111| .alert-info .status-sent {
-112|     color: #ffc107;
-113|     font-weight: bold;
-114| }
-115| 
-116| .alert-info .status-inactive {
-117|     color: #dc3545;
-118|     font-weight: bold;
-119| }
+102| 
+103| 
+104| // ==========  CONFIGURATION EXPRESS ==========
+105| const app = express();
+106| const server = http.createServer(app);
+107| 
+108| // Compression
+109| app.use(compression({
+110|     level: 6,
+111|     threshold: 1024,
+112|     filter: (req, res) => {
+113|         if (req.path === '/socket.io/') return false;
+114|         return compression.filter(req, res);
+115|     }
+116| }));
+117| 
+118| app.use(express.json());
+119| app.use(express.text({ type: 'text/plain' }));
 120| 
-121| .alert-form .form-group {
-122|     margin-bottom: 20px;
-123| }
-124| 
-125| .alert-form label {
-126|     display: block;
-127|     font-weight: 500;
-128|     margin-bottom: 8px;
-129|     color: #495057;
-130|     font-size: 14px;
-131| }
-132| 
-133| .alert-form select {
-134|     width: 100%;
-135|     padding: 12px 14px;
-136|     border: 2px solid #e0e0e0;
-137|     border-radius: 12px;
-138|     font-size: 14px;
-139|     font-family: inherit;
-140|     background: white;
-141|     transition: border-color 0.2s;
-142|     color: #333;
-143| }
-144| 
-145| .alert-form select:focus {
-146|     outline: none;
-147|     border-color: #667eea;
-148| }
-149| 
-150| .button-group {
-151|     display: flex;
-152|     flex-wrap: wrap;
-153|     gap: 12px;
-154|     margin-top: 20px;
-155| }
-156| 
-157| .btn {
-158|     padding: 12px 24px;
-159|     border: none;
-160|     border-radius: 50px;
-161|     font-size: 14px;
-162|     font-weight: bold;
-163|     cursor: pointer;
-164|     transition: all 0.3s ease;
-165|     flex: 1;
-166|     min-width: 120px;
-167|     text-align: center;
-168| }
-169| 
-170| .btn:disabled {
-171|     opacity: 0.6;
-172|     cursor: not-allowed;
-173|     transform: none !important;
-174| }
-175| 
-176| .btn-primary {
-177|     background: linear-gradient(135deg, #667eea, #764ba2);
-178|     color: white;
-179| }
-180| 
-181| .btn-primary:hover:not(:disabled) {
-182|     transform: translateY(-2px);
-183|     box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-184| }
-185| 
-186| .btn-success {
-187|     background: #28a745;
-188|     color: white;
-189| }
-190| 
-191| .btn-success:hover:not(:disabled) {
-192|     background: #218838;
-193|     transform: translateY(-2px);
-194|     box-shadow: 0 5px 15px rgba(40, 167, 69, 0.3);
-195| }
-196| 
-197| .btn-danger {
-198|     background: #dc3545;
-199|     color: white;
-200| }
-201| 
-202| .btn-danger:hover:not(:disabled) {
-203|     background: #c82333;
-204|     transform: translateY(-2px);
-205|     box-shadow: 0 5px 15px rgba(220, 53, 69, 0.3);
-206| }
-207| 
-208| .message {
-209|     padding: 12px 16px;
-210|     border-radius: 12px;
-211|     margin-top: 15px;
-212|     display: none;
-213|     font-weight: 500;
-214| }
-215| 
-216| .message.success {
-217|     display: block;
-218|     background: #d4edda;
-219|     color: #155724;
-220|     border: 1px solid #c3e6cb;
-221| }
-222| 
-223| .message.error {
-224|     display: block;
-225|     background: #f8d7da;
-226|     color: #721c24;
-227|     border: 1px solid #f5c6cb;
-228| }
-229| 
-230| .message.info {
-231|     display: block;
-232|     background: #d1ecf1;
-233|     color: #0c5460;
-234|     border: 1px solid #bee5eb;
-235| }
+121| const cookieParser = require('cookie-parser');
+122| app.use(cookieParser());
+123| 
+124| app.use(session({
+125|     store: new pgSession({
+126|         pool: pool,
+127|         tableName: 'session',
+128|         createTableIfMissing: false,
+129|         pruneSessionInterval: 60
+130|     }),
+131|     secret: 'un-super-secret-change-moi',
+132|     resave: false,
+133|     saveUninitialized: false,
+134|     cookie: {
+135|         httpOnly: true,
+136|         secure: false,
+137|         maxAge: 30 * 24 * 60 * 60 * 1000 // 30 jours
+138|     }
+139| }));
+140| 
+141| 
+142| app.use(maintenanceMiddleware(pool));
+143| contactRoutes(app);
+144| htmlRoutes(app, pool);
+145| messagesRoutes(app, pool);
+146| authRoutes(app, pool);
+147| geocodeRoutes(app);
+148| require('./modules/routes/api-block')(app, pool);
+149| alertRoutes(app, pool);
+150| 
+151| // Route pour la page de gestion des alertes
+152| app.get('/manage-alert', (req, res) => {
+153|     res.sendFile(path.join(__dirname, 'public', 'manage-alert.html'));
+154| });
+155| 
+156| // ========== CONFIGURATION DES FICHIERS STATIQUES ==========
+157| 
+158| // 🔥 Détermine les options selon le mode
+159| const staticOptions = {
+160|     setHeaders: function (res, path) {
+161|         if (path.endsWith('.css')) {
+162|             res.setHeader('Content-Type', 'text/css');
+163|         }
+164|     }
+165| };
+166| 
+167| // 🔥 Si DEV_MODE est activé, désactive le cache
+168| if (DEV_MODE === true) {
+169|     staticOptions.etag = false;           // Désactive ETag
+170|     staticOptions.maxAge = 0;             // Pas de mise en cache
+171|     staticOptions.lastModified = false;   // Désactive Last-Modified
+172| 
+173|     // Ajoute des headers anti-cache
+174|     staticOptions.setHeaders = function (res, path) {
+175|         if (path.endsWith('.css')) {
+176|             res.setHeader('Content-Type', 'text/css');
+177|         }
+178|         // 🔥 Headers anti-cache pour TOUS les fichiers
+179|         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
+180|         res.setHeader('Pragma', 'no-cache');
+181|         res.setHeader('Expires', '0');
+182|     };
+183| 
+184|     console.log('🔥 MODE DÉVELOPPEMENT ACTIF - Cache désactivé');
+185| } else {
+186|     console.log('✅ MODE PRODUCTION - Cache activé');
+187| }
+188| 
+189| // Applique la configuration
+190| app.use(express.static('/var/www/meetgay/public', staticOptions));
+191| app.use('/protected', express.static('protected'));
+192| app.use(express.json());
+193| 
+194| // 🔥 Middleware anti-cache (seulement en développement)
+195| if (DEV_MODE === true) {
+196|     app.use((req, res, next) => {
+197|         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
+198|         res.setHeader('Pragma', 'no-cache');
+199|         res.setHeader('Expires', '0');
+200|         next();
+201|     });
+202|     console.log('🔥 Middleware anti-cache activé');
+203| }
+204| 
+205| // ========== SOCKET.IO ==========
+206| const io = socketIo(server, {
+207|     cors: {
+208|         origin: "*",
+209|         methods: ["GET", "POST"],
+210|         credentials: true,
+211|         allowedHeaders: ["*"]
+212|     },
+213|     transports: ['websocket', 'polling'],
+214|     allowEIO3: true,
+215|     pingTimeout: 120000,    // ← 2 minutes (au lieu de 10)
+216|     pingInterval: 30000     // ← 30 secondes (au lieu de 1 minute)
+217| });
+218| 
+219| const sessionManager = require('./modules/session-manager.js')(io, pool, {
+220|     CLEANUP_INTERVAL: CLEANUP_INTERVAL_MINUTES * 60 * 1000,
+221|     INACTIVITY_THRESHOLD: INACTIVITY_MINUTES * 60 * 1000
+222| });
+223| 
+224| adminRoutes(app, pool, io);
+225| 
+226| // Gestion d'erreur (port déjà utilisé)
+227| server.on('error', (err) => {
+228|     if (err.code === 'EADDRINUSE') {
+229|         console.error(`❌ Port déjà utilisé. Tue l'autre processus et redémarre.`);
+230|         process.exit(1);
+231|     }
+232| });
+233| 
+234| // Initialiser la surveillance d’inactivité (5 minutes sans activité)
+235| const updateActivity = sessionManager.updateActivity;
 236| 
-237| .error-text {
-238|     color: #dc3545;
-239|     text-align: center;
-240|     font-size: 18px;
-241| }
-242| 
-243| .back-link {
-244|     display: block;
-245|     text-align: center;
-246|     margin-top: 20px;
-247|     color: #667eea;
-248|     text-decoration: none;
-249|     font-weight: 500;
-250| }
+237| // ========== LANCEMENT DES HANDLERS SOCKET (APRÈS io, users, constants) ==========
+238| socketHandlers(io, pool, sessionManager, updateActivity, REPORTS_THRESHOLD, REPORTS_WINDOW_MINUTES, TEMP_BAN_MINUTES);
+239| 
+240| // ========== NETTOYAGE AUTOMATIQUE ==========
+241| // Nettoyage des utilisateurs inactifs
+242| (async function initCleanup() {
+243|     await loadConfigFromDatabase(); // Recharge les paramètres depuis la base
+244|     if (VISITOR_CLEANUP_ENABLED) {
+245|         sessionManager.startCleanup();
+246|         console.log('🧹 Nettoyage des visiteurs déconnectés ACTIVÉ');
+247|     } else {
+248|         console.log('🧹 Nettoyage des visiteurs déconnectés DÉSACTIVÉ');
+249|     }
+250| })();
 251| 
-252| .back-link:hover {
-253|     text-decoration: underline;
-254| }
-255| 
-256| .state {
-257|     text-align: center;
-258|     padding: 40px 0;
-259|     color: #6c757d;
+252| // Nettoyage auto du journal et signalements (toutes les 24h)
+253| if (AUTO_CLEANUP_ENABLED) {
+254|     setInterval(async () => {
+255|         await cleanOldData(pool, LOGS_RETENTION_DAYS, REPORTS_RETENTION_DAYS);
+256|     }, 24 * 60 * 60 * 1000);
+257|     console.log(`🧹 Nettoyage auto activé: journal ${LOGS_RETENTION_DAYS} jours, signalements ${REPORTS_RETENTION_DAYS} jours`);
+258| } else {
+259|     console.log(`🧹 Nettoyage auto DÉSACTIVÉ`);
 260| }
 261| 
-262| .fa-spinner {
-263|     font-size: 24px;
-264|     margin-right: 10px;
-265| }
-266| 
-267| /* ===== RESPONSIVE ===== */
-268| @media (max-width: 600px) {
-269|     .manage-box {
-270|         padding: 20px;
-271|         margin: 10px 0;
-272|     }
-273| 
-274|     .button-group {
-275|         flex-direction: column;
-276|     }
-277| 
-278|     .btn {
-279|         width: 100%;
-280|         flex: none;
-281|     }
-282| 
-283|     .manage-box h1 {
-284|         font-size: 20px;
-285|     }
-286| }
-287| 
-288| @media (max-width: 400px) {
-289|     .manage-box {
-290|         padding: 15px;
-291|     }
-292| 
-293|     .alert-info p {
-294|         font-size: 13px;
-295|     }
-296| }
+262| // ========== DÉMARRAGE ==========
+263| const PORT = process.env.PORT || 3005;
+264| server.listen(PORT, '0.0.0.0', () => {
+265|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+266| });
 
 # ============================================
-# FILE: public\manage-alert.html
-# ============================================
-
-1| <!DOCTYPE html>
-2| <html lang="fr">
-3| 
-4| <head>
-5|     <meta charset="UTF-8">
-6|     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-7|     <title data-i18n="manage.title">Gérer mon alerte - MeetGay</title>
-8|     <link rel="stylesheet" href="/css/common/reset.css">
-9|     <link rel="stylesheet" href="/css/layouts/footer.css">
-10|     <link rel="stylesheet" href="/css/pages/manage-alert.css">
-11|     <link rel="stylesheet" href="/fontawesome/css/all.min.css">
-12|     <script src="/js/translator.js"></script>
-13| </head>
-14| 
-15| <body>
-16| 
-17|     <div class="container">
-18|         <div class="manage-box">
-19|             <h1><i class="fas fa-bell"></i> <span data-i18n="manage.title">Gérer mon alerte</span></h1>
-20| 
-21|             <!-- Chargement -->
-22|             <div id="loadingState" class="state">
-23|                 <i class="fas fa-spinner fa-spin"></i> <span data-i18n="manage.loading">Chargement...</span>
-24|             </div>
-25| 
-26|             <!-- Contenu principal (caché par défaut) -->
-27|             <div id="contentState" style="display: none;">
-28|                 <div id="alertInfo" class="alert-info">
-29|                     <p><strong data-i18n="manage.current_threshold">Seuil actuel :</strong> <span
-30|                             id="currentThreshold">-</span></p>
-31|                     <p><strong data-i18n="manage.status">Statut :</strong> <span id="currentStatus">-</span></p>
-32|                     <p><strong data-i18n="manage.email">Email :</strong> <span id="currentEmail">-</span></p>
-33|                 </div>
-34| 
-35|                 <div class="alert-form">
-36|                     <div class="form-group">
-37|                         <label for="newThreshold" data-i18n="manage.new_threshold">Nouveau seuil :</label>
-38|                         <select id="newThreshold">
-39|                             <option value="5">5 connectés</option>
-40|                             <option value="10">10 connectés</option>
-41|                             <option value="15" selected>15 connectés</option>
-42|                             <option value="20">20 connectés</option>
-43|                             <option value="25">25 connectés</option>
-44|                             <option value="30">30 connectés</option>
-45|                             <option value="35">35 connectés</option>
-46|                             <option value="40">40 connectés</option>
-47|                             <option value="45">45 connectés</option>
-48|                             <option value="50">50 connectés</option>
-49|                         </select>
-50|                     </div>
-51| 
-52|                     <div class="button-group">
-53|                         <button id="updateBtn" class="btn btn-primary" data-i18n="manage.update_btn">Mettre à
-54|                             jour</button>
-55|                         <button id="reactivateBtn" class="btn btn-success" data-i18n="manage.reactivate_btn">Réactiver
-56|                             l'alerte</button>
-57|                         <button id="unsubscribeBtn" class="btn btn-danger" data-i18n="manage.unsubscribe_btn">Se
-58|                             désabonner</button>
-59|                     </div>
-60| 
-61|                     <div id="manageMessage" class="message" style="display: none;"></div>
-62|                 </div>
-63|             </div>
-64| 
-65|             <!-- Erreur / Invalide (caché par défaut) -->
-66|             <div id="errorState" style="display: none;">
-67|                 <p class="error-text"><i class="fas fa-exclamation-triangle"></i> <span
-68|                         data-i18n="manage.invalid_token">Lien invalide ou expiré.</span></p>
-69|                 <a href="/login.html" class="back-link" data-i18n="manage.back_to_login">← Retour à la page de
-70|                     connexion</a>
-71|             </div>
-72|         </div>
-73|     </div>
-74| 
-75|     <footer class="site-footer">
-76|         <div class="footer-content">
-77|             <span data-i18n="footer.text"><i class="far fa-copyright"></i> 2026 MeetGay - Chat Belgique</span> &nbsp |
-78|         </div>
-79|     </footer>
-80| 
-81|     <script>
-82|         /**
-83|          * manage-alert.js - Gestion de l'alerte
-84|          * Sécurité : redirige vers login.html si le token est absent ou invalide
-85|          */
-86| 
-87|         document.addEventListener('DOMContentLoaded', function () {
-88|             // 1️⃣ Récupérer le token depuis l'URL
-89|             const urlParams = new URLSearchParams(window.location.search);
-90|             const token = urlParams.get('token');
-91| 
-92|             // 2️⃣ Si pas de token → rediriger vers login
-93|             if (!token) {
-94|                 console.warn('⚠️ Token manquant, redirection vers login');
-95|                 window.location.href = '/login.html';
-96|                 return;
-97|             }
-98| 
-99|             // 3️⃣ Récupérer les éléments du DOM
-100|             const loadingState = document.getElementById('loadingState');
-101|             const contentState = document.getElementById('contentState');
-102|             const errorState = document.getElementById('errorState');
-103|             const currentThreshold = document.getElementById('currentThreshold');
-104|             const currentStatus = document.getElementById('currentStatus');
-105|             const currentEmail = document.getElementById('currentEmail');
-106|             const newThreshold = document.getElementById('newThreshold');
-107|             const updateBtn = document.getElementById('updateBtn');
-108|             const reactivateBtn = document.getElementById('reactivateBtn');
-109|             const unsubscribeBtn = document.getElementById('unsubscribeBtn');
-110|             const messageDiv = document.getElementById('manageMessage');
-111| 
-112|             // 4️⃣ Fonction pour afficher les messages
-113|             function showMessage(text, type = 'info') {
-114|                 messageDiv.textContent = text;
-115|                 messageDiv.className = 'message ' + type;
-116|                 messageDiv.style.display = 'block';
-117|                 if (type !== 'error') {
-118|                     setTimeout(() => {
-119|                         messageDiv.style.display = 'none';
-120|                     }, 5000);
-121|                 }
-122|             }
-123| 
-124|             function hideMessage() {
-125|                 messageDiv.style.display = 'none';
-126|                 messageDiv.className = 'message';
-127|             }
-128| 
-129|             // 5️⃣ Charger les informations de l'abonnement
-130|             async function loadAlertStatus() {
-131|                 try {
-132|                     const response = await fetch(`/api/alert-status?token=${encodeURIComponent(token)}`);
-133| 
-134|                     if (!response.ok) {
-135|                         if (response.status === 404) {
-136|                             // Token invalide ou abonnement inexistant
-137|                             loadingState.style.display = 'none';
-138|                             errorState.style.display = 'block';
-139|                             return;
-140|                         }
-141|                         throw new Error(`HTTP ${response.status}`);
-142|                     }
-143| 
-144|                     const data = await response.json();
-145| 
-146|                     // Mettre à jour l'affichage
-147|                     currentThreshold.textContent = data.threshold + ' connectés';
-148|                     currentEmail.textContent = data.email;
-149| 
-150|                     // Statut
-151|                     let statusText = '';
-152|                     let statusClass = '';
-153|                     if (data.is_active && !data.alert_sent) {
-154|                         statusText = '✅ En attente du seuil';
-155|                         statusClass = 'status-active';
-156|                     } else if (data.is_active && data.alert_sent) {
-157|                         statusText = '⏳ Alerte envoyée, en attente de réactivation';
-158|                         statusClass = 'status-sent';
-159|                     } else {
-160|                         statusText = '❌ Désactivé';
-161|                         statusClass = 'status-inactive';
-162|                     }
-163|                     currentStatus.textContent = statusText;
-164|                     currentStatus.className = statusClass;
-165| 
-166|                     // Présélectionner le seuil actuel dans le select
-167|                     newThreshold.value = data.threshold;
-168| 
-169|                     // Afficher le contenu, cacher le chargement
-170|                     loadingState.style.display = 'none';
-171|                     contentState.style.display = 'block';
-172| 
-173|                 } catch (error) {
-174|                     console.error('❌ Erreur chargement:', error);
-175|                     loadingState.style.display = 'none';
-176|                     errorState.style.display = 'block';
-177|                 }
-178|             }
-179| 
-180|             // 6️⃣ Actions : Mettre à jour le seuil
-181|             updateBtn.addEventListener('click', async function () {
-182|                 hideMessage();
-183|                 const threshold = parseInt(newThreshold.value);
-184| 
-185|                 if (threshold < 5 || threshold > 50) {
-186|                     showMessage('Le seuil doit être entre 5 et 50.', 'error');
-187|                     return;
-188|                 }
-189| 
-190|                 updateBtn.disabled = true;
-191|                 updateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Envoi...';
-192| 
-193|                 try {
-194|                     const response = await fetch('/api/update-alert', {
-195|                         method: 'POST',
-196|                         headers: { 'Content-Type': 'application/json' },
-197|                         body: JSON.stringify({
-198|                             token: token,
-199|                             threshold: threshold,
-200|                             action: 'update'
-201|                         })
-202|                     });
-203| 
-204|                     const data = await response.json();
-205|                     if (response.ok) {
-206|                         showMessage('✅ Seuil mis à jour avec succès.', 'success');
-207|                         // Recharger les infos
-208|                         setTimeout(loadAlertStatus, 500);
-209|                     } else {
-210|                         showMessage('❌ ' + (data.error || 'Erreur lors de la mise à jour.'), 'error');
-211|                     }
-212|                 } catch (error) {
-213|                     showMessage('❌ Erreur de connexion.', 'error');
-214|                 } finally {
-215|                     updateBtn.disabled = false;
-216|                     updateBtn.innerHTML = '<i class="fas fa-sync-alt"></i> Mettre à jour';
-217|                 }
-218|             });
-219| 
-220|             // 7️⃣ Actions : Réactiver
-221|             reactivateBtn.addEventListener('click', async function () {
-222|                 hideMessage();
-223| 
-224|                 reactivateBtn.disabled = true;
-225|                 reactivateBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Envoi...';
-226| 
-227|                 try {
-228|                     const response = await fetch('/api/update-alert', {
-229|                         method: 'POST',
-230|                         headers: { 'Content-Type': 'application/json' },
-231|                         body: JSON.stringify({
-232|                             token: token,
-233|                             action: 'reactivate'
-234|                         })
-235|                     });
-236| 
-237|                     const data = await response.json();
-238|                     if (response.ok) {
-239|                         showMessage('✅ Alerte réactivée !', 'success');
-240|                         setTimeout(loadAlertStatus, 500);
-241|                     } else {
-242|                         showMessage('❌ ' + (data.error || 'Erreur lors de la réactivation.'), 'error');
-243|                     }
-244|                 } catch (error) {
-245|                     showMessage('❌ Erreur de connexion.', 'error');
-246|                 } finally {
-247|                     reactivateBtn.disabled = false;
-248|                     reactivateBtn.innerHTML = '<i class="fas fa-bell"></i> Réactiver l\'alerte';
-249|                 }
-250|             });
-251| 
-252|             // 8️⃣ Actions : Se désabonner
-253|             unsubscribeBtn.addEventListener('click', function () {
-254|                 if (confirm('⚠️ Êtes-vous sûr de vouloir vous désabonner ? Vous ne recevrez plus d\'alertes.')) {
-255|                     performUnsubscribe();
-256|                 }
-257|             });
-258| 
-259|             async function performUnsubscribe() {
-260|                 hideMessage();
-261|                 unsubscribeBtn.disabled = true;
-262|                 unsubscribeBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Désabonnement...';
-263| 
-264|                 try {
-265|                     const response = await fetch('/api/update-alert', {
-266|                         method: 'POST',
-267|                         headers: { 'Content-Type': 'application/json' },
-268|                         body: JSON.stringify({
-269|                             token: token,
-270|                             action: 'unsubscribe'
-271|                         })
-272|                     });
-273| 
-274|                     const data = await response.json();
-275|                     if (response.ok) {
-276|                         showMessage('✅ Vous êtes désabonné(e).', 'success');
-277|                         setTimeout(() => {
-278|                             window.location.href = '/login.html';
-279|                         }, 3000);
-280|                     } else {
-281|                         showMessage('❌ ' + (data.error || 'Erreur lors du désabonnement.'), 'error');
-282|                     }
-283|                 } catch (error) {
-284|                     showMessage('❌ Erreur de connexion.', 'error');
-285|                 } finally {
-286|                     unsubscribeBtn.disabled = false;
-287|                     unsubscribeBtn.innerHTML = '<i class="fas fa-times-circle"></i> Se désabonner';
-288|                 }
-289|             }
-290| 
-291|             // 9️⃣ Lancer le chargement des données
-292|             loadAlertStatus();
-293|         });
-294|     </script>
-295| </body>
-296| 
-297| </html>
-
-# ============================================
-# FIN DU FICHIER - 2 fichiers inclus
-# Généré le 2026-08-08 11:39:25
+# FIN DU FICHIER - 1 fichiers inclus
+# Généré le 2026-08-08 12:09:35
 # Tous les fichiers sont complets
 # ============================================
