@@ -1,5 +1,5 @@
 # MEETGAY - CODE COMPLET
-# Généré le 2026-08-11 12:19:02
+# Généré le 2026-08-11 12:26:57
 # 1 fichier(s) inclus
 
 "⚠️ MODE ANALYSE TOTALE - Lecture exhaustive du code ci-dessous. 
@@ -8,285 +8,608 @@ Ne fais pas de supposition, relis attentivement tout le contenu."
 
 # ========== SOMMAIRE ==========
 
-# 1. server.js
+# 1. modules\socket-handlers.js
 
 # ============================================
-# FILE: server.js
+# FILE: modules\socket-handlers.js
 # ============================================
 
-1| // ============================================================
-2| // server.js - Cœur du chat MeetGay (version base de données)
-3| // ROLE: Point d'entrée - Monte les routes et lance le serveur
-4| // ============================================================
-5| 
-6| // ========== CHARGEMENT DES VARIABLES D'ENVIRONNEMENT ==========
-7| if (process.env.NODE_ENV !== 'production') {
-8|     try {
-9|         require('dotenv').config();
-10|         console.log('✅ dotenv chargé (environnement local)');
-11|     } catch (err) {
-12|         console.log('⚠️ dotenv non installé, utilisation des variables système');
-13|     }
-14| } else {
-15|     console.log('✅ Mode production, variables Render utilisées');
-16| }
-17| 
-18| // ========== IMPORTS ==========
-19| const express = require('express');
-20| const compression = require('compression');
-21| const http = require('http');
-22| const socketIo = require('socket.io');
-23| const jwt = require('jsonwebtoken');
-24| const { Pool } = require('pg');
-25| const { disconnectBannedUser } = require('./moderation');
-26| const path = require('path');
-27| const bcrypt = require('bcrypt');
-28| const session = require('express-session');
-29| const pgSession = require('connect-pg-simple')(session);
-30| 
-31| 
-32| 
-33| // Modules internes
-34| const { cleanOldData } = require('./modules/cleanup.js');
-35| const contactRoutes = require('./modules/routes/api-contact.js');
-36| const pool = require('./modules/postgresql.js');
-37| const htmlRoutes = require('./modules/routes/html.js');
-38| const adminRoutes = require('./modules/routes/admin.js');
-39| const authRoutes = require('./modules/routes/api-auth.js');
-40| const messagesRoutes = require('./modules/routes/api-messages.js');
-41| const maintenanceMiddleware = require('./modules/middleware/maintenance.js');
-42| const socketHandlers = require('./modules/socket-handlers.js');
-43| // Route de géocodage
-44| const geocodeRoutes = require('./modules/routes/geocode');
-45| const alertRoutes = require('./modules/routes/api-subscribe-alert.js');
-46| const alertMonitor = require('./modules/alert-monitor.js');
-47| 
-48| // JWT_SECRET pour les utilisateurs normaux
-49| const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
+1| ﻿// modules/socket-handlers.js
+2| module.exports = function (io, pool, sessionManager, updateActivity, REPORTS_THRESHOLD, REPORTS_WINDOW_MINUTES, TEMP_BAN_MINUTES) {
+3|     // ========== MAP POUR SUIVRE LES RECHARGEMENTS ==========
+4|     if (!global.reloadingUsers) {
+5|         global.reloadingUsers = new Map();
+6|     }
+7|     io.on('connection', (socket) => {
+8|         console.log('🔌 Nouvelle connexion :', socket.id);
+9| 
+10|         // 🔥 Flag pour savoir si la déconnexion est volontaire
+11|         let isManualDisconnect = false;
+12| 
+13|         socket.on('user join', async (userInfo) => {
+14|             console.log('📥 SOCKET - userInfo.origine reçu pour', userInfo.pseudo, ':', userInfo.origine);
+15| 
+16|             // ============================================================
+17|             // 👑 CAS ADMIN CHAT - Connexion invisible
+18|             // ============================================================
+19|             if (userInfo.isAdminChat === true) {
+20|                 console.log(`👑 Admin chat connecté: ${userInfo.pseudo} (invisible)`);
+21| 
+22|                 // Stocker dans l'objet users (mais avec flag invisible)
+23|                 users[socket.id] = {
+24|                     pseudo: userInfo.pseudo,
+25|                     isAdminChat: true,
+26|                     isVisible: false,  // Ne pas afficher dans la liste
+27|                     isAdmin: true,
+28|                     age: 'Admin',
+29|                     tendencies: 'Admin',
+30|                     bio: '👑 Administrateur',
+31|                     gender: 'Admin',
+32|                     purpose: 'Modération',
+33|                     origine: 'Admin',
+34|                     language: 'fr',
+35|                     socketId: socket.id,
+36|                     connectedAt: Date.now()
+37|                 };
+38| 
+39|                 // Rejoindre la room admin pour les actions de modération
+40|                 socket.join('admin-room');
+41| 
+42|                 // Envoyer une confirmation
+43|                 socket.emit('admin-chat-connected', {
+44|                     success: true,
+45|                     pseudo: userInfo.pseudo,
+46|                     message: '👑 Mode Admin Chat activé (invisible)'
+47|                 });
+48| 
+49|                 console.log(`👑 Admin ${userInfo.pseudo} connecté en mode invisible`);
 50| 
-51| // ==========  VARIABLES GLOBALES (chargées depuis la base) ==========
-52| // Ces valeurs sont des "fallbacks" en cas d'erreur de lecture de la base
-53| let TEST_MODE = false;
-54| let REPORTS_THRESHOLD = 2;
-55| let REPORTS_WINDOW_MINUTES = 60;
-56| let TEMP_BAN_MINUTES = 10;
-57| let LOGS_RETENTION_DAYS = 30;
-58| let REPORTS_RETENTION_DAYS = 60;
-59| let AUTO_CLEANUP_ENABLED = true;
-60| let VISITOR_CLEANUP_ENABLED = false;
-61| let INACTIVITY_MINUTES = 2;
-62| let CLEANUP_INTERVAL_MINUTES = 1;
-63| let DEV_MODE = true;
-64| 
-65| // Fonction pour charger la config depuis la base de données
-66| async function loadConfigFromDatabase() {
-67|     try {
-68|         console.log('📂 Chargement des paramètres depuis la base de données...');
-69|         const result = await pool.query('SELECT key, value FROM settings');
-70| 
-71|         if (result.rows.length === 0) {
-72|             console.warn('⚠️ Aucun paramètre trouvé dans la base, utilisation des valeurs par défaut.');
-73|             return;
-74|         }
+51|                 // 🔥 SORTIR IMMÉDIATEMENT pour ne PAS exécuter le traitement normal
+52|                 return;
+53|             }
+54| 
+55|             // ============================================================
+56|             // 🔵 TRAITEMENT NORMAL POUR LES UTILISATEURS LAMBDA
+57|             // ============================================================
+58|             if (!userInfo || !userInfo.pseudo) {
+59|                 socket.emit('join error', { error: 'Pseudo requis pour rejoindre' });
+60|                 return;
+61|             }
+62| 
+63|             // Récupérer l'IP du client
+64|             const clientIp = socket.handshake.headers['x-forwarded-for']
+65|                 ? socket.handshake.headers['x-forwarded-for'].split(',')[0]
+66|                 : socket.conn.remoteAddress;
+67| 
+68|             console.log(`📡 Connexion de ${userInfo.pseudo} depuis IP: ${clientIp}`);
+69| 
+70|             // 🔥 STOCKER LE PSEUDO SUR LA SOCKET
+71|             socket.userPseudo = userInfo.pseudo;
+72| 
+73|             // 🔥 Réinitialiser le flag à chaque connexion
+74|             isManualDisconnect = false;
 75| 
-76|         const settings = {};
-77|         result.rows.forEach(row => {
-78|             settings[row.key] = row.value;
-79|         });
-80| 
-81|         // Mettre à jour les variables globales
-82|         if (settings.test_mode !== undefined) TEST_MODE = settings.test_mode === 'true';
-83|         if (settings.reports_threshold !== undefined) REPORTS_THRESHOLD = parseInt(settings.reports_threshold) || 2;
-84|         if (settings.reports_window_minutes !== undefined) REPORTS_WINDOW_MINUTES = parseInt(settings.reports_window_minutes) || 60;
-85|         if (settings.temp_ban_minutes !== undefined) TEMP_BAN_MINUTES = parseInt(settings.temp_ban_minutes) || 10;
-86|         if (settings.logs_retention_days !== undefined) LOGS_RETENTION_DAYS = parseInt(settings.logs_retention_days) || 30;
-87|         if (settings.reports_retention_days !== undefined) REPORTS_RETENTION_DAYS = parseInt(settings.reports_retention_days) || 60;
-88|         if (settings.auto_cleanup_enabled !== undefined) AUTO_CLEANUP_ENABLED = settings.auto_cleanup_enabled === 'true';
-89|         if (settings.visitor_cleanup_enabled !== undefined) VISITOR_CLEANUP_ENABLED = settings.visitor_cleanup_enabled === 'true';
-90|         if (settings.inactivity_minutes !== undefined) INACTIVITY_MINUTES = parseInt(settings.inactivity_minutes) || 2;
-91|         if (settings.cleanup_interval_minutes !== undefined) CLEANUP_INTERVAL_MINUTES = parseInt(settings.cleanup_interval_minutes) || 1;
-92|         if (settings.dev_mode !== undefined) DEV_MODE = settings.dev_mode === 'true';
-93| 
-94| 
-95|     } catch (err) {
-96|         console.error('❌ Erreur lors du chargement des paramètres :', err.message);
-97|         console.warn('⚠️ Utilisation des valeurs par défaut (fallback).');
-98|     }
-99| }
-100| 
-101| 
+76|             // Récupérer la date de création depuis la base
+77|             let firstConnectedAt = Date.now();
+78|             // 🔥 RÉCUPÉRER LES MESSAGES EN ATTENTE
+79|             try {
+80|                 const pendingResult = await pool.query(
+81|                     'SELECT from_pseudo, message, created_at FROM pending_messages WHERE to_pseudo = $1 ORDER BY created_at ASC',
+82|                     [userInfo.pseudo]
+83|                 );
+84| 
+85|                 if (pendingResult.rows.length > 0) {
+86|                     console.log(`📨 ${pendingResult.rows.length} message(s) en attente pour ${userInfo.pseudo}`);
+87| 
+88|                     // Envoyer chaque message avec le flag isPending = true
+89|                     for (const msg of pendingResult.rows) {
+90|                         socket.emit('private message received', {
+91|                             fromPseudo: msg.from_pseudo,
+92|                             message: msg.message,
+93|                             timestamp: msg.created_at,
+94|                             isPending: true // 🔑 FLAG IMPORTANT
+95|                         });
+96|                     }
+97| 
+98|                     // 🔔 ÉMETTRE UNE ALERTE SPÉCIFIQUE POUR LES MESSAGES EN ATTENTE
+99|                     socket.emit('pending_alert', {
+100|                         count: pendingResult.rows.length
+101|                     });
 102| 
-103| 
-104| 
-105| // ==========  CONFIGURATION EXPRESS ==========
-106| const app = express();
-107| const server = http.createServer(app);
+103|                     // Supprimer les messages envoyés
+104|                     await pool.query(
+105|                         'DELETE FROM pending_messages WHERE to_pseudo = $1',
+106|                         [userInfo.pseudo]
+107|                     );
 108| 
-109| // Compression
-110| app.use(compression({
-111|     level: 6,
-112|     threshold: 1024,
-113|     filter: (req, res) => {
-114|         if (req.path === '/socket.io/') return false;
-115|         return compression.filter(req, res);
-116|     }
-117| }));
-118| 
-119| app.use(express.json());
-120| app.use(express.text({ type: 'text/plain' }));
-121| 
-122| const cookieParser = require('cookie-parser');
-123| app.use(cookieParser());
-124| 
-125| app.use(session({
-126|     store: new pgSession({
-127|         pool: pool,
-128|         tableName: 'session',
-129|         createTableIfMissing: false,
-130|         pruneSessionInterval: 60
-131|     }),
-132|     secret: 'un-super-secret-change-moi',
-133|     resave: false,
-134|     saveUninitialized: false,
-135|     cookie: {
-136|         httpOnly: true,
-137|         secure: false,
-138|         maxAge: 30 * 24 * 60 * 60 * 1000 // 30 jours
-139|     }
-140| }));
-141| 
-142| 
-143| app.use(maintenanceMiddleware(pool));
-144| contactRoutes(app);
-145| htmlRoutes(app, pool);
-146| messagesRoutes(app, pool);
-147| authRoutes(app, pool);
-148| geocodeRoutes(app);
-149| require('./modules/routes/api-block')(app, pool);
-150| alertRoutes(app, pool);
-151| 
-152| // Route pour la page de gestion des alertes
-153| app.get('/manage-alert', (req, res) => {
-154|     res.sendFile(path.join(__dirname, 'public', 'manage-alert.html'));
-155| });
-156| 
-157| // ========== CONFIGURATION DES FICHIERS STATIQUES ==========
-158| 
-159| // 🔥 Détermine les options selon le mode
-160| const staticOptions = {
-161|     setHeaders: function (res, path) {
-162|         if (path.endsWith('.css')) {
-163|             res.setHeader('Content-Type', 'text/css');
-164|         }
-165|     }
-166| };
-167| 
-168| // 🔥 Si DEV_MODE est activé, désactive le cache
-169| if (DEV_MODE === true) {
-170|     staticOptions.etag = false;           // Désactive ETag
-171|     staticOptions.maxAge = 0;             // Pas de mise en cache
-172|     staticOptions.lastModified = false;   // Désactive Last-Modified
-173| 
-174|     // Ajoute des headers anti-cache
-175|     staticOptions.setHeaders = function (res, path) {
-176|         if (path.endsWith('.css')) {
-177|             res.setHeader('Content-Type', 'text/css');
-178|         }
-179|         // 🔥 Headers anti-cache pour TOUS les fichiers
-180|         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
-181|         res.setHeader('Pragma', 'no-cache');
-182|         res.setHeader('Expires', '0');
-183|     };
-184| 
-185|     console.log('🔥 MODE DÉVELOPPEMENT ACTIF - Cache désactivé');
-186| } else {
-187|     console.log('✅ MODE PRODUCTION - Cache activé');
-188| }
-189| 
-190| // Applique la configuration
-191| app.use(express.static('/var/www/meetgay/public', staticOptions));
-192| app.use('/protected', express.static('protected'));
-193| app.use(express.json());
-194| 
-195| // 🔥 Middleware anti-cache (seulement en développement)
-196| if (DEV_MODE === true) {
-197|     app.use((req, res, next) => {
-198|         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
-199|         res.setHeader('Pragma', 'no-cache');
-200|         res.setHeader('Expires', '0');
-201|         next();
-202|     });
-203|     console.log('🔥 Middleware anti-cache activé');
-204| }
-205| 
-206| // ========== SOCKET.IO ==========
-207| const io = socketIo(server, {
-208|     cors: {
-209|         origin: "*",
-210|         methods: ["GET", "POST"],
-211|         credentials: true,
-212|         allowedHeaders: ["*"]
-213|     },
-214|     transports: ['websocket', 'polling'],
-215|     allowEIO3: true,
-216|     pingTimeout: 120000,    // ← 2 minutes (au lieu de 10)
-217|     pingInterval: 30000     // ← 30 secondes (au lieu de 1 minute)
-218| });
-219| 
-220| const sessionManager = require('./modules/session-manager.js')(io, pool, {
-221|     CLEANUP_INTERVAL: CLEANUP_INTERVAL_MINUTES * 60 * 1000,
-222|     INACTIVITY_THRESHOLD: INACTIVITY_MINUTES * 60 * 1000
-223| });
-224| 
-225| adminRoutes(app, pool, io);
-226| 
-227| // Gestion d'erreur (port déjà utilisé)
-228| server.on('error', (err) => {
-229|     if (err.code === 'EADDRINUSE') {
-230|         console.error(`❌ Port déjà utilisé. Tue l'autre processus et redémarre.`);
-231|         process.exit(1);
-232|     }
-233| });
-234| 
-235| // Initialiser la surveillance d’inactivité (5 minutes sans activité)
-236| const updateActivity = sessionManager.updateActivity;
-237| 
-238| // ========== LANCEMENT DES HANDLERS SOCKET (APRÈS io, users, constants) ==========
-239| socketHandlers(io, pool, sessionManager, updateActivity, REPORTS_THRESHOLD, REPORTS_WINDOW_MINUTES, TEMP_BAN_MINUTES);
-240| 
-241| // ========== NETTOYAGE AUTOMATIQUE ==========
-242| // Nettoyage des utilisateurs inactifs
-243| (async function initCleanup() {
-244|     await loadConfigFromDatabase(); // Recharge les paramètres depuis la base
-245|     if (VISITOR_CLEANUP_ENABLED) {
-246|         sessionManager.startCleanup();
-247|         console.log('🧹 Nettoyage des visiteurs déconnectés ACTIVÉ');
-248|     } else {
-249|         console.log('🧹 Nettoyage des visiteurs déconnectés DÉSACTIVÉ');
-250|     }
-251| })();
-252| 
-253| // Nettoyage auto du journal et signalements (toutes les 24h)
-254| if (AUTO_CLEANUP_ENABLED) {
-255|     setInterval(async () => {
-256|         await cleanOldData(pool, LOGS_RETENTION_DAYS, REPORTS_RETENTION_DAYS);
-257|     }, 24 * 60 * 60 * 1000);
-258|     console.log(`🧹 Nettoyage auto activé: journal ${LOGS_RETENTION_DAYS} jours, signalements ${REPORTS_RETENTION_DAYS} jours`);
-259| } else {
-260|     console.log(`🧹 Nettoyage auto DÉSACTIVÉ`);
-261| }
-262| 
-263| // ========== SURVEILLANCE DES ALERTES ==========
-264| const alertInterval = alertMonitor.startAlertMonitoring(pool, 60000);
-265| 
-266| // ========== DÉMARRAGE ==========
-267| const PORT = process.env.PORT || 3005;
-268| server.listen(PORT, '0.0.0.0', () => {
-269|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
-270| });
+109|                     console.log(`🗑️ Messages en attente supprimés pour ${userInfo.pseudo}`);
+110|                 }
+111|             } catch (err) {
+112|                 console.error('❌ Erreur récupération messages en attente:', err.message);
+113|             }
+114| 
+115|             // 🔥 SUPPRESSION DES ANCIENNES SESSIONS DU MÊME PSEUDO (remplace le delete de users)
+116|             try {
+117|                 await pool.query(
+118|                     `UPDATE users SET socket_id = NULL 
+119|              WHERE pseudo = $1 AND socket_id IS NOT NULL`,
+120|                     [userInfo.pseudo]
+121|                 );
+122|                 console.log(`🧹 Ancienne socket nettoyée pour ${userInfo.pseudo}`);
+123|             } catch (err) {
+124|                 console.error('Erreur nettoyage ancienne socket:', err.message);
+125|             }
+126| 
+127|             // Stocker le fingerprint et l'IP dans la base
+128|             if (userInfo.fingerprint) {
+129|                 try {
+130|                     const existingFp = await pool.query(
+131|                         'SELECT id FROM fingerprints WHERE fingerprint_hash = $1',
+132|                         [userInfo.fingerprint]
+133|                     );
+134| 
+135|                     let fingerprintId;
+136|                     if (existingFp.rows.length > 0) {
+137|                         fingerprintId = existingFp.rows[0].id;
+138|                         await pool.query(
+139|                             `UPDATE fingerprints
+140|                      SET last_seen = NOW(),
+141|                      notes = CASE
+142|                          WHEN notes IS NULL THEN $1
+143|                          ELSE notes || ' | ' || $1
+144|                      END
+145|                      WHERE id = $2`,
+146|                             [`IP: ${clientIp}`, fingerprintId]
+147|                         );
+148|                     } else {
+149|                         const newFp = await pool.query(
+150|                             `INSERT INTO fingerprints (fingerprint_hash, first_seen, last_seen, notes)
+151|                      VALUES ($1, NOW(), NOW(), $2)
+152|                      RETURNING id`,
+153|                             [userInfo.fingerprint, `IP: ${clientIp}`]
+154|                         );
+155|                         fingerprintId = newFp.rows[0].id;
+156|                     }
+157| 
+158|                     await pool.query(
+159|                         'UPDATE users SET fingerprint_id = $1, last_ip = $2, socket_id = $3, last_seen = NOW() WHERE pseudo = $4',
+160|                         [fingerprintId, clientIp, socket.id, userInfo.pseudo]
+161|                     );
+162| 
+163| 
+164|                     console.log(`🔒 Fingerprint lié pour ${userInfo.pseudo} (ID: ${fingerprintId})`);
+165|                 } catch (err) {
+166|                     console.error('Erreur stockage fingerprint/IP:', err);
+167|                 }
+168|             } else {
+169|                 // Même sans fingerprint, on met à jour socket_id
+170|                 await pool.query(
+171|                     'UPDATE users SET socket_id = $1, last_ip = $2, last_seen = NOW() WHERE pseudo = $3',
+172|                     [socket.id, clientIp, userInfo.pseudo]
+173|                 );
+174|                 console.warn(`⚠️ Pas de fingerprint pour ${userInfo.pseudo}`);
+175|             }
+176| 
+177|             // 🔥 RÉCUPÉRER LA LISTE DES CONNECTÉS DEPUIS LA BASE (remplace Object.values(users))
+178|             try {
+179|                 const result = await pool.query(`
+180|             SELECT 
+181|                 pseudo,
+182|                 age,
+183|                 COALESCE(NULLIF(origine, ''), 'NC') as origine,
+184|                 tendencies,
+185|                 gender,
+186|                 purpose,
+187|                 COALESCE(bio, 'Aucune présentation') as bio,
+188|                 language,
+189|                 location_city as "locationCity",
+190|                 location_commune as "locationCommune",
+191|                 location_postal_code as "locationPostalCode",
+192|                 location_province as "locationProvince",
+193|                 location_region as "locationRegion",
+194|                 location_country as "locationCountry",
+195|                 location_neighborhood as "locationNeighborhood",
+196|                 location_postcode_localities as "locationPostcodeLocalities",
+197|                 location_sublocality_level_1 as "locationSublocalityLevel1",
+198|                 location_sublocality_level_2 as "locationSublocalityLevel2",
+199|                 location_sublocality_level_3 as "locationSublocalityLevel3",
+200|                 location_sublocality_level_4 as "locationSublocalityLevel4",
+201|                 location_sublocality_level_5 as "locationSublocalityLevel5",
+202|                 location_admin_level_3 as "locationAdminLevel3",
+203|                 location_admin_level_4 as "locationAdminLevel4",
+204|                 location_admin_level_5 as "locationAdminLevel5",
+205|                 location_admin_level_6 as "locationAdminLevel6",
+206|                 location_admin_level_7 as "locationAdminLevel7",
+207|                 location_colloquial_area as "locationColloquialArea",
+208|                 location_intersection as "locationIntersection",
+209|                 location_lat as "locationLat",
+210|                 location_lng as "locationLng",
+211|                 socket_id as "socketId",
+212|                 EXTRACT(EPOCH FROM first_connected_at) * 1000 as "connectedAt"
+213|                 FROM users 
+214|                 WHERE socket_id IS NOT NULL 
+215|                 ORDER BY first_connected_at DESC
+216|                  `);
+217| 
+218|                 // Construire la liste avec la MÊME STRUCTURE qu'avant
+219|                 const usersList = result.rows.map(u => ({
+220|                     pseudo: u.pseudo,
+221|                     age: u.age,
+222|                     origine: (u.origine && u.origine !== 'undefined' && u.origine !== 'null') ? u.origine : 'NC',
+223|                     tendencies: u.tendencies,
+224|                     gender: u.gender,
+225|                     purpose: u.purpose,
+226|                     bio: u.bio || 'Aucune présentation',
+227|                     language: u.language || null,
+228|                     locationCity: u.locationCity || null,
+229|                     locationCommune: u.locationCommune || null,
+230|                     locationPostalCode: u.locationPostalCode || null,
+231|                     locationProvince: u.locationProvince || null,
+232|                     locationRegion: u.locationRegion || null,
+233|                     locationCountry: u.locationCountry || null,
+234|                     locationNeighborhood: u.locationNeighborhood || null,
+235|                     locationPostcodeLocalities: u.locationPostcodeLocalities || null,
+236|                     locationSublocalityLevel1: u.locationSublocalityLevel1 || null,
+237|                     locationSublocalityLevel2: u.locationSublocalityLevel2 || null,
+238|                     locationSublocalityLevel3: u.locationSublocalityLevel3 || null,
+239|                     locationSublocalityLevel4: u.locationSublocalityLevel4 || null,
+240|                     locationSublocalityLevel5: u.locationSublocalityLevel5 || null,
+241|                     locationAdminLevel3: u.locationAdminLevel3 || null,
+242|                     locationAdminLevel4: u.locationAdminLevel4 || null,
+243|                     locationAdminLevel5: u.locationAdminLevel5 || null,
+244|                     locationAdminLevel6: u.locationAdminLevel6 || null,
+245|                     locationAdminLevel7: u.locationAdminLevel7 || null,
+246|                     locationColloquialArea: u.locationColloquialArea || null,
+247|                     locationIntersection: u.locationIntersection || null,
+248|                     locationLat: u.locationLat || null,
+249|                     locationLng: u.locationLng || null,
+250|                     socketId: u.socketId,
+251|                     connectedAt: u.connectedAt || 0
+252|                 }));
+253| 
+254|                 // Envoyer la liste à TOUS les clients
+255|                 io.emit('update users', usersList);
+256| 
+257|                 console.log('📤 update users envoyé pour', userInfo.pseudo);
+258|                 console.log('📤 Envoi de join confirmed pour', userInfo.pseudo);
+259|                 socket.emit('join confirmed', { success: true, user: userInfo });
+260| 
+261|                 // 🔥 RÉCUPÉRER LES MESSAGES MANQUANTS À LA RECONNEXION
+262|                 try {
+263|                     // Récupérer tous les messages non lus (sans limite de temps)
+264|                     const result = await pool.query(
+265|                         `SELECT from_pseudo, message, created_at FROM messages 
+266|                         WHERE to_pseudo = $1
+267|                         ORDER BY created_at ASC`,
+268|                         [userInfo.pseudo]
+269|                     );
+270|                     if (result.rows.length > 0) {
+271|                         socket.emit('pending messages', result.rows);
+272|                         console.log(`📨 ${result.rows.length} messages manquants envoyés à ${userInfo.pseudo}`);
+273|                     }
+274|                 } catch (err) {
+275|                     console.error('❌ Erreur récupération messages manquants:', err);
+276|                 }
+277| 
+278|             } catch (err) {
+279|                 console.error('❌ Erreur récupération liste utilisateurs:', err);
+280|                 socket.emit('join error', { error: 'Erreur lors du chargement des utilisateurs' });
+281|             }
+282|         });
+283| 
+284| 
+285| 
+286| 
+287| 
+288|         // Heartbeat pour mettre à jour lastSeen
+289|         socket.on('heartbeat', async () => {
+290|             try {
+291|                 await pool.query(
+292|                     'UPDATE users SET last_seen = NOW() WHERE socket_id = $1',
+293|                     [socket.id]
+294|                 );
+295|             } catch (err) {
+296|                 console.error('❌ Erreur heartbeat:', err.message);
+297|             }
+298|             socket.emit('heartbeat_ack');
+299|         });
+300| 
+301|         socket.on('ping', async () => {
+302|             try {
+303|                 await pool.query(
+304|                     'UPDATE users SET last_seen = NOW() WHERE socket_id = $1',
+305|                     [socket.id]
+306|                 );
+307|             } catch (err) {
+308|                 console.error('❌ Erreur ping:', err.message);
+309|             }
+310|         });
+311| 
+312|         // ========== RÉCUPÉRATION MANUELLE DES MESSAGES EN ATTENTE ==========
+313|         socket.on('check-pending', async (data) => {
+314|             const { pseudo } = data;
+315|             if (!pseudo) {
+316|                 console.log('❌ check-pending sans pseudo');
+317|                 return;
+318|             }
+319| 
+320|             try {
+321|                 const pendingResult = await pool.query(
+322|                     'SELECT from_pseudo, message, created_at FROM pending_messages WHERE to_pseudo = $1 ORDER BY created_at ASC',
+323|                     [pseudo]
+324|                 );
+325| 
+326|                 if (pendingResult.rows.length > 0) {
+327|                     console.log(`📨 ${pendingResult.rows.length} message(s) en attente pour ${pseudo}`);
+328| 
+329|                     for (const msg of pendingResult.rows) {
+330|                         socket.emit('private message received', {
+331|                             fromPseudo: msg.from_pseudo,
+332|                             message: msg.message,
+333|                             timestamp: msg.created_at,
+334|                             isPending: true
+335|                         });
+336|                     }
+337| 
+338|                     // 🔔 ALERTE PENDING (son + enveloppe)
+339|                     socket.emit('pending_alert', {
+340|                         count: pendingResult.rows.length
+341|                     });
+342| 
+343|                     await pool.query(
+344|                         'DELETE FROM pending_messages WHERE to_pseudo = $1',
+345|                         [pseudo]
+346|                     );
+347| 
+348|                     console.log(`🗑️ Messages en attente supprimés pour ${pseudo}`);
+349|                 }
+350|             } catch (err) {
+351|                 console.error('❌ Erreur check-pending:', err.message);
+352|             }
+353|         });
+354| 
+355|         socket.on('private message', async (data) => {
+356|             const { toSocketId, message, fromPseudo } = data;
+357| 
+358|             try {
+359|                 // 1. Vérifier si le destinataire a un socket_id
+360|                 const result = await pool.query(
+361|                     'SELECT socket_id FROM users WHERE pseudo = $1',
+362|                     [toSocketId]
+363|                 );
+364| 
+365|                 if (result.rows.length === 0) {
+366|                     socket.emit('error', { message: 'Utilisateur non trouvé' });
+367|                     return;
+368|                 }
+369| 
+370|                 const targetSocketId = result.rows[0].socket_id;
+371| 
+372|                 // 2. VÉRIFIER SI LE SOCKET EST VRAIMENT ACTIF
+373|                 let socketActive = false;
+374|                 if (targetSocketId) {
+375|                     const targetSocket = io.sockets.sockets.get(targetSocketId);
+376|                     socketActive = !!targetSocket; // true si le socket existe vraiment
+377|                 }
+378| 
+379|                 if (socketActive) {
+380|                     // ✅ DESTINATAIRE CONNECTÉ → ENVOI IMMÉDIAT
+381|                     io.to(targetSocketId).emit('private message received', {
+382|                         fromPseudo: fromPseudo,
+383|                         fromSocketId: socket.id,
+384|                         message: message,
+385|                         timestamp: new Date(),
+386|                         isPending: false // Flag : message normal
+387|                     });
+388| 
+389|                     socket.emit('message sent confirmation', {
+390|                         message: message,
+391|                         toPseudo: toSocketId,
+392|                         timestamp: new Date()
+393|                     });
+394| 
+395|                     console.log(`💬 Message de ${fromPseudo} à ${toSocketId} envoyé immédiatement`);
+396|                 } else {
+397|                     // ❌ DESTINATAIRE EN VEILLE OU DÉCONNECTÉ → STOCKER EN PENDING
+398|                     await pool.query(
+399|                         'INSERT INTO pending_messages (from_pseudo, to_pseudo, message) VALUES ($1, $2, $3)',
+400|                         [fromPseudo, toSocketId, message]
+401|                     );
+402| 
+403|                     console.log(`📦 Message de ${fromPseudo} à ${toSocketId} stocké en pending (veille)`);
+404| 
+405|                     socket.emit('message sent confirmation', {
+406|                         message: message,
+407|                         toPseudo: toSocketId,
+408|                         timestamp: new Date(),
+409|                         pending: true
+410|                     });
+411|                 }
+412|             } catch (err) {
+413|                 console.error('❌ Erreur message privé:', err.message);
+414|                 socket.emit('error', { message: 'Erreur lors de l\'envoi du message' });
+415|             }
+416|         });
+417| 
+418| 
+419|         // Gestion des signalements utilisateur
+420|         socket.on('report user', async (data) => {
+421|             const { targetPseudo } = data;
+422| 
+423|             // Récupérer le pseudo du signaleur depuis users[socket.id]
+424|             // Récupérer le pseudo du signaleur depuis la base
+425|             let reporterPseudo;
+426|             try {
+427|                 const result = await pool.query(
+428|                     'SELECT pseudo FROM users WHERE socket_id = $1',
+429|                     [socket.id]
+430|                 );
+431|                 if (result.rows.length === 0) {
+432|                     socket.emit('report_error', { error: 'Utilisateur non identifié' });
+433|                     return;
+434|                 }
+435|                 reporterPseudo = result.rows[0].pseudo;
+436|             } catch (err) {
+437|                 console.error('❌ Erreur récupération reporter:', err.message);
+438|                 socket.emit('report_error', { error: 'Erreur serveur' });
+439|                 return;
+440|             }
+441| 
+442|             if (!targetPseudo || targetPseudo === reporterPseudo) {
+443|                 socket.emit('report_error', { error: 'Signalement invalide' });
+444|                 return;
+445|             }
+446| 
+447|             try {
+448|                 // 1. Insérer le signalement
+449|                 await pool.query(
+450|                     'INSERT INTO reports (reporter_pseudo, target_pseudo) VALUES ($1, $2)',
+451|                     [reporterPseudo, targetPseudo]
+452|                 );
+453| 
+454|                 // 2. Utiliser les constantes de server.js
+455|                 const threshold = REPORTS_THRESHOLD;
+456| 
+457|                 // 3. Récupérer la date de fin du dernier ban (si existe)
+458|                 const lastBan = await pool.query(
+459|                     `SELECT expires_at FROM temp_bans 
+460|                     WHERE user_pseudo = $1 
+461|                     ORDER BY expires_at DESC LIMIT 1`,
+462|                     [targetPseudo]
+463|                 );
+464| 
+465|                 let sinceDate = `NOW() - INTERVAL '${REPORTS_WINDOW_MINUTES} minutes'`;
+466|                 if (lastBan.rows.length > 0) {
+467|                     const lastBanExpiry = lastBan.rows[0].expires_at;
+468|                     // Prendre la date la plus récente entre la fin du dernier ban et la fenêtre
+469|                     sinceDate = `GREATEST(NOW() - INTERVAL '${REPORTS_WINDOW_MINUTES} minutes', '${lastBanExpiry.toISOString()}')`;
+470|                 }
+471| 
+472|                 const countRes = await pool.query(
+473|                     `SELECT COUNT(DISTINCT reporter_pseudo) FROM reports 
+474|                     WHERE target_pseudo = $1 
+475|                     AND created_at > ${sinceDate}`,
+476|                     [targetPseudo]
+477|                 );
+478|                 const reportCount = parseInt(countRes.rows[0].count);
+479| 
+480|                 // 4. Confirmation au signaleur
+481|                 socket.emit('report_confirmation', {
+482|                     targetPseudo,
+483|                     reportCount,
+484|                     threshold,
+485|                     willTrigger: reportCount >= threshold
+486|                 });
+487| 
+488|                 // 5. Si seuil atteint, déclencher temp_ban (10 minutes)
+489|                 if (reportCount >= threshold) {
+490|                     const expiresAt = new Date(Date.now() + TEMP_BAN_MINUTES * 60 * 1000);
+491| 
+492|                     await pool.query(
+493|                         `INSERT INTO temp_bans (user_pseudo, expires_at, reason) 
+494|                          VALUES ($1, $2, $3)
+495|                          ON CONFLICT (user_pseudo) DO UPDATE 
+496|                          SET expires_at = EXCLUDED.expires_at, reason = EXCLUDED.reason`,
+497|                         [targetPseudo, expiresAt, `${reportCount} signalements reçus`]
+498|                     );
+499| 
+500|                     // Journaliser l'action
+501|                     await pool.query(
+502|                         `INSERT INTO moderation_actions (admin_pseudo, action_type, target_pseudo, duration_minutes, reason)
+503|                          VALUES ('SYSTEM', 'temp_ban', $1, 10, $2)`,
+504|                         [targetPseudo, `Ban auto après ${reportCount} signalements`]
+505|                     );
+506| 
+507|                     // Déconnecter l'utilisateur cible s'il est connecté
+508|                     let targetSocketId = null;
+509|                     try {
+510|                         const targetResult = await pool.query(
+511|                             'SELECT socket_id FROM users WHERE pseudo = $1 AND socket_id IS NOT NULL',
+512|                             [targetPseudo]
+513|                         );
+514|                         if (targetResult.rows.length > 0) {
+515|                             targetSocketId = targetResult.rows[0].socket_id;
+516|                             io.to(targetSocketId).emit('force logout', {
+517|                                 reason: `Vous avez été banni temporairement (10 minutes) pour comportement abusif.`
+518|                             });
+519|                         }
+520|                     } catch (err) {
+521|                         console.error('❌ Erreur récupération socket cible:', err.message);
+522|                     }
+523| 
+524|                     // Notifier tous les admins connectés (optionnel)
+525|                     io.emit('new_report_auto_ban', {
+526|                         targetPseudo,
+527|                         reportCount,
+528|                         duration: 10
+529|                     });
+530| 
+531|                     console.log(`🔨 Auto-ban: ${targetPseudo} banni 10 min (${reportCount} signalements)`);
+532|                 }
+533|             } catch (err) {
+534|                 console.error('Erreur lors du signalement:', err);
+535|                 socket.emit('report_error', { error: 'Erreur serveur' });
+536|             }
+537|         });
+538| 
+539|         socket.on('manual disconnect', () => {
+540|             console.log(`🚪 Déconnexion volontaire demandée pour ${socket.userPseudo}`);
+541|             isManualDisconnect = true;
+542|             socket.disconnect(true);
+543|         });
+544| 
+545|         socket.on('disconnect', async () => {
+546|             const pseudo = socket.userPseudo;
+547|             if (!pseudo) return;
+548| 
+549|             // 1️⃣ VÉRIFIER SI C'EST UN RECHARGEMENT (F5)
+550|             if (global.reloadingUsers && global.reloadingUsers.has(pseudo)) {
+551|                 console.log(`🔄 Rechargement de ${pseudo} - Suppression IGNORÉE`);
+552|                 global.reloadingUsers.delete(pseudo);
+553|                 return;
+554|             }
+555| 
+556|             // 2️⃣ ICI ON NE SUPPRIME PAS !
+557|             // On marque juste "away" dans la base
+558|             await pool.query(
+559|                 'UPDATE users SET status = $1, last_seen = NOW() WHERE pseudo = $2',
+560|                 ['away', pseudo]
+561|             );
+562| 
+563|             console.log(`📱 ${pseudo} est en veille (status = away) - Aucune suppression`);
+564| 
+565|             // 3️⃣ Notifier les autres que l'utilisateur est absent
+566|             io.emit('user status', { pseudo, status: 'away' });
+567| 
+568|             // 4️⃣ ON NETTOIE LE FLAG rechargement SI PRÉSENT
+569|             if (global.reloadingUsers) {
+570|                 global.reloadingUsers.delete(pseudo);
+571|             }
+572|         });
+573| 
+574|         // ========== RÉINITIALISER LE COMPTEUR D'INACTIVITÉ ==========
+575|         socket.on('reset-inactivity', async () => {
+576|             const pseudo = socket.userPseudo;
+577|             if (pseudo) {
+578|                 try {
+579|                     await pool.query(
+580|                         'UPDATE users SET last_seen = NOW(), inactivity_warning_sent = false WHERE pseudo = $1',
+581|                         [pseudo]
+582|                     );
+583|                     //console.log(`🔄 Compteur d'inactivité réinitialisé pour ${pseudo}`);
+584|                 } catch (err) {
+585|                     console.error('❌ Erreur reset-inactivity:', err.message);
+586|                 }
+587|             }
+588|         });
+589| 
+590|     });
+591| 
+592| 
+593| };
 
 # ============================================
 # FIN DU FICHIER - 1 fichiers inclus
-# Généré le 2026-08-11 12:19:02
+# Généré le 2026-08-11 12:26:57
 # Tous les fichiers sont complets
 # ============================================
