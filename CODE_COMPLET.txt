@@ -1,6 +1,6 @@
 # MEETGAY - CODE COMPLET
-# Généré le 2026-08-13 13:10:39
-# 2 fichier(s) inclus
+# Généré le 2026-08-17 14:28:43
+# 1 fichier(s) inclus
 
 "⚠️ MODE ANALYSE TOTALE - Lecture exhaustive du code ci-dessous. 
 Vérifie chaque fichier listé dans le sommaire. 
@@ -8,1974 +8,298 @@ Ne fais pas de supposition, relis attentivement tout le contenu."
 
 # ========== SOMMAIRE ==========
 
-# 1. public\css\pages\chat.css
-# 2. public\chat.html
+# 1. server.js
 
 # ============================================
-# FILE: public\css\pages\chat.css
+# FILE: server.js
 # ============================================
 
-1| ﻿/* ========== BASE ========== */
-2| * {
-3|     margin: 0;
-4|     padding: 0;
-5|     box-sizing: border-box;
-6| }
-7| 
-8| html,
-9| body {
-10|     width: 100%;
-11|     overflow-x: auto;
-12| }
-13| 
-14| 
-15| body {
-16|     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-17|     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-18|     min-height: 100vh;
-19|     display: flex;
-20|     flex-direction: column;
-21| }
-22| 
-23| /* ========== HEADER ========== */
-24| .site-header {
-25|     background: rgba(0, 0, 0, 0.2);
-26|     backdrop-filter: blur(10px);
-27|     padding: 15px 30px;
-28|     border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-29| }
+1| // ============================================================
+2| // server.js - Cœur du chat MeetGay (version base de données)
+3| // ROLE: Point d'entrée - Monte les routes et lance le serveur
+4| // ============================================================
+5| 
+6| // ========== CHARGEMENT DES VARIABLES D'ENVIRONNEMENT ==========
+7| if (process.env.NODE_ENV !== 'production') {
+8|     try {
+9|         require('dotenv').config();
+10|         console.log('✅ dotenv chargé (environnement local)');
+11|     } catch (err) {
+12|         console.log('⚠️ dotenv non installé, utilisation des variables système');
+13|     }
+14| } else {
+15|     console.log('✅ Mode production, variables Render utilisées');
+16| }
+17| 
+18| // ========== IMPORTS ==========
+19| const express = require('express');
+20| const compression = require('compression');
+21| const http = require('http');
+22| const socketIo = require('socket.io');
+23| const jwt = require('jsonwebtoken');
+24| const { Pool } = require('pg');
+25| const { disconnectBannedUser } = require('./moderation');
+26| const path = require('path');
+27| const bcrypt = require('bcrypt');
+28| const session = require('express-session');
+29| const pgSession = require('connect-pg-simple')(session);
 30| 
-31| .header-content {
-32|     max-width: 1600px;
-33|     margin: 0 auto;
-34|     display: flex;
-35|     justify-content: space-between;
-36|     align-items: center;
-37|     flex-wrap: wrap;
-38|     gap: 15px;
-39| }
-40| 
-41| .logo h1 {
-42|     margin: 0;
-43|     font-size: 24px;
-44|     color: white;
-45|     text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
-46| }
+31| 
+32| 
+33| // Modules internes
+34| const { cleanOldData } = require('./modules/cleanup.js');
+35| const contactRoutes = require('./modules/routes/api-contact.js');
+36| const pool = require('./modules/postgresql.js');
+37| const htmlRoutes = require('./modules/routes/html.js');
+38| const adminRoutes = require('./modules/routes/admin.js');
+39| const authRoutes = require('./modules/routes/api-auth.js');
+40| const messagesRoutes = require('./modules/routes/api-messages.js');
+41| const maintenanceMiddleware = require('./modules/middleware/maintenance.js');
+42| const socketHandlers = require('./modules/socket-handlers.js');
+43| // Route de géocodage
+44| const geocodeRoutes = require('./modules/routes/geocode');
+45| const alertRoutes = require('./modules/routes/api-subscribe-alert.js');
+46| const alertMonitor = require('./modules/alert-monitor.js');
 47| 
-48| .logo p {
-49|     margin: 5px 0 0;
-50|     font-size: 12px;
-51|     color: rgba(255, 255, 255, 0.8);
-52| }
-53| 
-54| .user-badge {
-55|     background: rgba(255, 255, 255, 0.2);
-56|     padding: 8px 16px;
-57|     border-radius: 50px;
-58|     font-size: 14px;
-59|     color: white;
-60|     white-space: nowrap;
-61| }
-62| 
-63| .header-buttons {
-64|     display: flex;
-65|     gap: 0;
-66|     align-items: center;
-67| }
-68| 
-69| .donate-btn {
-70|     background: linear-gradient(135deg, #ffd89b, #c7e9fb);
-71|     color: #333;
-72|     padding: 8px 16px;
-73|     text-decoration: none;
-74|     font-weight: bold;
-75|     font-size: 14px;
-76|     border-radius: 30px 0 0 30px;
-77| }
-78| 
-79| .logout-btn {
-80|     background: rgba(255, 255, 255, 0.2);
-81|     color: white;
-82|     border: none;
-83|     padding: 8px 16px;
-84|     cursor: pointer;
-85|     font-weight: bold;
-86|     font-size: 14px;
-87|     border-radius: 0 30px 30px 0;
-88| }
-89| 
-90| .logout-btn:hover {
-91|     background: rgba(255, 255, 255, 0.35);
-92| }
+48| // JWT_SECRET pour les utilisateurs normaux
+49| const JWT_SECRET = process.env.JWT_SECRET || 'meetgay_super_secret_key_2026';
+50| 
+51| // ==========  VARIABLES GLOBALES (chargées depuis la base) ==========
+52| // Ces valeurs sont des "fallbacks" en cas d'erreur de lecture de la base
+53| let TEST_MODE = false;
+54| let REPORTS_THRESHOLD = 2;
+55| let REPORTS_WINDOW_MINUTES = 60;
+56| let TEMP_BAN_MINUTES = 10;
+57| let LOGS_RETENTION_DAYS = 30;
+58| let REPORTS_RETENTION_DAYS = 60;
+59| let AUTO_CLEANUP_ENABLED = true;
+60| let VISITOR_CLEANUP_ENABLED = false;
+61| let INACTIVITY_MINUTES = 2;
+62| let CLEANUP_INTERVAL_MINUTES = 1;
+63| let DEV_MODE = true;
+64| 
+65| // Fonction pour charger la config depuis la base de données
+66| async function loadConfigFromDatabase() {
+67|     try {
+68|         console.log('📂 Chargement des paramètres depuis la base de données...');
+69|         const result = await pool.query('SELECT key, value FROM settings');
+70| 
+71|         if (result.rows.length === 0) {
+72|             console.warn('⚠️ Aucun paramètre trouvé dans la base, utilisation des valeurs par défaut.');
+73|             return;
+74|         }
+75| 
+76|         const settings = {};
+77|         result.rows.forEach(row => {
+78|             settings[row.key] = row.value;
+79|         });
+80| 
+81|         // Mettre à jour les variables globales
+82|         if (settings.test_mode !== undefined) TEST_MODE = settings.test_mode === 'true';
+83|         if (settings.reports_threshold !== undefined) REPORTS_THRESHOLD = parseInt(settings.reports_threshold) || 2;
+84|         if (settings.reports_window_minutes !== undefined) REPORTS_WINDOW_MINUTES = parseInt(settings.reports_window_minutes) || 60;
+85|         if (settings.temp_ban_minutes !== undefined) TEMP_BAN_MINUTES = parseInt(settings.temp_ban_minutes) || 10;
+86|         if (settings.logs_retention_days !== undefined) LOGS_RETENTION_DAYS = parseInt(settings.logs_retention_days) || 30;
+87|         if (settings.reports_retention_days !== undefined) REPORTS_RETENTION_DAYS = parseInt(settings.reports_retention_days) || 60;
+88|         if (settings.auto_cleanup_enabled !== undefined) AUTO_CLEANUP_ENABLED = settings.auto_cleanup_enabled === 'true';
+89|         if (settings.visitor_cleanup_enabled !== undefined) VISITOR_CLEANUP_ENABLED = settings.visitor_cleanup_enabled === 'true';
+90|         if (settings.inactivity_minutes !== undefined) INACTIVITY_MINUTES = parseInt(settings.inactivity_minutes) || 2;
+91|         if (settings.cleanup_interval_minutes !== undefined) CLEANUP_INTERVAL_MINUTES = parseInt(settings.cleanup_interval_minutes) || 1;
+92|         if (settings.dev_mode !== undefined) DEV_MODE = settings.dev_mode === 'true';
 93| 
-94| /* ========== MAIN WRAPPER (3 COLONNES) ========== */
-95| .main-wrapper {
-96|     display: flex;
-97|     justify-content: space-between;
-98|     align-items: flex-start;
-99|     gap: 20px;
-100|     padding: 20px 120px;
-101|     width: 100%;
-102|     max-width: 100%;
-103|     box-sizing: border-box;
-104| }
-105| 
-106| .users-block {
-107|     display: flex;
-108|     gap: 0;
-109|     width: auto;
-110|     max-width: 100%;
-111|     flex-shrink: 0;
-112|     background: transparent;
-113|     justify-content: flex-start;
-114| }
-115| 
-116| /* ========== COLONNE GAUCHE - CONNECTÉS ========== */
-117| .users-panel {
-118|     width: 280px;
-119|     background: white;
-120|     border-radius: 16px;
-121|     padding: 15px;
-122|     height: 600px;
-123|     overflow-y: auto;
-124|     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-125|     flex-shrink: 0;
-126| }
-127| 
-128| .users-panel h3 {
-129|     margin: 0 0 15px 0;
-130|     font-size: 16px;
-131|     color: #667eea;
-132|     border-bottom: 2px solid #667eea;
-133|     padding-bottom: 8px;
-134| }
-135| 
-136| .online-count {
-137|     background: rgba(102, 126, 234, 0.2);
-138|     padding: 2px 8px;
-139|     border-radius: 20px;
-140|     font-size: 12px;
-141|     margin-left: 8px;
-142| }
-143| 
-144| .user-item {
-145|     padding: 10px;
-146|     margin: 8px 0;
-147|     background: #f8f9fa;
-148|     cursor: pointer;
-149|     border-radius: 12px;
-150|     font-size: 13px;
-151|     transition: all 0.2s;
-152|     border: 1px solid transparent;
-153| }
-154| 
-155| .user-item:hover {
-156|     background: #e9ecef;
-157|     transform: translateX(3px);
-158| }
-159| 
-160| .user-item strong {
-161|     color: #667eea;
-162| }
-163| 
-164| .user-item.current-target {
-165|     background: #667eea;
-166|     color: white;
-167| }
-168| 
-169| .user-item.current-target strong {
-170|     color: white;
-171| }
-172| 
-173| /* ========== COLONNE CENTRALE - CHAT ========== */
-174| .chat-panel {
-175|     width: 400px;
-176|     flex-shrink: 1;
-177|     min-width: 350px;
-178|     background: white;
-179|     border-radius: 16px;
-180|     padding: 20px;
-181|     height: 600px;
-182|     display: flex;
-183|     flex-direction: column;
-184|     position: relative;
-185|     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-186| }
-187| 
-188| .chat-flex {
-189|     display: flex;
-190|     width: 100%;
-191|     height: 100%;
-192|     position: relative;
-193|     overflow: hidden;
-194| }
-195| 
-196| .chat-main {
-197|     flex: 1;
-198|     display: flex;
-199|     flex-direction: column;
-200|     background: white;
-201|     position: relative;
-202|     z-index: 10;
-203|     border-radius: 12px;
-204| }
-205| 
-206| .contact-info {
-207|     background: #f0f0ff;
-208|     border-radius: 12px;
-209|     padding: 12px;
-210|     margin-bottom: 15px;
-211|     font-size: 13px;
-212|     display: none;
-213|     border-left: 4px solid #667eea;
-214| }
-215| 
-216| .contact-info .contact-name {
-217|     font-weight: bold;
-218|     font-size: 15px;
-219|     color: #667eea;
-220| }
-221| 
-222| .contact-info .contact-bio {
-223|     margin-top: 8px;
-224|     padding: 8px;
-225|     background: white;
-226|     border-radius: 8px;
-227|     font-style: italic;
-228| }
-229| 
-230| .message-area {
-231|     flex: 1;
-232|     background: #f8f9fa;
-233|     border-radius: 12px;
-234|     padding: 20px;
-235|     margin-bottom: 15px;
-236|     display: flex;
-237|     flex-direction: column;
-238|     gap: 12px;
-239|     align-items: center;
-240|     justify-content: center;
-241|     text-align: center;
-242|     overflow-y: auto;
-243| }
-244| 
-245| .empty-message {
-246|     color: #adb5bd;
-247|     font-style: italic;
-248| }
-249| 
-250| .input-area {
-251|     display: flex;
-252|     gap: 10px;
-253| }
-254| 
-255| #messageInput {
-256|     flex: 1;
-257|     padding: 12px 16px;
-258|     font-family: inherit;
-259|     border: 2px solid #e0e0e0;
-260|     border-radius: 50px;
-261|     font-size: 14px;
-262|     transition: border-color 0.2s;
-263| }
-264| 
-265| #messageInput:focus {
-266|     outline: none;
-267|     border-color: #667eea;
-268| }
-269| 
-270| #sendBtn {
-271|     padding: 12px 24px;
-272|     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-273|     color: white;
-274|     border: none;
-275|     border-radius: 50px;
-276|     font-family: inherit;
-277|     cursor: pointer;
-278|     font-weight: bold;
-279|     transition: transform 0.2s, box-shadow 0.2s;
-280| }
-281| 
-282| #sendBtn:hover:not(:disabled) {
-283|     transform: translateY(-2px);
-284|     box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
-285| }
-286| 
-287| #sendBtn:disabled {
-288|     opacity: 0.5;
-289|     cursor: not-allowed;
-290| }
-291| 
-292| /* ========== HISTORIQUE COULISSANT ========== */
-293| .history-inner {
-294|     position: absolute;
-295|     right: 0;
-296|     top: 0;
-297|     bottom: 0;
-298|     width: 280px;
-299|     background: #f8f9fa;
-300|     border-radius: 12px 0 0 12px;
-301|     box-shadow: -4px 0 15px rgba(0, 0, 0, 0.15);
-302|     transform: translateX(100%);
-303|     transition: transform 0.3s ease-in-out;
-304|     display: flex;
-305|     flex-direction: column;
-306|     z-index: 20;
-307|     border-left: 1px solid #ddd;
-308| }
-309| 
-310| .history-inner.open {
-311|     transform: translateX(0);
-312| }
-313| 
-314| .history-tab {
-315|     position: absolute;
-316|     right: 0px;
-317|     top: 50%;
-318|     transform: translateY(-50%);
-319|     background: #6e64c5;
-320|     color: white;
-321|     padding: 12px 0px;
-322|     border-radius: 12px 12px 12px 12px;
-323|     cursor: pointer;
-324|     writing-mode: vertical-rl;
-325|     text-orientation: mixed;
-326|     font-size: 0.9rem;
-327|     font-weight: bold;
-328|     z-index: 25;
-329|     box-shadow: -2px 2px 8px rgba(0, 0, 0, 0.2);
-330|     transition: all 0.2s;
-331|     display: flex;
-332|     align-items: center;
-333|     justify-content: center;
-334|     white-space: nowrap;
-335| }
-336| 
-337| .history-tab:hover {
-338|     background: #6779e4;
-339|     right: 0px;
-340| }
-341| 
-342| .close-slider {
-343|     display: none;
-344| }
-345| 
-346| .slider-header {
-347|     padding: 15px;
-348|     border-bottom: 1px solid #ddd;
-349|     display: flex;
-350|     justify-content: space-between;
-351|     align-items: center;
-352| }
-353| 
-354| .slider-content {
-355|     flex: 1;
-356|     overflow-y: auto;
-357|     padding: 12px;
-358|     display: flex;
-359|     flex-direction: column;
-360|     gap: 12px;
-361| }
-362| 
-363| /* ========== ENVELOPPE ========== */
-364| .envelope {
-365|     position: absolute;
-366|     bottom: 80px;
-367|     right: 20px;
-368|     font-size: 40px;
-369|     cursor: pointer;
-370|     background: white;
-371|     border-radius: 50%;
-372|     padding: 12px;
-373|     box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
-374|     transition: transform 0.2s;
-375|     z-index: 100;
-376| }
-377| 
-378| .envelope:hover {
-379|     transform: scale(1.05);
-380| }
-381| 
-382| .envelope.blinking {
-383|     animation: blink 0.8s infinite;
-384| }
-385| 
-386| @keyframes blink {
-387|     0% {
-388|         opacity: 1;
-389|         background: white;
-390|     }
-391| 
-392|     50% {
-393|         opacity: 0.5;
-394|         background: #ffcc00;
-395|     }
-396| 
-397|     100% {
-398|         opacity: 1;
-399|         background: white;
-400|     }
-401| }
-402| 
-403| /* Icônes d'action utilisateur (⚠️ et 🚫/🔓) */
-404| .user-action-container {
-405|     background-color: rgba(50, 70, 197, 0.616) !important;
-406|     border-radius: 20px;
-407|     padding: 4px 8px;
-408|     margin-left: 8px;
-409|     display: inline-block;
-410| }
-411| 
-412| .user-action-icon {
-413|     font-size: 2.1rem;
-414|     margin: 0 2px;
-415|     cursor: pointer;
-416|     opacity: 1 !important;
-417|     transition: all 0.2s ease;
-418| }
-419| 
-420| .user-action-icon:hover {
-421|     opacity: 1;
-422|     transform: scale(1.05);
-423| }
-424| 
-425| /* Pour la première icône (⚠️) */
-426| .user-action-icon:first-child {
-427|     transform: translateY(-2px) !important;
-428|     display: inline-block;
-429|     font-size: 1.8rem;
-430|     /* Augmente la taille */
-431|     transform: scale(1.2);
-432| 
-433| }
-434| 
-435| /* Pour la deuxième icône (🚫 ou 🔓) */
-436| .user-action-icon:last-child {
-437|     transform: translateY(-2px) !important;
-438|     display: inline-block;
-439|     font-size: 1.8rem;
-440|     /* Augmente la taille */
-441|     transform: scale(1.2);
-442| }
-443| 
-444| /* ========== COLONNE DROITE - NOUVEAU BLOC (fenêtre + menus) ========== */
-445| .new-block {
-446|     display: flex;
-447|     width: 580px;
-448|     max-width: 100%;
-449|     flex-shrink: 1;
-450|     background: transparent;
-451|     justify-content: flex-end;
-452|     min-height: 600px;
-453| }
-454| 
-455| /* Grande fenêtre (à gauche dans le bloc) */
-456| .new-window {
-457|     display: flex;
-458|     flex-direction: row;
-459|     /* ← contenu à gauche, menu à droite */
-460|     width: 100%;
-461|     height: 600px;
-462|     background: white;
-463|     border-radius: 16px;
-464|     padding: 20px;
-465|     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-466|     overflow: hidden;
-467|     position: relative;
-468| }
-469| 
-470| .new-placeholder,
-471| #windowContent {
-472|     flex: 1 1 auto;
-473|     /* ← grandit, rétrécit si besoin */
-474|     overflow-y: auto;
-475|     /* ← scroll si contenu trop long */
-476|     padding-right: 15px;
-477|     min-height: 0;
-478|     /* ← permet de rétrécir */
-479|     box-sizing: border-box;
-480| }
-481| 
-482| .new-placeholder i {
-483|     font-size: 64px;
-484|     margin-bottom: 20px;
-485| }
-486| 
-487| .new-content {
-488|     flex: 1;
-489|     display: flex;
-490|     flex-direction: column;
-491|     overflow-y: auto;
-492|     padding-right: 15px;
-493| }
-494| 
-495| /* Bouton hamburger - caché sur desktop */
-496| .menu-toggle-btn {
-497|     display: none;
-498|     position: absolute;
-499|     top: 15px;
-500|     right: 15px;
-501|     background: #667eea;
-502|     color: white;
-503|     border: none;
-504|     border-radius: 50%;
-505|     width: 42px;
-506|     height: 42px;
-507|     font-size: 22px;
-508|     cursor: pointer;
-509|     z-index: 30;
-510|     box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
-511|     align-items: center;
-512|     justify-content: center;
-513| }
-514| 
-515| /* Menus (à droite dans le bloc, collés au bord) */
-516| .new-menus {
-517|     flex: 0 0 180px;
-518|     width: 180px;
-519|     min-width: 180px;
-520|     max-width: 180px;
-521|     padding: 15px;
-522|     padding-left: 15px;
-523|     border-left: 1px solid #e0e0e0;
-524|     display: flex;
-525|     flex-direction: column;
-526|     overflow-y: auto;
-527|     background: transparent;
-528|     border-radius: 0;
-529|     box-shadow: none;
-530|     box-sizing: border-box;
-531| }
-532| 
-533| .new-menus h3 {
-534|     margin: 0 0 15px 0;
-535|     font-size: 16px;
-536|     color: #667eea;
-537|     border-bottom: 2px solid #667eea;
-538|     padding-bottom: 8px;
-539| }
-540| 
-541| .new-menus-list {
-542|     flex: 1;
-543|     display: flex;
-544|     flex-direction: column;
-545|     gap: 8px;
-546| }
-547| 
-548| .new-menu-item {
-549|     flex-shrink: 0;
-550|     background: #f8f9fa;
-551|     border-radius: 12px;
-552|     padding: 10px 12px;
-553|     cursor: pointer;
-554|     transition: all 0.2s;
-555|     border: 1px solid #e0e0e0;
-556|     display: flex;
-557|     align-items: center;
-558|     gap: 12px;
-559| }
-560| 
-561| .new-menu-item:hover {
-562|     background: #667eea;
-563|     color: white;
-564|     transform: translateX(-3px);
-565| }
-566| 
-567| .new-menu-item i {
-568|     width: 24px;
-569|     font-size: 18px;
-570|     color: #667eea;
-571| }
-572| 
-573| .new-menu-item:hover i {
-574|     color: white;
-575| }
-576| 
-577| .new-menu-item span {
-578|     font-size: 14px;
-579|     font-weight: 500;
-580| }
-581| 
-582| .new-ad-space {
-583|     margin-top: 15px;
-584|     background: #f1f3f5;
-585|     border-radius: 12px;
-586|     padding: 10px;
-587|     text-align: center;
-588|     font-size: 11px;
-589|     color: #888;
-590|     border: 1px dashed #ccc;
-591| }
-592| 
-593| .dynamic-content {
-594|     text-align: left;
-595|     width: 100%;
-596| }
-597| 
-598| .dynamic-content h3 {
-599|     color: #667eea;
-600|     margin-bottom: 15px;
-601|     border-bottom: 1px solid #ddd;
-602|     padding-bottom: 8px;
-603| }
-604| 
-605| .dynamic-content button {
-606|     background: #667eea;
-607|     color: white;
-608|     border: none;
-609|     padding: 8px 16px;
-610|     border-radius: 30px;
-611|     cursor: pointer;
-612|     margin-top: 15px;
-613| }
-614| 
-615| 
-616| 
-617| /* ========== HISTORIQUE DES MESSAGES ========== */
-618| 
-619| /* Chaque conversation dans l'historique */
-620| .history-conversation {
-621|     background: white;
-622|     border-radius: 12px;
-623|     padding: 12px;
-624|     border: 1px solid #e9ecef;
-625|     transition: all 0.2s;
-626|     cursor: pointer;
-627| }
-628| 
-629| .history-conversation:hover {
-630|     background: #f8f9fa;
-631|     transform: translateX(-3px);
-632|     border-left: 3px solid #667eea;
-633| }
-634| 
-635| /* En-tête de la conversation */
-636| .history-conversation-header {
-637|     display: flex;
-638|     justify-content: space-between;
-639|     align-items: center;
-640|     margin-bottom: 8px;
-641| }
-642| 
-643| .history-conversation-name {
-644|     font-weight: bold;
-645|     color: #667eea;
-646|     font-size: 14px;
-647| }
-648| 
-649| .history-conversation-date {
-650|     font-size: 10px;
-651|     color: #adb5bd;
-652| }
-653| 
-654| /* Dernier message (aperçu) */
-655| .history-last-message {
-656|     font-size: 12px;
-657|     color: #6c757d;
-658|     white-space: nowrap;
-659|     overflow: hidden;
-660|     text-overflow: ellipsis;
-661|     margin-bottom: 8px;
-662| }
-663| 
-664| /* Badge de messages non lus */
-665| .history-unread-badge {
-666|     background: #dc3545;
-667|     color: white;
-668|     border-radius: 30px;
-669|     padding: 2px 8px;
-670|     font-size: 10px;
-671|     font-weight: bold;
-672|     display: inline-block;
-673| }
-674| 
-675| /* Messages individuels dans l'historique (quand déployé) */
-676| .history-messages-list {
-677|     margin-top: 10px;
-678|     padding-top: 8px;
-679|     border-top: 1px dashed #e0e0e0;
-680|     display: none;
-681|     flex-direction: column;
-682|     gap: 8px;
-683| }
-684| 
-685| .history-messages-list.open {
-686|     display: flex;
-687| }
-688| 
-689| .history-message-item {
-690|     font-size: 11px;
-691|     padding: 6px 10px;
-692|     border-radius: 10px;
-693|     background: #f8f9fa;
-694| }
-695| 
-696| .history-message-item.sent {
-697|     background: #e3f2fd;
-698|     text-align: right;
-699| }
-700| 
-701| .history-message-item.received {
-702|     background: #f5f5f5;
-703| }
-704| 
-705| .history-message-text {
-706|     word-wrap: break-word;
-707| }
-708| 
-709| .history-message-time {
-710|     font-size: 9px;
-711|     color: #adb5bd;
-712|     margin-top: 3px;
-713| }
-714| 
-715| /* Messages dans l'historique - version améliorée */
-716| .history-message-sender {
-717|     font-weight: bold;
-718|     font-size: 11px;
-719|     margin-bottom: 3px;
-720|     color: #667eea;
-721| }
-722| 
-723| .history-message-item.sent .history-message-sender {
-724|     color: #2c7a4d;
-725| }
-726| 
-727| .history-message-item.received .history-message-sender {
-728|     color: #6c757d;
-729| }
-730| 
-731| /* ========== MESSAGES DANS LE CHAT ========== */
-732| 
-733| /* Bulle de message */
-734| .message-bubble {
-735|     max-width: 75%;
-736|     padding: 12px 18px;
-737|     border-radius: 20px;
-738|     font-size: 15px;
-739|     line-height: 1.4;
-740|     word-wrap: break-word;
-741|     position: relative;
-742|     animation: fadeIn 0.2s ease;
-743| }
-744| 
-745| /* Message envoyé (moi) */
-746| .message-mine {
-747|     background: linear-gradient(135deg, #667eea, #764ba2);
-748|     color: white;
-749|     align-self: flex-end;
-750|     border-bottom-right-radius: 4px;
-751| }
-752| 
-753| /* Message reçu (lui) */
-754| .message-theirs {
-755|     background: white;
-756|     color: #333;
-757|     align-self: flex-start;
-758|     border-bottom-left-radius: 4px;
-759|     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
-760|     border: 1px solid #e0e0e0;
-761| }
-762| 
-763| /* Nom de l'expéditeur (pour les messages reçus) */
-764| .message-sender {
-765|     font-weight: bold;
-766|     font-size: 11px;
-767|     margin-bottom: 4px;
-768|     color: #667eea;
-769| }
-770| 
-771| /* Heure du message */
-772| .message-time {
-773|     font-size: 10px;
-774|     margin-top: 5px;
-775|     opacity: 0.6;
-776|     text-align: right;
-777| }
-778| 
-779| /* Animation d'apparition */
-780| @keyframes fadeIn {
-781|     from {
-782|         opacity: 0;
-783|         transform: translateY(5px);
-784|     }
-785| 
-786|     to {
-787|         opacity: 1;
-788|         transform: translateY(0);
-789|     }
-790| }
-791| 
-792| .message-area {
-793|     gap: 16px;
-794| }
-795| 
-796| /* ========== RESPONSIVE CHAT ========== */
-797| 
-798| /* Point de rupture 1 : 1300px - rétrécissement progressif */
-799| @media (max-width: 1300px) {
-800|     .main-wrapper {
-801|         display: flex;
-802|         justify-content: space-between;
-803|         align-items: flex-start;
-804|         gap: 20px;
-805|         padding: 20px 30px;
-806|         width: 100%;
-807|         max-width: 100%;
-808|         box-sizing: border-box;
-809|     }
-810| 
-811|     .users-panel {
-812|         width: 280px;
-813|         min-width: 200px;
-814|         flex-shrink: 1;
-815|         height: 550px;
-816|     }
-817| 
-818|     .chat-panel {
-819|         width: 350px;
-820|         height: 550px;
-821|     }
-822| 
-823|     .new-block {
-824|         display: flex;
-825|         gap: 0;
-826|         width: 580px;
-827|         max-width: 100%;
-828|         flex-shrink: 1;
-829|         background: transparent;
-830|         justify-content: flex-end;
-831|         height: 550px;
-832|         min-height: 550px;
-833|     }
-834| 
-835|     .new-window {
-836|         display: flex;
-837|         justify-content: flex-end;
-838|         width: 100%;
-839|         height: 550px !important;
-840|         min-height: 550px !important;
-841|         background: white;
-842|         border-radius: 16px 0 0 16px;
-843|         /* ← arrondi à gauche */
-844|         padding: 20px;
-845|         box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
-846|         overflow: hidden;
-847|         position: relative;
-848|     }
-849| 
-850|     .new-menus {
-851|         width: 150px;
-852|         height: 550px !important;
-853|         min-height: 550px !important;
-854|     }
-855| }
-856| 
-857| /* Point de rupture 2 : entre 710px et 1160px - 2 colonnes puis colonne */
-858| @media (min-width: 710px) and (max-width: 1160px) {
-859|     .main-wrapper {
-860|         flex-wrap: wrap;
-861|         justify-content: center;
-862|         gap: 20px;
-863|         padding: 20px 30px;
-864|         width: 100%;
-865|         max-width: 100%;
-866|         box-sizing: border-box;
-867|     }
-868| 
-869|     .users-panel {
-870|         width: 280px;
-871|         min-width: 200px;
-872|         flex-shrink: 1;
-873|         height: 550px;
-874|     }
-875| 
-876|     .chat-panel {
-877|         width: 350px;
-878|         height: 550px;
-879|     }
-880| 
-881|     .new-block {
-882|         flex: 1 1 100%;
-883|         max-width: calc(280px + 350px + 20px);
-884|         width: 100%;
-885|         min-width: unset;
-886|         flex-shrink: 0;
-887|         height: 550px;
-888|         display: flex;
-889|         gap: 0;
-890|         background: transparent;
-891|         justify-content: flex-end;
-892|     }
-893| 
-894|     .new-window {
-895|         min-width: 280px;
-896|         height: 550px;
-897|     }
-898| 
-899|     .new-menus {
-900|         width: 150px;
-901|         height: 550px;
-902|     }
-903| }
-904| 
-905| /* Point de rupture 3 : en dessous de 710px - colonnes*/
-906| @media (max-width: 710px) {
-907|     .main-wrapper {
-908|         flex-direction: column;
-909|         align-items: center;
-910|         justify-content: center;
-911|         gap: 30px;
-912|         padding: 20px 15px;
-913|         width: 100%;
-914|         max-width: 100%;
-915|         box-sizing: border-box;
-916|     }
-917| 
-918|     .users-block {
-919|         order: 1;
-920|         width: 100%;
-921|         max-width: 100%;
-922|         padding: 0px;
-923|     }
-924| 
-925|     .users-panel {
-926|         width: 100%;
-927|         max-width: 100%;
-928|         min-width: unset;
-929|         height: auto;
-930|         max-height: 350px;
-931|         flex-shrink: 1;
-932|         padding: 15px;
-933|         box-sizing: border-box;
-934|     }
-935| 
-936|     .chat-panel {
-937|         order: 2;
-938|         width: 100%;
-939|         max-width: 100%;
-940|         height: 450px;
-941|         min-width: unset;
-942|         padding: 15px;
-943|         box-sizing: border-box;
-944|     }
-945| 
-946|     .new-block {
-947|         order: 3;
-948|         display: flex;
-949|         flex-direction: column;
-950|         width: 100%;
-951|         max-width: 100%;
-952|         min-width: unset;
-953|         height: auto;
-954|         min-height: 500px;
-955|         flex-shrink: 1;
-956|         gap: 15px;
-957|         background: transparent;
-958|         justify-content: flex-start;
-959|         padding: 0;
-960|     }
-961| 
-962|     .new-window {
-963|         width: 100%;
-964|         min-width: unset;
-965|         height: 400px;
-966|         border-radius: 16px;
-967|         flex: 1 1 auto;
-968|         padding: 15px;
-969|         box-sizing: border-box;
-970|         position: relative;
-971|         /* ← pour le hamburger */
-972|     }
-973| 
-974|     .new-menus {
-975|         width: 100%;
-976|         min-width: unset;
-977|         height: auto;
-978|         max-height: 200px;
-979|         border-radius: 16px;
-980|         flex-direction: row;
-981|         flex-wrap: wrap;
-982|         gap: 8px;
-983|         padding: 15px;
-984|         box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
-985|         overflow-y: auto;
-986|         box-sizing: border-box;
-987|     }
-988| 
-989|     .new-menus h3 {
-990|         width: 100%;
-991|         margin-bottom: 10px;
-992|         font-size: 14px;
-993|     }
-994| 
-995|     .new-menus-list {
-996|         flex-direction: row;
-997|         flex-wrap: wrap;
-998|         gap: 6px;
-999|         width: 100%;
-1000|     }
-1001| 
-1002|     .new-menu-item {
-1003|         flex: 1 1 calc(50% - 6px);
-1004|         min-width: 80px;
-1005|         width: auto;
-1006|         padding: 8px 10px;
-1007|         font-size: 13px;
-1008|         gap: 8px;
-1009|     }
-1010| 
-1011|     .new-menu-item i {
-1012|         font-size: 14px;
-1013|         width: 18px;
-1014|     }
-1015| 
-1016|     .new-menu-item span {
-1017|         font-size: 12px;
-1018|     }
-1019| 
-1020|     .new-placeholder {
-1021|         min-height: 200px;
-1022|     }
-1023| 
-1024|     .new-placeholder i {
-1025|         font-size: 40px;
-1026|     }
-1027| 
-1028|     /* BOUTON HAMBURGER - visible sur mobile */
-1029|     .menu-toggle-btn {
-1030|         display: flex !important;
-1031|         position: absolute;
-1032|         top: 10px;
-1033|         right: 10px;
-1034|         background: #667eea;
-1035|         color: white;
-1036|         border: none;
-1037|         border-radius: 50%;
-1038|         width: 38px;
-1039|         height: 38px;
-1040|         font-size: 18px;
-1041|         cursor: pointer;
-1042|         z-index: 30;
-1043|         box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
-1044|         align-items: center;
-1045|         justify-content: center;
-1046|     }
-1047| 
-1048|     .menu-toggle-btn.open {
-1049|         background: #dc3545;
-1050|     }
-1051| 
-1052|     /* Le menu en overlay (hamburger) */
-1053|     .new-window .new-menus {
-1054|         position: absolute;
-1055|         top: 55px;
-1056|         right: 10px;
-1057|         width: 220px;
-1058|         height: auto;
-1059|         max-height: 300px;
-1060|         background: white;
-1061|         border-radius: 12px;
-1062|         padding: 15px;
-1063|         box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
-1064|         display: none;
-1065|         z-index: 20;
-1066|         border: 1px solid #e0e0e0;
-1067|         flex-direction: column;
-1068|         flex-wrap: nowrap;
-1069|         overflow-y: auto;
-1070|     }
-1071| 
-1072|     .new-window .new-menus.open {
-1073|         display: block;
-1074|     }
-1075| 
-1076|     .new-window .new-menus h3 {
-1077|         margin-bottom: 10px;
-1078|         font-size: 14px;
-1079|     }
-1080| 
-1081|     .new-window .new-menus-list {
-1082|         flex-direction: column;
-1083|         flex-wrap: nowrap;
-1084|         gap: 6px;
-1085|     }
-1086| 
-1087|     .new-window .new-menu-item {
-1088|         flex: 0 0 auto;
-1089|         min-width: unset;
-1090|         width: 100%;
-1091|         padding: 8px 10px;
-1092|         font-size: 13px;
-1093|     }
-1094| 
-1095| 
-1096| 
-1097|     /* Pour les tout petits écrans (< 400px) */
-1098|     @media (max-width: 400px) {
-1099|         #messageInput {
-1100|             padding: 10px 12px;
-1101|             font-size: 13px;
-1102|         }
-1103| 
-1104|         #sendBtn {
-1105|             padding: 10px;
-1106|             font-size: 13px;
-1107|         }
-1108| 
-1109|         .input-area {
-1110|             display: flex;
-1111|             flex-direction: column;
-1112|             /* ← passage en colonne */
-1113|             gap: 10px;
-1114|             width: 100%;
-1115|             padding: 10px 0;
-1116|         }
-1117| 
-1118|         #messageInput {
-1119|             width: 100%;
-1120|             padding: 12px 14px;
-1121|             font-size: 14px;
-1122|             border-radius: 30px;
-1123|             box-sizing: border-box;
-1124|         }
-1125| 
-1126|         #sendBtn {
-1127|             width: 100%;
-1128|             padding: 12px;
-1129|             font-size: 14px;
-1130|             border-radius: 30px;
-1131|             justify-content: center;
-1132|         }
-1133|     }
-1134| }
-1135| 
-1136| 
-1137| 
-1138| 
-1139| 
-1140| 
-1141| 
-1142| 
-1143| 
-1144| /* Point de rupture 3 : entre 577px et 768px - tablette verticale 
-1145| @media (min-width: 577px) and (max-width: 768px) {
-1146|     .main-wrapper {
-1147|         flex-direction: column;
-1148|         align-items: center;
-1149|         gap: 20px;
-1150|         padding: 15px;
-1151|     }
-1152| 
-1153|     .users-panel {
-1154|         width: 100%;
-1155|         max-width: 400px;
-1156|         height: auto;
-1157|         max-height: 350px;
-1158|     }
-1159| 
-1160|     .chat-panel {
-1161|         width: 100%;
-1162|         max-width: 550px;
-1163|         height: 500px;
-1164|     }
-1165| 
-1166|     .new-block {
-1167|         width: 100%;
-1168|         max-width: 550px;
-1169|         flex-direction: column;
-1170|     }
-1171| 
-1172|     .new-window {
-1173|         width: 100%;
-1174|         border-radius: 16px;
-1175|         min-height: 350px;
-1176|     }
-1177| 
-1178|     .new-menus {
-1179|         width: 100%;
-1180|         border-radius: 16px;
-1181|         margin-top: 15px;
-1182|     }
-1183| }*/
-1184| 
-1185| /* Point de rupture 4 : entre 481px et 576px - grands mobiles 
-1186| @media (min-width: 481px) and (max-width: 576px) {
-1187|     .main-wrapper {
-1188|         flex-direction: column;
-1189|         align-items: center;
-1190|         gap: 15px;
-1191|         padding: 10px;
-1192|     }
-1193| 
-1194|     .users-panel {
-1195|         width: 100%;
-1196|         max-width: 350px;
-1197|         height: auto;
-1198|         max-height: 300px;
-1199|         padding: 12px;
-1200|     }
-1201| 
-1202|     .chat-panel {
-1203|         width: 100%;
-1204|         height: 450px;
-1205|         padding: 12px;
-1206|     }
-1207| 
-1208|     .new-block {
-1209|         width: 100%;
-1210|         flex-direction: column;
-1211|     }
-1212| 
-1213|     .new-window {
-1214|         width: 100%;
-1215|         min-height: 300px;
-1216|         padding: 15px;
-1217|         border-radius: 16px;
-1218|     }
-1219| 
-1220|     .new-menus {
-1221|         width: 100%;
-1222|         border-radius: 16px;
-1223|         margin-top: 15px;
-1224|         padding: 12px;
-1225|     }
-1226| 
-1227|     .message-bubble {
-1228|         max-width: 90%;
-1229|         padding: 8px 12px;
-1230|         font-size: 13px;
-1231|     }
-1232| 
-1233|     #messageInput {
-1234|         padding: 10px 12px;
-1235|         font-size: 13px;
-1236|     }
-1237| 
-1238|     #sendBtn {
-1239|         padding: 10px 16px;
-1240|         font-size: 13px;
-1241|     }
-1242| }*/
-1243| 
-1244| /* Point de rupture 5 : moins de 480px - petits mobiles 
-1245| @media (max-width: 480px) {
-1246|     .main-wrapper {
-1247|         flex-direction: column;
-1248|         align-items: center;
-1249|         gap: 12px;
-1250|         padding: 8px;
-1251|     }
-1252| 
-1253|     .users-panel {
-1254|         width: 100%;
-1255|         max-width: 100%;
-1256|         height: auto;
-1257|         max-height: 250px;
-1258|         padding: 10px;
-1259|     }
-1260| 
-1261|     .users-panel h3 {
-1262|         font-size: 14px;
-1263|     }
-1264| 
-1265|     .user-item {
-1266|         padding: 6px;
-1267|         font-size: 11px;
-1268|     }
-1269| 
-1270|     .chat-panel {
-1271|         width: 100%;
-1272|         height: 400px;
-1273|         padding: 10px;
-1274|     }
-1275| 
-1276|     .contact-info {
-1277|         font-size: 11px;
-1278|         padding: 8px;
-1279|     }
-1280| 
-1281|     .message-area {
-1282|         padding: 12px;
-1283|         gap: 10px;
-1284|     }
-1285| 
-1286|     .message-bubble {
-1287|         max-width: 95%;
-1288|         padding: 8px 10px;
-1289|         font-size: 12px;
-1290|     }
-1291| 
-1292|     .input-area {
-1293|         gap: 6px;
-1294|     }
-1295| 
-1296|     #messageInput {
-1297|         padding: 8px 10px;
-1298|         font-size: 12px;
-1299|     }
-1300| 
-1301|     #sendBtn {
-1302|         padding: 8px 12px;
-1303|         font-size: 12px;
-1304|     }
-1305| 
-1306|     .new-block {
-1307|         width: 100%;
-1308|         flex-direction: column;
-1309|     }
-1310| 
-1311|     .new-window {
-1312|         width: 100%;
-1313|         min-height: 250px;
-1314|         padding: 12px;
-1315|         border-radius: 16px;
-1316|     }
-1317| 
-1318|     .new-menus {
-1319|         width: 100%;
-1320|         border-radius: 16px;
-1321|         margin-top: 12px;
-1322|         padding: 10px;
-1323|     }
-1324| 
-1325|     .new-menus h3 {
-1326|         font-size: 14px;
-1327|     }
-1328| 
-1329|     .new-menu-item {
-1330|         padding: 6px 8px;
-1331|     }
-1332| 
-1333|     .new-menu-item i {
-1334|         font-size: 14px;
-1335|         width: 20px;
-1336|     }
-1337| 
-1338|     .new-menu-item span {
-1339|         font-size: 12px;
-1340|     }
-1341| 
-1342|     .history-tab {
-1343|         padding: 8px 0px;
-1344|         font-size: 0.7rem;
-1345|     }
-1346| 
-1347|     .history-inner {
-1348|         width: 240px;
-1349|     }
-1350| }*/
-1351| 
-1352| /* Correction pour smartphone - force le chat à ne pas dépasser l'écran 
-1353| @media (max-width: 480px) {
-1354|     .chat-panel {
-1355|         width: 100% dans;
-1356|         min-width: auto !important;
-1357|         max-width: 100% !important;
-1358|         padding: 10px !important;
-1359|         box-sizing: border-box !important;
-1360|     }
-1361| 
-1362|     .input-area {
-1363|         display: flex;
-1364|         flex-wrap: nowrap;
-1365|         width: 100%;
-1366|         gap: 8px;
-1367|     }
-1368| 
-1369| #messageInput {
-1370|     flex: 1;
-1371|     min-width: 0;
-1372|     /* important pour que le input puisse rétrécir
-1373|     width: auto;
-1374| }*/
-1375| 
-1376| #sendBtn {
-1377|     flex-shrink: 0;
-1378|     white-space: nowrap;
-1379|     padding: 10px 12px;
-1380| }
-1381| 
-1382| .chat-flex {
-1383|     width: 100%;
-1384|     overflow-x: hidden;
-1385| }
-1386| 
-1387| .chat-main {
-1388|     width: 100%;
-1389|     overflow-x: hidden;
-1390| }
-1391| 
-1392| .message-area {
-1393|     width: 100%;
-1394|     overflow-x: hidden;
-1395|     word-wrap: break-word;
-1396| }
-1397| 
-1398| .message-bubble {
-1399|     max-width: 85%;
-1400|     word-wrap: break-word;
-1401|     overflow-wrap: break-word;
-1402| }
-1403| 
-1404| /* Empêcher tout débordement 
-1405| .main-wrapper,
-1406| .chat-panel,
-1407| .chat-flex,
-1408| .chat-main,
-1409| .input-area {
-1410| overflow-x: hidden;
-1411| }*/
-1412| 
-1413| 
-1414| /* Pour les écrans entre 481px et 576px aussi 
-1415| @media (min-width: 481px) and (max-width: 576px) {
-1416|     .chat-panel {
-1417|         width: 100% !important;
-1418|         min-width: auto !important;
-1419|         max-width: 100% !important;
-1420|         box-sizing: border-box !important;
-1421|     }
-1422| 
-1423|     #messageInput {
-1424|         min-width: 0;
-1425|     }
-1426| }*/
-1427| 
-1428| 
-1429| 
-1430| 
-1431| 
-1432| 
-1433| 
-1434| /* ========== MOBILE-NAV ========== */
-1435| 
-1436| /* ===== MODE DESKTOP (s'affiche de 351px à 1079px) ===== */
-1437| @media (min-width: 351px) and (max-width: 1079px) {
-1438| 
-1439|     .mobile-nav {
-1440|         position: fixed;
-1441|         z-index: 9999;
-1442|         transition: all 0.3s ease;
-1443|         background: rgba(0, 0, 0, 0.95);
-1444|         backdrop-filter: blur(10px);
-1445|         border-radius: 50px;
-1446|         padding: 8px 12px;
-1447|         display: flex;
-1448|         gap: 12px;
-1449|         box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-1450|         border: 1px solid rgba(255, 255, 255, 0.1);
-1451|         bottom: 20px;
-1452|         left: 50%;
-1453|         transform: translateX(-50%);
-1454|         flex-direction: row;
-1455|     }
-1456| 
-1457|     .mobile-nav button {
-1458|         background: rgba(255, 255, 255, 0.1);
-1459|         border: none;
-1460|         color: white;
-1461|         font-size: 22px;
-1462|         width: 44px;
-1463|         height: 44px;
-1464|         border-radius: 50%;
-1465|         cursor: pointer;
-1466|         display: flex;
-1467|         align-items: center;
-1468|         justify-content: center;
-1469|     }
-1470| 
-1471|     .mobile-nav button:active {
-1472|         transform: scale(0.95);
-1473|     }
-1474| 
-1475|     #toggleNavBtn {
-1476|         background: #2196F3;
-1477|     }
-1478| 
-1479|     #navSettingsBtn {
-1480|         background: #4CAF50;
-1481|     }
-1482| 
-1483|     .mobile-nav button:not(#toggleNavBtn).hidden,
-1484|     #navSettingsBtn.hidden {
-1485|         display: none;
-1486|     }
-1487| 
-1488|     .mobile-nav[data-position="top"] {
-1489|         bottom: auto;
-1490|         top: 20px;
-1491|         left: 50%;
-1492|         transform: translateX(-50%);
-1493|     }
-1494| 
-1495|     .mobile-nav[data-position="left"] {
-1496|         left: 20px;
-1497|         top: 50%;
-1498|         transform: translateY(-50%);
-1499|         bottom: auto;
-1500|         right: auto;
-1501|         flex-direction: column;
-1502|         border-radius: 30px;
-1503|     }
-1504| 
-1505|     .mobile-nav[data-position="right"] {
-1506|         right: 20px;
-1507|         top: 50%;
-1508|         transform: translateY(-50%);
-1509|         bottom: auto;
-1510|         left: auto;
-1511|         flex-direction: column;
-1512|         border-radius: 30px;
-1513|     }
-1514| 
-1515|     #navSettingsPanel {
-1516|         position: fixed;
-1517|         background: rgba(0, 0, 0, 0.95);
-1518|         backdrop-filter: blur(10px);
-1519|         border-radius: 40px;
-1520|         padding: 8px 12px;
-1521|         display: none;
-1522|         gap: 8px;
-1523|         z-index: 10000;
-1524|         box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
-1525|         border: 1px solid rgba(255, 255, 255, 0.1);
-1526|     }
-1527| 
-1528|     #navSettingsPanel.horizontal {
-1529|         flex-direction: row;
-1530|     }
-1531| 
-1532|     #navSettingsPanel.vertical {
-1533|         flex-direction: column;
-1534|         border-radius: 30px;
-1535|     }
-1536| 
-1537|     #navSettingsPanel button {
-1538|         background: rgba(255, 255, 255, 0.15);
-1539|         border: none;
-1540|         color: white;
-1541|         padding: 6px 14px;
-1542|         border-radius: 30px;
-1543|         cursor: pointer;
-1544|         font-size: 12px;
-1545|         font-weight: 500;
-1546|     }
-1547| 
-1548|     #navReset {
-1549|         background: rgba(244, 67, 54, 0.8);
-1550|     }
-1551| }
-1552| 
-1553| /* ===== ZONE AU-DESSUS DE 1080px : RIEN N'AFFICHÉ ===== */
-1554| @media (min-width: 1080px) {
-1555| 
-1556|     .mobile-nav,
-1557|     #navSettingsPanel,
-1558|     #mobileMenuBtn,
-1559|     #mobileNavPanel {
-1560|         display: none !important;
-1561|     }
-1562| }
-1563| 
-1564| /* ===== MODE MOBILE (≤350px) - VERSION MINIMALE ===== */
-1565| @media (max-width: 350px) {
-1566| 
-1567|     .mobile-nav,
-1568|     #navSettingsPanel {
-1569|         display: none !important;
-1570|     }
-1571| 
-1572|     /* Nouveau bouton bleu fixe en bas à droite */
-1573|     #mobileMenuBtn {
-1574|         position: fixed;
-1575|         bottom: 15px;
-1576|         right: 15px;
-1577|         width: 44px;
-1578|         height: 44px;
-1579|         border-radius: 50%;
-1580|         background: #2196F3;
-1581|         border: none;
-1582|         color: white;
-1583|         font-size: 22px;
-1584|         cursor: pointer;
-1585|         z-index: 10000;
-1586|         box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
-1587|         display: flex;
-1588|         align-items: center;
-1589|         justify-content: center;
-1590|     }
-1591| 
-1592|     #mobileMenuBtn:active {
-1593|         transform: scale(0.95);
-1594|     }
-1595| 
-1596|     #mobileNavPanel {
-1597|         position: fixed;
-1598|         bottom: 0;
-1599|         left: 0;
-1600|         right: 0;
-1601|         background: rgba(0, 0, 0, 0.95);
-1602|         border-radius: 15px 15px 0 0;
-1603|         padding: 10px 15px;
-1604|         z-index: 9999;
-1605|         transform: translateY(100%);
-1606|         transition: transform 0.3s ease;
-1607|         border-top: 1px solid rgba(255, 255, 255, 0.1);
-1608|     }
-1609| 
-1610|     #mobileNavPanel.open {
-1611|         transform: translateY(0);
-1612|     }
-1613| 
-1614|     .mobile-panel-buttons {
-1615|         display: flex;
-1616|         flex-direction: row;
-1617|         justify-content: flex-start;
-1618|         /* ← aligné à gauche au lieu de space-around */
-1619|         align-items: center;
-1620|         gap: 15px;
-1621|         /* ← espace réduit entre les boutons */
-1622|         flex-wrap: nowrap;
-1623|         /* ← pas de retour à la ligne */
-1624|         overflow-x: auto;
-1625|         /* ← permet de scroller si besoin */
-1626|         padding-right: 55px;
-1627|         /* ← réserve de l'espace pour le bouton bleu */
-1628|     }
-1629| 
-1630|     .mobile-panel-buttons button {
-1631|         background: rgba(255, 255, 255, 0.1);
-1632|         border: none;
-1633|         color: white;
-1634|         font-size: 16px;
-1635|         width: 44px;
-1636|         height: 44px;
-1637|         border-radius: 12px;
-1638|         cursor: pointer;
-1639|         display: flex;
-1640|         flex-direction: column;
-1641|         align-items: center;
-1642|         justify-content: center;
-1643|         gap: 2px;
-1644|         transition: all 0.2s;
-1645|     }
-1646| 
-1647|     .mobile-panel-buttons button span {
-1648|         font-size: 9px;
-1649|         font-weight: normal;
-1650|     }
-1651| 
-1652|     .mobile-panel-buttons button:active {
-1653|         transform: scale(0.95);
-1654|         background: rgba(255, 255, 255, 0.2);
-1655|     }
-1656| }
-1657| 
-1658| /* ========== TRÈS PETITS ÉCRANS (≤ 320px) ========== */
-1659| @media (max-width: 320px) {
-1660|     .history-inner {
-1661|         width: 200px !important;
-1662|         /* ← Réduit la largeur du slider */
-1663|         right: -200px !important;
-1664|         /* ← Ajuste la position pour qu'il soit caché */
-1665|     }
-1666| 
-1667|     .history-inner.open {
-1668|         right: 0 !important;
-1669|         /* ← Quand ouvert, il reste collé à droite */
-1670|         transform: translateX(0) !important;
-1671|     }
-1672| 
-1673|     .history-tab {
-1674|         font-size: 0.6rem !important;
-1675|         /* ← Réduit la taille du texte du bouton */
-1676|         padding: 8px 4px !important;
-1677|         right: 0px !important;
-1678|     }
-1679| }
-1680| 
-1681| /* ===== ESPACE ENTRE LES ICÔNES ET LE TEXTE ===== */
-1682| 
-1683| /* Icônes dans la liste des connectés */
-1684| .user-item i {
-1685|     margin-right: 6px;
-1686| }
-1687| 
-1688| /* Icônes Font Awesome dans les éléments de la liste */
-1689| .user-item .fas,
-1690| .user-item .far,
-1691| .user-item .fa-solid {
-1692|     margin-right: 6px;
-1693| }
-1694| 
-1695| /* Drapeaux dans la liste des connectés */
-1696| .user-item .flag-icon {
-1697|     margin-right: 4px;
-1698| }
-1699| 
-1700| /* Icônes dans les boutons (si nécessaire) */
-1701| #sendBtn i,
-1702| #messageInput i {
-1703|     margin-right: 8px;
-1704| }
-1705| 
-1706| /* ===== ESPACE ENTRE LES ICÔNES ET LE TEXTE DANS LE HEADER ===== */
-1707| 
-1708| /* Badge utilisateur */
-1709| .user-badge i {
-1710|     margin-right: 8px;
-1711| }
-1712| 
-1713| /* Icônes dans les boutons du header */
-1714| .header-buttons i,
-1715| .header-right i {
-1716|     margin-right: 8px;
-1717| }
-1718| 
-1719| /* Icônes dans les boutons de réglages */
-1720| #settingsBtn i {
-1721|     margin-right: 4px;
-1722| }
-1723| 
-1724| /* Espace pour TOUTES les icônes dans le header */
-1725| header i,
-1726| .site-header i,
-1727| .header-content i {
-1728|     margin-right: 8px !important;
-1729| }
-
-# ============================================
-# FILE: public\chat.html
-# ============================================
-
-1| <!DOCTYPE html>
-2| <html lang="fr">
-3| 
-4| <head>
-5|     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-6|     <meta http-equiv="Pragma" content="no-cache">
-7|     <meta http-equiv="Expires" content="0">
-8|     <meta charset="UTF-8">
-9|     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-10|     <title data-i18n="chat.page_title">MeetGay - Chat</title>
-11|     <link rel="stylesheet" href="/css/common/reset.css">
-12|     <link rel="stylesheet" href="/css/pages/chat.css">
-13|     <link rel="stylesheet" href="/css/layouts/footer.css">
-14|     <link rel="stylesheet" href="/css/cookie-consent.css">
-15|     <link rel="manifest" href="/manifest.json">
-16|     <link rel="stylesheet" href="/fontawesome/css/all.min.css">
-17|     <script src="/js/translator.js"></script>
-18| </head>
-19| 
-20| <body>
-21|     <header class="site-header">
-22|         <div class="header-content">
-23|             <div class="logo">
-24|                 <h1 data-i18n="chat.logo_title"><i class="fas fa-comment-dots"></i> MeetGay</h1>
-25|                 <p data-i18n="chat.logo_subtitle"><i class="fas fa-map-marker-alt"></i> Belgique - Rencontres et
-26|                     discussions</p>
-27|             </div>
-28|             <div style="display: flex; align-items: center; gap: 10px;">
-29|                 <div class="user-badge" id="userBadge" data-i18n="chat.user_badge"><i class="fas fa-user-circle"></i>
-30|                     Chargement...</div>
-31|                 <button id="settingsBtn"
-32|                     style="background: none; border: none; color: #fff; font-size: 1.2rem; cursor: pointer; display: flex; align-items: center; justify-content: center; height: 100%; padding: 0; margin: 0;"
-33|                     title="Réglages" data-i18n-title="chat.settings_btn_title">⚙️</button>
-34|             </div>
-35|             <!-- Bouton pour retourner au Dashboard Admin (visible uniquement en mode admin) -->
-36|             <button id="backToDashboardBtn" class="logout-btn"
-37|                 style="display:none; background: #667eea; color: white; border: none; padding: 8px 16px; border-radius: 30px; cursor: pointer; font-weight: bold; font-size: 14px; margin-right: 8px;">
-38|                 <i class="fas fa-arrow-left"></i> Dashboard
-39|             </button>
-40|             <div class="header-buttons">
-41|                 <a href="/donate.html" class="donate-btn" data-i18n="chat.donate_btn"><i class="fas fa-coffee"></i>
-42|                     Don</a>
-43|                 <button id="logoutBtn" class="logout-btn" data-i18n="chat.logout_btn"><i
-44|                         class="fas fa-sign-out-alt"></i> Déconnexion</button>
-45|             </div>
-46|     </header>
-47| 
-48|     <!-- BARRE DE NAVIGATION MOBILE -->
-49|     <div class="mobile-nav" id="mobileNav">
-50|         <button id="toggleNavBtn">☰</button>
-51|         <button data-target="connectes" data-i18n="chat.nav_connected">👥</button>
-52|         <button data-target="chat" data-i18n="chat.nav_chat">💬</button>
-53|         <button data-target="new-window" data-i18n="chat.nav_new">📦</button>
-54|         <button data-target="menus" data-i18n="chat.nav_menus">📋</button>
-55|         <button id="navSettingsBtn" data-i18n="chat.nav_settings">⚙️</button>
-56|     </div>
-57| 
-58|     <!-- Panneau des directions (pour desktop uniquement) -->
-59|     <div id="navSettingsPanel">
-60|         <button id="navPosTop" data-i18n="chat.nav_top">Haut</button>
-61|         <button id="navPosBottom" data-i18n="chat.nav_bottom">Bas</button>
-62|         <button id="navPosLeft" data-i18n="chat.nav_left">Gauche</button>
-63|         <button id="navPosRight" data-i18n="chat.nav_right">Droite</button>
-64|         <button id="navReset" data-i18n="chat.nav_reset">Reset</button>
-65|     </div>
-66| 
-67|     <div class="main-wrapper">
-68|         <!-- GAUCHE : Connectés (plaqué à gauche) -->
-69|         <div class="users-block" id="connectes">
-70|             <div class="users-panel">
-71|                 <h3><i class="fas fa-users"></i> <span id="onlineCount" class="online-count">0</span> <span
-72|                         data-i18n="chat.connected_title">Connectés</span></h3>
-73|                 <div id="usersList" data-i18n="chat.waiting">En attente...</div>
-74|             </div>
-75|         </div>
-76| 
-77|         <!-- CENTRE : Chat (centré) -->
-78|         <div class="chat-panel" id="chat">
-79|             <div class="chat-flex">
-80|                 <div class="chat-main">
-81|                     <div id="contactInfo" class="contact-info">
-82|                         <div><span class="contact-name" id="contactName"></span> <span id="contactAge"></span> <i
-83|                                 class=""></i> <span id="contactGender"></span> <span id="contactOrientation"></span>
-84|                         </div>
-85|                         <div id="contactPurpose" style="margin-top: 5px; font-size: 12px; color: #555;"></div>
-86|                         <div class="contact-bio" id="contactBio"></div>
-87|                     </div>
-88|                     <div class="message-area" id="messageArea">
-89|                         <div class="empty-message" data-i18n="chat.empty_message"><i class="fas fa-comment"></i> En
-90|                             attente de message...</div>
-91|                     </div>
-92|                     <div class="input-area">
-93|                         <input type="text" id="messageInput" placeholder="Cliquez sur un pseudo d'abord..." disabled
-94|                             data-i18n-placeholder="chat.placeholder_input">
-95|                         <button id="sendBtn" disabled data-i18n="chat.send_btn"><i class="fas fa-paper-plane"></i>
-96|                             Envoyer</button>
-97|                     </div>
-98|                     <div id="envelope" class="envelope" style="display: none;"><i class="fas fa-envelope"></i></div>
-99|                 </div>
-100|                 <div id="historyInner" class="history-inner">
+94| 
+95|     } catch (err) {
+96|         console.error('❌ Erreur lors du chargement des paramètres :', err.message);
+97|         console.warn('⚠️ Utilisation des valeurs par défaut (fallback).');
+98|     }
+99| }
+100| 
 101| 
-102|                     <div class="slider-header">
-103|                         <h4 data-i18n="chat.history_title">Conversations</h4>
-104|                         <button class="close-slider" id="closeInnerSlider"
-105|                             data-i18n="chat.history_close">&times;</button>
-106|                     </div>
-107|                     <div class="slider-content" id="historyList"></div>
-108|                 </div>
-109|             </div>
-110|             <div class="history-tab" id="historyTab" data-i18n="chat.history_tab">
-111|                 <span>Historique</span>
-112|             </div>
-113|         </div>
-114| 
-115|         <!-- DROITE : Menus + Fenêtre (plaqué à droite) -->
-116|         <div class="new-block">
-117|             <div class="new-window" id="new-window">
-118|                 <!-- Contenu de la fenêtre -->
-119|                 <div class="new-placeholder" id="windowPlaceholder" data-i18n="chat.window_placeholder">
-120|                     <i class="fas fa-hand-pointer"></i>
-121|                     <p data-i18n="chat.window_select">Cliquez sur un menu pour afficher son contenu</p>
-122|                 </div>
-123|                 <div id="windowContent" style="display: none;"></div>
+102| 
+103| 
+104| 
+105| // ==========  CONFIGURATION EXPRESS ==========
+106| const app = express();
+107| const server = http.createServer(app);
+108| 
+109| // Compression
+110| app.use(compression({
+111|     level: 6,
+112|     threshold: 1024,
+113|     filter: (req, res) => {
+114|         if (req.path === '/socket.io/') return false;
+115|         return compression.filter(req, res);
+116|     }
+117| }));
+118| 
+119| app.use(express.json());
+120| app.use(express.text({ type: 'text/plain' }));
+121| 
+122| const cookieParser = require('cookie-parser');
+123| app.use(cookieParser());
 124| 
-125|                 <!-- Menu intégré (dans le même conteneur) -->
-126|                 <div class="new-menus" id="menus">
-127|                     <h3 data-i18n="chat.menus_title"><i class="fas fa-th-large"></i> Menus interactifs</h3>
-128|                     <div class="new-menus-list" id="newMenusList"></div>
-129|                 </div>
-130| 
-131|                 <!-- Bouton hamburger (visible uniquement en mobile) -->
-132|                 <button class="menu-toggle-btn" id="menuToggleBtn">☰</button>
-133|             </div>
-134|         </div>
-135| 
-136|     </div>
-137|     </div>
-138| 
-139|     <footer class="site-footer">
-140|         <div class="footer-content">
-141|             <span data-i18n="footer.text"><i class="far fa-copyright"></i> 2026 MeetGay - Chat Belgique</span> &nbsp |
-142|             <a href="/mentions-legales.html" data-i18n="footer.mentions"><i class="fas fa-gavel"></i> Mentions
-143|                 légales</a> |
-144|             <a href="/cgu.html" data-i18n="footer.cgu"><i class="fas fa-file-contract"></i> CGU</a> |
-145|             <a href="/contact.html" data-i18n="footer.contact"><i class="fas fa-envelope"></i> Contact</a> |
-146|             <a href="#" onclick="CookieConsent.showBanner(); return false;" data-i18n="footer.manage_cookies">🍪</a>
-147|         </div>
-148|     </footer>
-149|     <!-- Son de notification de message -->
-150|     <audio id="messageSound" preload="auto">
-151|         <source src="/sounds/incoming.mp3" type="audio/mpeg">
-152|         <source src="/sounds/incoming.wav" type="audio/wav">
-153|     </audio>
-154|     <!-- ===== PANEL DE RÉGLAGES ===== -->
-155|     <div id="settingsPanel"
-156|         style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 20000; justify-content: center; align-items: center;">
-157|         <div
-158|             style="background: #1e1e2e; border-radius: 16px; padding: 28px; max-width: 400px; width: 90%; box-shadow: 0 20px 40px rgba(0,0,0,0.5); border: 1px solid #333; color: white; font-family: system-ui, sans-serif;">
-159|             <h3 style="margin: 0 0 20px 0; color: #ff6b6b; font-size: 1.4rem;" data-i18n="chat.settings_title">⚙️
-160|                 Réglages</h3>
-161| 
-162|             <!-- Son -->
-163|             <div style="margin-bottom: 18px;">
-164|                 <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 1rem;"
-165|                     data-i18n="chat.settings_sound">
-166|                     <input type="checkbox" id="settingsSoundToggle" checked>
-167|                     🔔 Activer les sons
-168|                 </label>
-169|             </div>
-170| 
-171|             <!-- Volume -->
-172|             <div style="margin-bottom: 20px;">
-173|                 <label style="display: flex; align-items: center; gap: 10px; font-size: 0.95rem;"
-174|                     data-i18n="chat.settings_volume">
-175|                     🔊 Volume :
-176|                     <input type="range" id="settingsVolume" min="0" max="100" value="70"
-177|                         style="flex: 1; cursor: pointer;">
-178|                     <span id="settingsVolumeDisplay" style="min-width: 35px; font-size: 0.9rem;">70%</span>
-179|                 </label>
-180|             </div>
-181| 
-182|             <!-- Utilisateurs bloqués -->
-183|             <div style="border-top: 1px solid #333; padding-top: 15px; margin-bottom: 15px;">
-184|                 <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 0;">
-185|                     <span data-i18n="chat.settings_blocked">👥 Utilisateurs bloqués</span>
-186|                     <span id="blockedCount"
-187|                         style="background: #3a3a4a; padding: 2px 10px; border-radius: 12px; font-size: 0.8rem;">0</span>
-188|                 </div>
-189|                 <div id="blockedList"
-190|                     style="max-height: 80px; overflow-y: auto; font-size: 0.85rem; color: #aaa; background: #2a2a3a; border-radius: 8px; padding: 8px 12px;"
-191|                     data-i18n="chat.settings_no_blocked">
-192|                     Aucun utilisateur bloqué
-193|                 </div>
-194|             </div>
-195| 
-196|             <!-- Bouton fermer -->
-197|             <div
-198|                 style="display: flex; gap: 10px; justify-content: flex-end; border-top: 1px solid #333; padding-top: 15px;">
-199|                 <button id="settingsCloseBtn"
-200|                     style="background: #3a3a4a; border: none; padding: 8px 20px; border-radius: 8px; color: #ccc; cursor: pointer;"
-201|                     data-i18n="chat.settings_close">Fermer</button>
-202|             </div>
-203|         </div>
-204|     </div>
-205|     <script src="/socket.io/socket.io.js"></script>
-206|     <script src="/js/utils.js"></script>
-207|     <script src="/js/ui.js"></script>
-208|     <script src="/js/history.js"></script>
-209|     <script src="/js/modal-handler-user.js"></script>
-210|     <script src="/js/chat.js"></script>
-211|     <script src="/js/common.js"></script>
-212|     <script src="/js/admin-check.js"></script>
-213|     <script src="/js/chat-script.js"></script>
-214|     <script>
-215|         // Désactiver l'initialisation automatique de la bannière sur cette page
-216|         if (typeof CookieConsent !== 'undefined') {
-217|             CookieConsent.autoInit = false;
-218|         }
-219|     </script>
-220|     <script src="/js/cookie-consent.js"></script>
-221| 
-222| </body>
-223| 
-224| </html>
+125| app.use(session({
+126|     store: new pgSession({
+127|         pool: pool,
+128|         tableName: 'session',
+129|         createTableIfMissing: false,
+130|         pruneSessionInterval: 60
+131|     }),
+132|     secret: 'un-super-secret-change-moi',
+133|     resave: false,
+134|     saveUninitialized: false,
+135|     cookie: {
+136|         httpOnly: true,
+137|         secure: false,
+138|         maxAge: 30 * 24 * 60 * 60 * 1000 // 30 jours
+139|     }
+140| }));
+141| 
+142| 
+143| app.use(maintenanceMiddleware(pool));
+144| contactRoutes(app);
+145| 
+146| // ========== ROUTE POUR RÉCUPÉRER max_connections ==========
+147| app.get('/api/settings/max-connections', async (req, res) => {
+148|     try {
+149|         const result = await pool.query("SELECT value FROM settings WHERE key = 'max_connections'");
+150|         const maxConnections = result.rows.length > 0 ? parseInt(result.rows[0].value) : 50;
+151|         res.json({ max_connections: maxConnections });
+152|     } catch (err) {
+153|         console.error('❌ Erreur récupération max_connections:', err);
+154|         res.status(500).json({ error: 'Erreur serveur' });
+155|     }
+156| });
+157| 
+158| htmlRoutes(app, pool);
+159| messagesRoutes(app, pool);
+160| authRoutes(app, pool);
+161| geocodeRoutes(app);
+162| require('./modules/routes/api-block')(app, pool);
+163| alertRoutes(app, pool);
+164| 
+165| // Route pour la page de gestion des alertes
+166| app.get('/manage-alert', (req, res) => {
+167|     res.sendFile(path.join(__dirname, 'public', 'manage-alert.html'));
+168| });
+169| 
+170| // ========== CONFIGURATION DES FICHIERS STATIQUES ==========
+171| 
+172| // 🔥 Détermine les options selon le mode
+173| const staticOptions = {
+174|     setHeaders: function (res, path) {
+175|         if (path.endsWith('.css')) {
+176|             res.setHeader('Content-Type', 'text/css');
+177|         }
+178|     }
+179| };
+180| 
+181| // 🔥 Si DEV_MODE est activé, désactive le cache
+182| if (DEV_MODE === true) {
+183|     staticOptions.etag = false;           // Désactive ETag
+184|     staticOptions.maxAge = 0;             // Pas de mise en cache
+185|     staticOptions.lastModified = false;   // Désactive Last-Modified
+186| 
+187|     // Ajoute des headers anti-cache
+188|     staticOptions.setHeaders = function (res, path) {
+189|         if (path.endsWith('.css')) {
+190|             res.setHeader('Content-Type', 'text/css');
+191|         }
+192|         // 🔥 Headers anti-cache pour TOUS les fichiers
+193|         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
+194|         res.setHeader('Pragma', 'no-cache');
+195|         res.setHeader('Expires', '0');
+196|     };
+197| 
+198|     console.log('🔥 MODE DÉVELOPPEMENT ACTIF - Cache désactivé');
+199| } else {
+200|     console.log('✅ MODE PRODUCTION - Cache activé');
+201| }
+202| 
+203| // Applique la configuration
+204| app.use(express.static('/var/www/meetgay/public', staticOptions));
+205| app.use('/protected', express.static('protected'));
+206| app.use(express.json());
+207| 
+208| // 🔥 Middleware anti-cache (seulement en développement)
+209| if (DEV_MODE === true) {
+210|     app.use((req, res, next) => {
+211|         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate, private');
+212|         res.setHeader('Pragma', 'no-cache');
+213|         res.setHeader('Expires', '0');
+214|         next();
+215|     });
+216|     console.log('🔥 Middleware anti-cache activé');
+217| }
+218| 
+219| // ========== SOCKET.IO ==========
+220| const io = socketIo(server, {
+221|     cors: {
+222|         origin: "*",
+223|         methods: ["GET", "POST"],
+224|         credentials: true,
+225|         allowedHeaders: ["*"]
+226|     },
+227|     transports: ['websocket', 'polling'],
+228|     allowEIO3: true,
+229|     pingTimeout: 120000,    // ← 2 minutes (au lieu de 10)
+230|     pingInterval: 30000     // ← 30 secondes (au lieu de 1 minute)
+231| });
+232| 
+233| const sessionManager = require('./modules/session-manager.js')(io, pool, {
+234|     CLEANUP_INTERVAL: CLEANUP_INTERVAL_MINUTES * 60 * 1000,
+235|     INACTIVITY_THRESHOLD: INACTIVITY_MINUTES * 60 * 1000
+236| });
+237| 
+238| adminRoutes(app, pool, io);
+239| 
+240| // Gestion d'erreur (port déjà utilisé)
+241| server.on('error', (err) => {
+242|     if (err.code === 'EADDRINUSE') {
+243|         console.error(`❌ Port déjà utilisé. Tue l'autre processus et redémarre.`);
+244|         process.exit(1);
+245|     }
+246| });
+247| 
+248| // Initialiser la surveillance d’inactivité (5 minutes sans activité)
+249| const updateActivity = sessionManager.updateActivity;
+250| 
+251| // ========== LANCEMENT DES HANDLERS SOCKET (APRÈS io, users, constants) ==========
+252| socketHandlers(io, pool, sessionManager, updateActivity, REPORTS_THRESHOLD, REPORTS_WINDOW_MINUTES, TEMP_BAN_MINUTES);
+253| 
+254| // ========== NETTOYAGE AUTOMATIQUE ==========
+255| // Nettoyage des utilisateurs inactifs
+256| (async function initCleanup() {
+257|     await loadConfigFromDatabase(); // Recharge les paramètres depuis la base
+258|     if (VISITOR_CLEANUP_ENABLED) {
+259|         sessionManager.startCleanup();
+260|         console.log('🧹 Nettoyage des visiteurs déconnectés ACTIVÉ');
+261|     } else {
+262|         console.log('🧹 Nettoyage des visiteurs déconnectés DÉSACTIVÉ');
+263|     }
+264| })();
+265| 
+266| // Nettoyage auto du journal et signalements (toutes les 24h)
+267| if (AUTO_CLEANUP_ENABLED) {
+268|     setInterval(async () => {
+269|         await cleanOldData(pool, LOGS_RETENTION_DAYS, REPORTS_RETENTION_DAYS);
+270|     }, 24 * 60 * 60 * 1000);
+271|     console.log(`🧹 Nettoyage auto activé: journal ${LOGS_RETENTION_DAYS} jours, signalements ${REPORTS_RETENTION_DAYS} jours`);
+272| } else {
+273|     console.log(`🧹 Nettoyage auto DÉSACTIVÉ`);
+274| }
+275| 
+276| // ========== SURVEILLANCE DES ALERTES ==========
+277| const alertInterval = alertMonitor.startAlertMonitoring(pool, 60000);
+278| 
+279| // ========== DÉMARRAGE ==========
+280| const PORT = process.env.PORT || 3005;
+281| server.listen(PORT, '0.0.0.0', () => {
+282|     console.log(`🚀 Serveur démarré sur http://localhost:${PORT}`);
+283| });
 
 # ============================================
-# FIN DU FICHIER - 2 fichiers inclus
-# Généré le 2026-08-13 13:10:39
+# FIN DU FICHIER - 1 fichiers inclus
+# Généré le 2026-08-17 14:28:43
 # Tous les fichiers sont complets
 # ============================================
